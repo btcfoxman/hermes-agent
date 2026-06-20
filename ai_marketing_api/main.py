@@ -22,6 +22,7 @@ def root() -> Dict[str, Any]:
             "topicAnalyze": "/api/v1/topic/analyze",
             "briefGenerate": "/api/v1/brief/generate",
             "draftGenerate": "/api/v1/draft/generate",
+            "draftHumanize": "/api/v1/draft/humanize",
             "riskReview": "/api/v1/risk/review",
         },
     }
@@ -178,6 +179,38 @@ def _fallback_draft(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _fallback_humanize(payload: Dict[str, Any]) -> Dict[str, Any]:
+    draft = payload.get("draft") if isinstance(payload.get("draft"), dict) else payload
+    title = str(draft.get("title") or _title(payload)).strip()
+    description = str(draft.get("description") or "").strip()
+    body = str(draft.get("body") or _text(draft) or _text(payload)).strip()
+    html = str(draft.get("html") or "").strip()
+    if body:
+        body = (
+            body.replace("Additionally,", "")
+            .replace("In conclusion,", "")
+            .replace("It is important to note that", "值得注意的是")
+            .strip()
+        )
+    if not html and body:
+        html = "<p>" + _escape_html(body).replace("\n\n", "</p><p>").replace("\n", "<br/>") + "</p>"
+    return {
+        "title": title,
+        "description": description,
+        "body": body,
+        "html": html,
+        "blocks": draft.get("blocks") or [],
+        "components": draft.get("components") or [],
+        "topics": draft.get("hashtags") or [],
+        "media": draft.get("media") or [],
+        "cover_url": draft.get("cover_url"),
+        "platform": draft.get("platform") or "wechat_mp",
+        "format": draft.get("format") or "article",
+        "risk_flags": draft.get("risk_flags") or [],
+        "_model": "fallback",
+    }
+
+
 def _escape_html(value: str) -> str:
     return (
         str(value or "")
@@ -205,12 +238,19 @@ def _json_from_response(content: str) -> Dict[str, Any]:
     return data
 
 
-async def _llm_json(system: str, payload: Dict[str, Any], fallback: Dict[str, Any]) -> Dict[str, Any]:
-    api_key = os.getenv("HERMES_OPENAI_API_KEY", "").strip()
+async def _llm_json(
+    system: str,
+    payload: Dict[str, Any],
+    fallback: Dict[str, Any],
+    openai_base_url: Optional[str] = None,
+    openai_api_key: Optional[str] = None,
+    model_name: Optional[str] = None,
+) -> Dict[str, Any]:
+    api_key = (openai_api_key or os.getenv("HERMES_OPENAI_API_KEY", "")).strip()
     if not api_key:
         return fallback
-    base_url = os.getenv("HERMES_OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-    model = os.getenv("HERMES_MODEL", "gpt-4.1-mini").strip() or "gpt-4.1-mini"
+    base_url = (openai_base_url or os.getenv("HERMES_OPENAI_BASE_URL", "https://api.openai.com/v1")).rstrip("/")
+    model = (model_name or os.getenv("HERMES_MODEL", "gpt-4.1-mini")).strip() or "gpt-4.1-mini"
     request = {
         "model": model,
         "temperature": 0.3,
@@ -245,32 +285,78 @@ def health() -> Dict[str, str]:
 
 
 @app.post("/api/v1/topic/analyze")
-async def analyze_topic(payload: Dict[str, Any], authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+async def analyze_topic(
+    payload: Dict[str, Any],
+    authorization: Optional[str] = Header(default=None),
+    x_hermes_openai_base_url: Optional[str] = Header(default=None, alias="X-Hermes-OpenAI-Base-URL"),
+    x_hermes_openai_api_key: Optional[str] = Header(default=None, alias="X-Hermes-OpenAI-API-Key"),
+    x_hermes_model: Optional[str] = Header(default=None, alias="X-Hermes-Model"),
+) -> Dict[str, Any]:
     _require_auth(authorization)
     return await _llm_json(
         "Return strict JSON for topic analysis with title, summary, keywords, topic_score, risk_score, relevance_score, duplicate_score, risk_flags, recommendation, reason.",
         payload,
         _fallback_topic(payload),
+        x_hermes_openai_base_url,
+        x_hermes_openai_api_key,
+        x_hermes_model,
     )
 
 
 @app.post("/api/v1/brief/generate")
-async def generate_brief(payload: Dict[str, Any], authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+async def generate_brief(
+    payload: Dict[str, Any],
+    authorization: Optional[str] = Header(default=None),
+    x_hermes_openai_base_url: Optional[str] = Header(default=None, alias="X-Hermes-OpenAI-Base-URL"),
+    x_hermes_openai_api_key: Optional[str] = Header(default=None, alias="X-Hermes-OpenAI-API-Key"),
+    x_hermes_model: Optional[str] = Header(default=None, alias="X-Hermes-Model"),
+) -> Dict[str, Any]:
     _require_auth(authorization)
     return await _llm_json(
         "Return strict JSON for an editorial brief with title, fact_card, angle_card, audience_value, source_links, risk_notes, recommended_personas, recommended_platforms, confidence.",
         payload,
         _fallback_brief(payload),
+        x_hermes_openai_base_url,
+        x_hermes_openai_api_key,
+        x_hermes_model,
     )
 
 
 @app.post("/api/v1/draft/generate")
-async def generate_draft(payload: Dict[str, Any], authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+async def generate_draft(
+    payload: Dict[str, Any],
+    authorization: Optional[str] = Header(default=None),
+    x_hermes_openai_base_url: Optional[str] = Header(default=None, alias="X-Hermes-OpenAI-Base-URL"),
+    x_hermes_openai_api_key: Optional[str] = Header(default=None, alias="X-Hermes-OpenAI-API-Key"),
+    x_hermes_model: Optional[str] = Header(default=None, alias="X-Hermes-Model"),
+) -> Dict[str, Any]:
     _require_auth(authorization)
     return await _llm_json(
         "Return strict JSON for a publishable article draft with title, description, body, html, blocks, components, topics, media, cover_url, platform, format, risk_flags.",
         payload,
         _fallback_draft(payload),
+        x_hermes_openai_base_url,
+        x_hermes_openai_api_key,
+        x_hermes_model,
+    )
+
+
+@app.post("/api/v1/draft/humanize")
+async def humanize_draft(
+    payload: Dict[str, Any],
+    authorization: Optional[str] = Header(default=None),
+    x_hermes_openai_base_url: Optional[str] = Header(default=None, alias="X-Hermes-OpenAI-Base-URL"),
+    x_hermes_openai_api_key: Optional[str] = Header(default=None, alias="X-Hermes-OpenAI-API-Key"),
+    x_hermes_model: Optional[str] = Header(default=None, alias="X-Hermes-Model"),
+) -> Dict[str, Any]:
+    _require_auth(authorization)
+    return await _llm_json(
+        "Return strict JSON for a humanized article draft. Preserve facts, links, media, platform, and format. Rewrite only title, description, body, html, and blocks to remove AI writing patterns and add a more natural editorial voice. Return title, description, body, html, blocks, components, topics, media, cover_url, platform, format, risk_flags.",
+        payload,
+        _fallback_humanize(payload),
+        x_hermes_openai_base_url,
+        x_hermes_openai_api_key,
+        x_hermes_model,
     )
 
 
