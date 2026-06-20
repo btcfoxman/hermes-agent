@@ -1,0 +1,132 @@
+name: Deploy Test
+
+on:
+  push:
+    branches:
+      - test
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_REGISTRY: ghcr.io
+  IMAGE_NAMESPACE: ${{ github.repository_owner }}
+  IMAGE_NAME: hermes-agent
+  IMAGE_TAG_LATEST: test-latest
+  ARCHIVE_PROXY_URLS: "http://127.0.0.1:10809 http://xray:10809 direct"
+
+jobs:
+  build:
+    name: Build image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.IMAGE_REGISTRY }}
+          username: ${{ secrets.GHCR_USERNAME || github.actor }}
+          password: ${{ secrets.GHCR_TOKEN || github.token }}
+
+      - name: Prepare image metadata
+        id: meta
+        run: |
+          short_sha="$(git rev-parse --short HEAD)"
+          echo "image=${IMAGE_REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}" >> "${GITHUB_OUTPUT}"
+          echo "image_sha_tag=test-${short_sha}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./ai_marketing_api/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ env.IMAGE_TAG_LATEST }}
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.image_sha_tag }}
+          cache-from: type=gha,scope=hermes-agent
+          cache-to: type=gha,mode=max,scope=hermes-agent
+          provenance: false
+          sbom: false
+
+  deploy:
+    name: Deploy to 192.168.3.6
+    needs: build
+    runs-on:
+      - self-hosted
+      - linux
+      - aitoearn-test
+    env:
+      APP_DIR: /home/btcfoxman/docker/hermes-agent
+      IMAGE_REGISTRY: ghcr.io
+      IMAGE_NAMESPACE: ${{ github.repository_owner }}
+      IMAGE_NAME: hermes-agent
+      IMAGE_TAG: test-latest
+      GHCR_USERNAME: ${{ secrets.GHCR_USERNAME || github.actor }}
+      GHCR_TOKEN: ${{ secrets.GHCR_TOKEN || github.token }}
+    steps:
+      - name: Download repository archive
+        env:
+          ARCHIVE_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          work_dir="${RUNNER_TEMP:-/tmp}/hermes-agent-repo-${GITHUB_RUN_ID}"
+          archive_path="${RUNNER_TEMP:-/tmp}/hermes-agent-repo-${GITHUB_RUN_ID}.tar.gz"
+          rm -rf "${work_dir}"
+          mkdir -p "${work_dir}"
+
+          archive_url="https://api.github.com/repos/${GITHUB_REPOSITORY}/tarball/${GITHUB_SHA}"
+          for i in 1 2 3 4 5; do
+            for proxy_url in ${ARCHIVE_PROXY_URLS}; do
+              rm -f "${archive_path}"
+              proxy_args=()
+              proxy_label="direct"
+              if [ "${proxy_url}" != "direct" ]; then
+                proxy_args=(--proxy "${proxy_url}")
+                proxy_label="${proxy_url}"
+              fi
+
+              echo "Downloading repository archive via ${proxy_label} (attempt ${i})"
+              if curl --fail --location --silent --show-error \
+                --connect-timeout 15 \
+                --max-time 900 \
+                --speed-limit 1024 \
+                --speed-time 60 \
+                --retry 2 \
+                --retry-delay 5 \
+                "${proxy_args[@]}" \
+                -H "Authorization: Bearer ${ARCHIVE_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                "${archive_url}" \
+                -o "${archive_path}" \
+                && tar -tzf "${archive_path}" >/dev/null 2>&1; then
+                echo "Repository archive downloaded via ${proxy_label}"
+                break 2
+              fi
+            done
+
+            if [ "${i}" -eq 5 ]; then
+              exit 1
+            fi
+            sleep $((i * 10))
+          done
+
+          tar -xzf "${archive_path}" --strip-components=1 -C "${work_dir}"
+          rm -f "${archive_path}"
+          echo "REPO_WORK_DIR=${work_dir}" >> "${GITHUB_ENV}"
+
+      - name: Deploy
+        run: |
+          set -euo pipefail
+          cd "${REPO_WORK_DIR}"
+          bash test/deploy.sh
