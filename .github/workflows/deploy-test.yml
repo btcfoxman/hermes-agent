@@ -11,6 +11,7 @@ permissions:
   packages: write
 
 env:
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
   IMAGE_REGISTRY: ghcr.io
   IMAGE_NAMESPACE: ${{ github.repository_owner }}
   IMAGE_NAME: hermes-agent
