@@ -34,12 +34,12 @@ cp -f "${SCRIPT_DIR}/docker-compose.yml" "${COMPOSE_FILE}"
 
 if [ ! -f "${APP_DIR}/.env" ]; then
   cp -f "${SCRIPT_DIR}/.env.example" "${APP_DIR}/.env"
-  chmod 600 "${APP_DIR}/.env"
+  chmod 600 "${APP_DIR}/.env" || log "Could not chmod ${APP_DIR}/.env; continuing"
   log "Created ${APP_DIR}/.env from example. Fill secrets before deploying."
   exit 1
 fi
 
-chmod 600 "${APP_DIR}/.env"
+chmod 600 "${APP_DIR}/.env" || log "Could not chmod existing ${APP_DIR}/.env; continuing"
 
 if id "${APP_USER}" >/dev/null 2>&1; then
   chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}" || true
