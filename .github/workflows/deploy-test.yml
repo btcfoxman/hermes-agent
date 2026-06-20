@@ -99,7 +99,7 @@ jobs:
               echo "Downloading repository archive via ${proxy_label} (attempt ${i})"
               if curl --fail --location --silent --show-error \
                 --connect-timeout 15 \
-                --max-time 900 \
+                --max-time 120 \
                 --speed-limit 1024 \
                 --speed-time 60 \
                 --retry 2 \
