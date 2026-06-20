@@ -47,7 +47,10 @@ fi
 
 if [ -n "${GHCR_TOKEN:-}" ]; then
   log "Logging in to GHCR"
-  printf '%s' "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME:-${GITHUB_ACTOR:-btcfoxman}}" --password-stdin >/dev/null
+  docker_login_ghcr() {
+    printf '%s' "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME:-${GITHUB_ACTOR:-btcfoxman}}" --password-stdin >/dev/null
+  }
+  retry 5 10 docker_login_ghcr
 fi
 
 cd "${APP_DIR}"

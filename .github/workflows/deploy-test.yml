@@ -75,7 +75,7 @@ jobs:
       GHCR_USERNAME: ${{ secrets.GHCR_USERNAME || github.actor }}
       GHCR_TOKEN: ${{ secrets.GHCR_TOKEN || github.token }}
     steps:
-      - name: Fetch repository
+      - name: Fetch deployment files
         env:
           CHECKOUT_TOKEN: ${{ github.token }}
         run: |
@@ -84,13 +84,32 @@ jobs:
           work_dir="${RUNNER_TEMP:-/tmp}/${repo_name}-repo-${GITHUB_RUN_ID}"
           rm -rf "${work_dir}"
           mkdir -p "${work_dir}"
-          cd "${work_dir}"
-          git init
-          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
-          printf '[http "https://github.com/"]\n\textraheader = AUTHORIZATION: bearer %s\n' "${CHECKOUT_TOKEN}" >> .git/config
-          git -c protocol.version=2 fetch --no-tags --depth=1 origin "${GITHUB_SHA}"
-          git checkout --force FETCH_HEAD
-          git config --local --unset-all http.https://github.com/.extraheader || true
+
+          auth_config="${work_dir}/.curl-auth"
+          {
+            printf 'header = "Authorization: Bearer %s"\n' "${CHECKOUT_TOKEN}"
+            printf 'header = "Accept: application/vnd.github.raw"\n'
+            printf 'header = "X-GitHub-Api-Version: 2022-11-28"\n'
+          } > "${auth_config}"
+          chmod 600 "${auth_config}"
+
+          download_file() {
+            local path="$1"
+            mkdir -p "${work_dir}/$(dirname "${path}")"
+            curl --config "${auth_config}" \
+              --fail --location --silent --show-error \
+              --retry 5 --retry-delay 5 --connect-timeout 20 --max-time 120 \
+              -o "${work_dir}/${path}" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${GITHUB_SHA}"
+          }
+
+          for file in test/deploy.sh test/docker-compose.yml test/.env.example
+          do
+            download_file "${file}"
+          done
+
+          rm -f "${auth_config}"
+          chmod +x "${work_dir}/test/deploy.sh"
           echo "REPO_WORK_DIR=${work_dir}" >> "${GITHUB_ENV}"
 
       - name: Deploy
