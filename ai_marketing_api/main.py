@@ -11,6 +11,22 @@ from fastapi import FastAPI, Header, HTTPException
 app = FastAPI(title="Hermes AI Marketing API", version="0.1.0")
 
 
+@app.get("/")
+def root() -> Dict[str, Any]:
+    return {
+        "name": "Hermes AI Marketing API",
+        "status": "ok",
+        "health": "/health",
+        "docs": "/docs",
+        "endpoints": {
+            "topicAnalyze": "/api/v1/topic/analyze",
+            "briefGenerate": "/api/v1/brief/generate",
+            "draftGenerate": "/api/v1/draft/generate",
+            "riskReview": "/api/v1/risk/review",
+        },
+    }
+
+
 def _require_auth(authorization: Optional[str]) -> None:
     expected = os.getenv("HERMES_API_KEY", "").strip()
     if not expected:
