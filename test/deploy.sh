@@ -10,6 +10,23 @@ log() {
   printf '[hermes-agent-deploy] %s\n' "$*"
 }
 
+retry() {
+  local attempts="$1"
+  local delay="$2"
+  shift 2
+  local i
+  for i in $(seq 1 "${attempts}"); do
+    if "$@"; then
+      return 0
+    fi
+    if [ "${i}" -eq "${attempts}" ]; then
+      return 1
+    fi
+    log "Command failed, retrying in ${delay}s (${i}/${attempts}): $*"
+    sleep "${delay}"
+  done
+}
+
 mkdir -p "${APP_DIR}"
 
 log "Syncing deployment compose to ${COMPOSE_FILE}"
@@ -43,7 +60,7 @@ log "Validating compose config"
 docker compose config >/dev/null
 
 log "Pulling image"
-docker compose pull hermes-agent
+retry 5 10 docker compose pull hermes-agent
 
 log "Starting service"
 docker compose up -d --remove-orphans hermes-agent
