@@ -358,6 +358,18 @@ def _json_from_response(content: str) -> Dict[str, Any]:
     return data
 
 
+def _controlled_system_prompt(payload: Dict[str, Any], fallback: str) -> str:
+    control = payload.get("prompt_control")
+    if isinstance(control, dict):
+        system_prompt = str(control.get("system_prompt") or "").strip()
+        if system_prompt:
+            contract = control.get("response_contract")
+            if contract:
+                return f"{system_prompt}\n\nResponse contract:\n{json.dumps(contract, ensure_ascii=False, default=str)}"
+            return system_prompt
+    return fallback
+
+
 async def _llm_json(
     system: str,
     payload: Dict[str, Any],
@@ -414,7 +426,10 @@ async def analyze_topic(
 ) -> Dict[str, Any]:
     _require_auth(authorization)
     return await _llm_json(
-        "Return strict JSON for topic analysis with title, summary, keywords, topic_score, risk_score, relevance_score, duplicate_score, risk_flags, recommendation, reason, and optional preference_suggestions. If preference_context is provided, use it as historical guidance, not as source fact.",
+        _controlled_system_prompt(
+            payload,
+            "Return strict JSON for topic analysis with title, summary, keywords, topic_score, risk_score, relevance_score, duplicate_score, risk_flags, recommendation, reason, and optional preference_suggestions. If preference_context is provided, use it as historical guidance, not as source fact.",
+        ),
         payload,
         _fallback_topic(payload),
         x_hermes_openai_base_url,
@@ -433,14 +448,17 @@ async def generate_brief(
 ) -> Dict[str, Any]:
     _require_auth(authorization)
     result = await _llm_json(
-        (
-            "Return strict JSON for a source-grounded editorial brief. "
-            "If preference_context is provided, use it only for angle/tone guidance and keep fact_card source-grounded. "
-            "Use the same language as source_language or the source text. Do not translate. "
-            "fact_card must contain only facts explicitly present in the source text; do not add assumptions, advice, background, or interpretation. "
-            "If a fact is not stated, say it is not stated in the source language. "
-            "angle_card and audience_value are editorial interpretation fields; keep them separate from fact_card and use the same language as the source. "
-            "Return title, fact_card, angle_card, audience_value, source_links, risk_notes, recommended_personas, recommended_platforms, confidence, and optional preference_suggestions."
+        _controlled_system_prompt(
+            payload,
+            (
+                "Return strict JSON for a source-grounded editorial brief. "
+                "If preference_context is provided, use it only for angle/tone guidance and keep fact_card source-grounded. "
+                "Use the same language as source_language or the source text. Do not translate. "
+                "fact_card must contain only facts explicitly present in the source text; do not add assumptions, advice, background, or interpretation. "
+                "If a fact is not stated, say it is not stated in the source language. "
+                "angle_card and audience_value are editorial interpretation fields; keep them separate from fact_card and use the same language as the source. "
+                "Return title, fact_card, angle_card, audience_value, source_links, risk_notes, recommended_personas, recommended_platforms, confidence, and optional preference_suggestions."
+            ),
         ),
         payload,
         _fallback_brief(payload),
@@ -461,7 +479,10 @@ async def generate_draft(
 ) -> Dict[str, Any]:
     _require_auth(authorization)
     return await _llm_json(
-        "Return strict JSON for a publishable article draft with title, description, body, html, blocks, components, topics, media, cover_url, platform, format, risk_flags, and optional preference_suggestions. If preference_context is provided, follow accepted style, structure, avoid_patterns, and successful examples while preserving source facts.",
+        _controlled_system_prompt(
+            payload,
+            "Return strict JSON for a publishable article draft with title, description, body, html, blocks, components, topics, media, cover_url, platform, format, risk_flags, and optional preference_suggestions. If preference_context is provided, follow accepted style, structure, avoid_patterns, and successful examples while preserving source facts.",
+        ),
         payload,
         _fallback_draft(payload),
         x_hermes_openai_base_url,
@@ -480,7 +501,10 @@ async def humanize_draft(
 ) -> Dict[str, Any]:
     _require_auth(authorization)
     return await _llm_json(
-        "Return strict JSON for a humanized article draft. Preserve facts, links, media, platform, and format. If preference_context is provided, apply accepted human editing preferences and avoid rejected patterns. Rewrite only title, description, body, html, and blocks to remove AI writing patterns and add a more natural editorial voice. Return title, description, body, html, blocks, components, topics, media, cover_url, platform, format, risk_flags, and optional preference_suggestions.",
+        _controlled_system_prompt(
+            payload,
+            "Return strict JSON for a humanized article draft. Preserve facts, links, media, platform, and format. If preference_context is provided, apply accepted human editing preferences and avoid rejected patterns. Rewrite only title, description, body, html, and blocks to remove AI writing patterns and add a more natural editorial voice. Return title, description, body, html, blocks, components, topics, media, cover_url, platform, format, risk_flags, and optional preference_suggestions.",
+        ),
         payload,
         _fallback_humanize(payload),
         x_hermes_openai_base_url,
