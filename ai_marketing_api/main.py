@@ -97,6 +97,71 @@ def _sources(payload: Dict[str, Any]) -> List[Dict[str, str]]:
     return []
 
 
+def _contains_cjk(value: str) -> bool:
+    return any("\u4e00" <= char <= "\u9fff" for char in str(value or ""))
+
+
+def _infer_language(value: str) -> str:
+    text = str(value or "")
+    if not text.strip():
+        return ""
+    cjk_count = sum(1 for char in text if "\u4e00" <= char <= "\u9fff")
+    latin_count = sum(1 for char in text.lower() if "a" <= char <= "z")
+    if cjk_count >= 4 and cjk_count >= max(4, latin_count // 4):
+        return "zh-CN"
+    if latin_count >= 20:
+        return "en"
+    return ""
+
+
+def _source_language(payload: Dict[str, Any]) -> str:
+    for key in ("source_language", "language"):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            return value
+    snapshot = payload.get("source_snapshot")
+    if isinstance(snapshot, dict):
+        value = str(snapshot.get("language") or "").strip()
+        if value:
+            return value
+    return _infer_language(f"{_title(payload)}\n{_text(payload)}")
+
+
+def _is_chinese_language(language: str) -> bool:
+    return str(language or "").lower().startswith(("zh", "cn"))
+
+
+def _split_facts(text: str, limit: int = 6) -> List[str]:
+    raw = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not raw:
+        return []
+    parts = re.split(r"(?<=[。！？!?])\s+|(?<=[。！？!?])|(?<=\.)\s+", raw)
+    facts: List[str] = []
+    seen = set()
+    for part in parts:
+        item = part.strip(" \n\t-•")
+        if len(item) < 8:
+            continue
+        key = item[:80].lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        facts.append(item[:320])
+        if len(facts) >= limit:
+            break
+    if not facts and raw:
+        facts.append(raw[:360])
+    return facts
+
+
+def _fact_card_from_source(payload: Dict[str, Any]) -> str:
+    language = _source_language(payload)
+    facts = _split_facts(_text(payload))
+    if facts:
+        return "\n".join(f"- {item}" for item in facts)
+    return "原文未提供可抽取事实。" if _is_chinese_language(language) else "No extractable facts were provided in the source."
+
+
 def _fallback_topic(payload: Dict[str, Any]) -> Dict[str, Any]:
     text = _text(payload)
     return {
@@ -111,25 +176,52 @@ def _fallback_topic(payload: Dict[str, Any]) -> Dict[str, Any]:
         "risk_flags": [],
         "recommendation": "accept",
         "reason": "Fallback analysis generated because no LLM key is configured.",
+        "preference_suggestions": [],
         "_model": "fallback",
     }
 
 
 def _fallback_brief(payload: Dict[str, Any]) -> Dict[str, Any]:
+    language = _source_language(payload)
+    is_zh = _is_chinese_language(language)
     title = _title(payload)
-    summary = (_text(payload)[:320] or title).strip()
     return {
         "title": title,
-        "fact_card": summary,
-        "angle_card": "Explain why this matters now and connect it to a concrete operator workflow.",
-        "audience_value": "Helps the audience evaluate timing, risks, and practical next steps.",
+        "fact_card": _fact_card_from_source(payload),
+        "angle_card": "运营解读：可围绕事件的变化、影响对象和后续动作设计选题角度；该字段不是原文事实。" if is_zh else "Editorial interpretation: frame the angle around what changed, who is affected, and what may happen next. This field is not a source fact.",
+        "audience_value": "受众价值：帮助读者快速确认原文事实、判断是否值得继续关注，并识别可能的行动线索。" if is_zh else "Audience value: helps readers verify the source facts, decide whether to keep following the topic, and identify possible next actions.",
         "source_links": _sources(payload),
         "risk_notes": [],
         "recommended_personas": ["operator", "founder", "content strategist"],
         "recommended_platforms": ["wechat_mp", "toutiao"],
         "confidence": 0.55,
+        "source_language": language,
+        "fact_card_policy": "extractive_source_facts_only",
+        "preference_suggestions": [],
         "_model": "fallback",
     }
+
+
+def _normalize_brief_result(payload: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
+    fallback = _fallback_brief(payload)
+    data = {**fallback, **(result or {})}
+    language = _source_language(payload)
+    source_text = _text(payload)
+    data["source_language"] = data.get("source_language") or language
+    data["fact_card_policy"] = "extractive_source_facts_only"
+    if not data.get("source_links"):
+        data["source_links"] = _sources(payload)
+    if not data.get("fact_card"):
+        data["fact_card"] = fallback["fact_card"]
+    if _is_chinese_language(language) and _contains_cjk(source_text):
+        for key in ("fact_card", "angle_card", "audience_value"):
+            value = str(data.get(key) or "")
+            if value and not _contains_cjk(value):
+                data[key] = fallback[key]
+        if str(result.get("fact_card") or "") and not _contains_cjk(str(result.get("fact_card") or "")):
+            notes = data.get("risk_notes") if isinstance(data.get("risk_notes"), list) else []
+            data["risk_notes"] = [*notes, "模型输出语言与原文不一致，事实卡已回退为原文摘录。"]
+    return data
 
 
 def _fallback_draft(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -175,6 +267,22 @@ def _fallback_draft(payload: Dict[str, Any]) -> Dict[str, Any]:
         "platform": platform,
         "format": content_format,
         "risk_flags": [],
+        "preference_suggestions": [
+            {
+                "type": "draft_pattern",
+                "title": "草稿结构样本",
+                "rationale": "记录本次草稿结构，待人工审核后判断是否沉淀为偏好。",
+                "preferences": {
+                    "draft_structures": [
+                        {
+                            "platform": platform,
+                            "content_type": content_format,
+                            "sections": ["opening", "why_it_matters", "suggested_action"],
+                        }
+                    ]
+                },
+            }
+        ],
         "_model": "fallback",
     }
 
@@ -207,6 +315,18 @@ def _fallback_humanize(payload: Dict[str, Any]) -> Dict[str, Any]:
         "platform": draft.get("platform") or "wechat_mp",
         "format": draft.get("format") or "article",
         "risk_flags": draft.get("risk_flags") or [],
+        "preference_suggestions": [
+            {
+                "type": "humanize_pattern",
+                "title": "润色处理样本",
+                "rationale": "记录本次润色处理方式，待人工确认后可作为账号表达偏好。",
+                "preferences": {
+                    "humanize_rules": [
+                        "减少套话，保留事实、图片、视频和组件。",
+                    ]
+                },
+            }
+        ],
         "_model": "fallback",
     }
 
@@ -294,7 +414,7 @@ async def analyze_topic(
 ) -> Dict[str, Any]:
     _require_auth(authorization)
     return await _llm_json(
-        "Return strict JSON for topic analysis with title, summary, keywords, topic_score, risk_score, relevance_score, duplicate_score, risk_flags, recommendation, reason.",
+        "Return strict JSON for topic analysis with title, summary, keywords, topic_score, risk_score, relevance_score, duplicate_score, risk_flags, recommendation, reason, and optional preference_suggestions. If preference_context is provided, use it as historical guidance, not as source fact.",
         payload,
         _fallback_topic(payload),
         x_hermes_openai_base_url,
@@ -312,14 +432,23 @@ async def generate_brief(
     x_hermes_model: Optional[str] = Header(default=None, alias="X-Hermes-Model"),
 ) -> Dict[str, Any]:
     _require_auth(authorization)
-    return await _llm_json(
-        "Return strict JSON for an editorial brief with title, fact_card, angle_card, audience_value, source_links, risk_notes, recommended_personas, recommended_platforms, confidence.",
+    result = await _llm_json(
+        (
+            "Return strict JSON for a source-grounded editorial brief. "
+            "If preference_context is provided, use it only for angle/tone guidance and keep fact_card source-grounded. "
+            "Use the same language as source_language or the source text. Do not translate. "
+            "fact_card must contain only facts explicitly present in the source text; do not add assumptions, advice, background, or interpretation. "
+            "If a fact is not stated, say it is not stated in the source language. "
+            "angle_card and audience_value are editorial interpretation fields; keep them separate from fact_card and use the same language as the source. "
+            "Return title, fact_card, angle_card, audience_value, source_links, risk_notes, recommended_personas, recommended_platforms, confidence, and optional preference_suggestions."
+        ),
         payload,
         _fallback_brief(payload),
         x_hermes_openai_base_url,
         x_hermes_openai_api_key,
         x_hermes_model,
     )
+    return _normalize_brief_result(payload, result)
 
 
 @app.post("/api/v1/draft/generate")
@@ -332,7 +461,7 @@ async def generate_draft(
 ) -> Dict[str, Any]:
     _require_auth(authorization)
     return await _llm_json(
-        "Return strict JSON for a publishable article draft with title, description, body, html, blocks, components, topics, media, cover_url, platform, format, risk_flags.",
+        "Return strict JSON for a publishable article draft with title, description, body, html, blocks, components, topics, media, cover_url, platform, format, risk_flags, and optional preference_suggestions. If preference_context is provided, follow accepted style, structure, avoid_patterns, and successful examples while preserving source facts.",
         payload,
         _fallback_draft(payload),
         x_hermes_openai_base_url,
@@ -351,7 +480,7 @@ async def humanize_draft(
 ) -> Dict[str, Any]:
     _require_auth(authorization)
     return await _llm_json(
-        "Return strict JSON for a humanized article draft. Preserve facts, links, media, platform, and format. Rewrite only title, description, body, html, and blocks to remove AI writing patterns and add a more natural editorial voice. Return title, description, body, html, blocks, components, topics, media, cover_url, platform, format, risk_flags.",
+        "Return strict JSON for a humanized article draft. Preserve facts, links, media, platform, and format. If preference_context is provided, apply accepted human editing preferences and avoid rejected patterns. Rewrite only title, description, body, html, and blocks to remove AI writing patterns and add a more natural editorial voice. Return title, description, body, html, blocks, components, topics, media, cover_url, platform, format, risk_flags, and optional preference_suggestions.",
         payload,
         _fallback_humanize(payload),
         x_hermes_openai_base_url,
