@@ -12,6 +12,7 @@ services:
       HERMES_OPENAI_API_KEY: ${HERMES_OPENAI_API_KEY:-}
       HERMES_MODEL: ${HERMES_MODEL:-gpt-4.1-mini}
       HERMES_API_KEY: ${HERMES_API_KEY:-}
+      HERMES_LLM_TIMEOUT_SECONDS: ${HERMES_LLM_TIMEOUT_SECONDS:-180}
     ports:
       - "8095:8095"
     healthcheck:

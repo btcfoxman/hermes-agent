@@ -10,6 +10,8 @@ from fastapi import FastAPI, Header, HTTPException
 
 app = FastAPI(title="Hermes AI Marketing API", version="0.1.0")
 
+DEFAULT_LLM_TIMEOUT_SECONDS = 180.0
+
 
 @app.get("/")
 def root() -> Dict[str, Any]:
@@ -370,6 +372,17 @@ def _controlled_system_prompt(payload: Dict[str, Any], fallback: str) -> str:
     return fallback
 
 
+def _timeout_seconds(value: Optional[str] = None) -> float:
+    raw = (value or os.getenv("HERMES_LLM_TIMEOUT_SECONDS") or os.getenv("HERMES_TIMEOUT_SECONDS") or "").strip()
+    if not raw:
+        return DEFAULT_LLM_TIMEOUT_SECONDS
+    try:
+        timeout = float(raw)
+    except ValueError:
+        return DEFAULT_LLM_TIMEOUT_SECONDS
+    return timeout if timeout > 0 else DEFAULT_LLM_TIMEOUT_SECONDS
+
+
 async def _llm_json(
     system: str,
     payload: Dict[str, Any],
@@ -377,6 +390,7 @@ async def _llm_json(
     openai_base_url: Optional[str] = None,
     openai_api_key: Optional[str] = None,
     model_name: Optional[str] = None,
+    timeout_seconds: Optional[str] = None,
 ) -> Dict[str, Any]:
     api_key = (openai_api_key or os.getenv("HERMES_OPENAI_API_KEY", "")).strip()
     if not api_key:
@@ -392,8 +406,9 @@ async def _llm_json(
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False, default=str)},
         ],
     }
+    resolved_timeout = _timeout_seconds(timeout_seconds)
     try:
-        async with httpx.AsyncClient(timeout=80.0) as client:
+        async with httpx.AsyncClient(timeout=resolved_timeout) as client:
             resp = await client.post(
                 f"{base_url}/chat/completions",
                 json=request,
@@ -408,6 +423,7 @@ async def _llm_json(
     except Exception as exc:
         fallback = dict(fallback)
         fallback["_error"] = str(exc)
+        fallback["_timeout_seconds"] = resolved_timeout
         return fallback
 
 
@@ -423,6 +439,7 @@ async def analyze_topic(
     x_hermes_openai_base_url: Optional[str] = Header(default=None, alias="X-Hermes-OpenAI-Base-URL"),
     x_hermes_openai_api_key: Optional[str] = Header(default=None, alias="X-Hermes-OpenAI-API-Key"),
     x_hermes_model: Optional[str] = Header(default=None, alias="X-Hermes-Model"),
+    x_hermes_timeout_seconds: Optional[str] = Header(default=None, alias="X-Hermes-Timeout-Seconds"),
 ) -> Dict[str, Any]:
     _require_auth(authorization)
     return await _llm_json(
@@ -435,6 +452,7 @@ async def analyze_topic(
         x_hermes_openai_base_url,
         x_hermes_openai_api_key,
         x_hermes_model,
+        x_hermes_timeout_seconds,
     )
 
 
@@ -445,6 +463,7 @@ async def generate_brief(
     x_hermes_openai_base_url: Optional[str] = Header(default=None, alias="X-Hermes-OpenAI-Base-URL"),
     x_hermes_openai_api_key: Optional[str] = Header(default=None, alias="X-Hermes-OpenAI-API-Key"),
     x_hermes_model: Optional[str] = Header(default=None, alias="X-Hermes-Model"),
+    x_hermes_timeout_seconds: Optional[str] = Header(default=None, alias="X-Hermes-Timeout-Seconds"),
 ) -> Dict[str, Any]:
     _require_auth(authorization)
     result = await _llm_json(
@@ -465,6 +484,7 @@ async def generate_brief(
         x_hermes_openai_base_url,
         x_hermes_openai_api_key,
         x_hermes_model,
+        x_hermes_timeout_seconds,
     )
     return _normalize_brief_result(payload, result)
 
@@ -476,6 +496,7 @@ async def generate_draft(
     x_hermes_openai_base_url: Optional[str] = Header(default=None, alias="X-Hermes-OpenAI-Base-URL"),
     x_hermes_openai_api_key: Optional[str] = Header(default=None, alias="X-Hermes-OpenAI-API-Key"),
     x_hermes_model: Optional[str] = Header(default=None, alias="X-Hermes-Model"),
+    x_hermes_timeout_seconds: Optional[str] = Header(default=None, alias="X-Hermes-Timeout-Seconds"),
 ) -> Dict[str, Any]:
     _require_auth(authorization)
     return await _llm_json(
@@ -488,6 +509,7 @@ async def generate_draft(
         x_hermes_openai_base_url,
         x_hermes_openai_api_key,
         x_hermes_model,
+        x_hermes_timeout_seconds,
     )
 
 
@@ -498,6 +520,7 @@ async def humanize_draft(
     x_hermes_openai_base_url: Optional[str] = Header(default=None, alias="X-Hermes-OpenAI-Base-URL"),
     x_hermes_openai_api_key: Optional[str] = Header(default=None, alias="X-Hermes-OpenAI-API-Key"),
     x_hermes_model: Optional[str] = Header(default=None, alias="X-Hermes-Model"),
+    x_hermes_timeout_seconds: Optional[str] = Header(default=None, alias="X-Hermes-Timeout-Seconds"),
 ) -> Dict[str, Any]:
     _require_auth(authorization)
     return await _llm_json(
@@ -510,6 +533,7 @@ async def humanize_draft(
         x_hermes_openai_base_url,
         x_hermes_openai_api_key,
         x_hermes_model,
+        x_hermes_timeout_seconds,
     )
 
 
