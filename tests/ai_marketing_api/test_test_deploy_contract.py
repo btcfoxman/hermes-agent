@@ -21,7 +21,8 @@ def test_deploy_script_persists_secret_without_using_a_mutable_deploy_tag():
     assert 'upsert_env_value "${APP_DIR}/.env" "HERMES_API_KEY" "${HERMES_API_KEY}"' in deploy_script
     assert 'if [ -z "${IMAGE_TAG:-}" ] || [ "${IMAGE_TAG}" = "test-latest" ]' in deploy_script
     assert 'authenticated_get "http://127.0.0.1:8095/api/v1/operators/${role}/probe"' in deploy_script
-    assert "--header @-" in deploy_script
+    assert '--header "Authorization: Bearer ${HERMES_API_KEY}"' in deploy_script
+    assert "--header @-" not in deploy_script
 
 
 def test_container_healthcheck_authenticates_operator_readiness():

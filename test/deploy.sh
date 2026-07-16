@@ -71,8 +71,9 @@ upsert_env_value() {
 
 authenticated_get() {
   local url="$1"
-  printf 'Authorization: Bearer %s\n' "${HERMES_API_KEY}" \
-    | curl --fail --silent --show-error --header @- "${url}" >/dev/null
+  curl --fail --silent --show-error \
+    --header "Authorization: Bearer ${HERMES_API_KEY}" \
+    "${url}" >/dev/null
 }
 
 if [ -z "${HERMES_API_KEY:-}" ]; then
