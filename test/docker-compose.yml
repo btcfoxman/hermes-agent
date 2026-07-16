@@ -1,7 +1,9 @@
+name: ${COMPOSE_PROJECT_NAME:-hermes-agent-test}
+
 services:
-  hermes-agent:
+  hermes-agent-test:
     image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-btcfoxman}/${IMAGE_NAME:-hermes-agent}:${IMAGE_TAG:?IMAGE_TAG must be an immutable test git SHA tag}
-    container_name: hermes-agent
+    container_name: hermes-agent-test
     restart: unless-stopped
     networks:
       - my-shared-net
@@ -14,7 +16,9 @@ services:
       HERMES_API_KEY: ${HERMES_API_KEY:-}
       HERMES_LLM_TIMEOUT_SECONDS: ${HERMES_LLM_TIMEOUT_SECONDS:-180}
     ports:
-      - "8095:8095"
+      - "${HERMES_HOST_PORT:-18095}:8095"
+    volumes:
+      - ./logs/hermes-agent:/app/logs
     healthcheck:
       test: ["CMD", "python", "-c", "import json, os, urllib.request; req=urllib.request.Request('http://127.0.0.1:8095/api/v1/operators/health', headers={'Authorization': 'Bearer ' + os.environ['HERMES_API_KEY']}); data=json.load(urllib.request.urlopen(req, timeout=5)); assert data['status']=='ok' and all(item['ready'] for item in data['roles'].values())"]
       interval: 15s

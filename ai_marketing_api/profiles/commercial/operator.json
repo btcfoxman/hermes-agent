@@ -1,8 +1,8 @@
 {
   "profile_id": "commercial",
   "role_id": "commercial",
-  "version": "1.0.0",
-  "allowed_actions": ["propose", "revise"],
+  "version": "1.1.0",
+  "allowed_actions": ["propose", "revise", "compose"],
   "allowed_knowledge_spaces": [
     "company_public",
     "company_internal",

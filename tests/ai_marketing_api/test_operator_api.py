@@ -68,12 +68,76 @@ def _revision_payload() -> dict:
     return payload
 
 
+def _compose_payload() -> dict:
+    proposal = _request("POST", "/api/v1/operators/industry/propose", json=_base_payload()).json()
+    payload = _base_payload()
+    payload.update(
+        {
+            "approved_proposal": proposal["proposal"],
+            "claims": proposal["claims"],
+        }
+    )
+    return payload
+
+
+def _role_compose_payload(role: str) -> dict:
+    if role == "commercial":
+        content = "已批准能力：内容交接后必须经过人工终审。"
+        space, record_type, kind = "company_public", "capability", "fact"
+    elif role == "personal_ip":
+        content = "第一次带团队出海时，我暂停了未经验证的投放。"
+        space, record_type, kind = "personal_approved", "experience", "experience"
+    else:
+        return _compose_payload()
+    return {
+        "objective": "Compose the approved proposal",
+        "topic": "Approved topic",
+        "audience": "business owners",
+        "channels": ["wechat_mp", "xiaohongshu"],
+        "as_of": "2026-07-16T08:00:00Z",
+        "approved_proposal": {
+            "title": content,
+            "angle": "Use only approved evidence.",
+            "audience_value": "Provide a traceable explanation.",
+            "key_points": [content],
+            "suggested_formats": ["wechat_mp", "xiaohongshu"],
+            "cta": None,
+            "first_person": role == "personal_ip",
+        },
+        "claims": [
+            {
+                "text": content,
+                "kind": kind,
+                "evidence_ids": ["record-1"],
+                "verification_status": "verified",
+            }
+        ],
+        "authorized_context": [
+            {
+                "record_id": "record-1",
+                "space": space,
+                "record_type": record_type,
+                "title": "Approved record",
+                "content": content,
+                "structured_data": {},
+                "status": "approved",
+                "authorized_roles": [role],
+                "valid_from": "2026-01-01T00:00:00Z",
+                "valid_until": "2027-01-01T00:00:00Z",
+                "source_uri": None,
+                "source_tier": "primary",
+            }
+        ],
+    }
+
+
 def _protected_endpoints() -> list[tuple[str, str, dict | None]]:
     return [
         ("GET", "/api/v1/operators/health", None),
         ("GET", "/api/v1/operators/industry/probe", None),
         ("POST", "/api/v1/operators/industry/propose", _base_payload()),
         ("POST", "/api/v1/operators/industry/revise", _revision_payload()),
+        ("POST", "/api/v1/operators/industry/compose", _compose_payload()),
         ("POST", "/api/v1/topic/analyze", {}),
         ("POST", "/api/v1/brief/generate", {}),
         ("POST", "/api/v1/draft/generate", {}),
@@ -88,12 +152,26 @@ def test_operator_health_and_role_probes_cover_all_profiles():
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "ok"
+    assert data["schema_version"] == "operator.proposal.v1"
+    assert data["schema_versions"] == {
+        "proposal": "operator.proposal.v1",
+        "content": "operator.content.v1",
+    }
     assert set(data["roles"]) == {"commercial", "industry", "personal_ip"}
     for role in data["roles"]:
         probe = _request("GET", f"/api/v1/operators/{role}/probe")
         assert probe.status_code == 200
         assert probe.json()["direct_tools"] == []
         assert probe.json()["knowledge_source"] == "request_authorized_context_only"
+        assert probe.json()["supported_actions"] == ["compose", "propose", "revise"]
+        assert probe.json()["schema_versions"]["content"] == "operator.content.v1"
+
+
+def test_api_directory_lists_the_compose_contract():
+    response = _request("GET", "/", operator_auth=False)
+
+    assert response.status_code == 200
+    assert response.json()["endpoints"]["operatorCompose"] == "/api/v1/operators/{role_id}/compose"
 
 
 def test_propose_returns_the_strict_versioned_contract(monkeypatch):
@@ -124,6 +202,122 @@ def test_revise_stays_in_the_same_profile(monkeypatch):
     assert response.json()["role_id"] == "industry"
     assert response.json()["action"] == "revise"
     assert "Focus on product teams" in response.json()["proposal"]["angle"]
+
+
+def test_compose_returns_content_v1_with_exact_variants_and_critic(monkeypatch):
+    monkeypatch.delenv("HERMES_OPENAI_API_KEY", raising=False)
+    payload = _compose_payload()
+    payload["channels"] = ["wechat_mp", "xiaohongshu"]
+
+    response = _request("POST", "/api/v1/operators/industry/compose", json=payload)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["schema_version"] == "operator.content.v1"
+    assert data["role_id"] == "industry"
+    assert data["action"] == "compose"
+    assert data["status"] == "content_ready"
+    assert data["requires_human_review"] is True
+    assert data["critic"]["passed"] is True
+    assert {variant["platform"] for variant in data["platform_variants"]} == {
+        "wechat_mp",
+        "xiaohongshu",
+    }
+    fact = next(block for block in data["blocks"] if block["kind"] == "fact")
+    assert fact["text"] == payload["authorized_context"][0]["content"]
+    assert fact["evidence_ids"] == ["source-1"]
+    assert all(fact["text"] in variant["body"] for variant in data["platform_variants"])
+
+
+@pytest.mark.parametrize("role", ["commercial", "personal_ip"])
+def test_compose_endpoint_supports_each_role_profile(role, monkeypatch):
+    monkeypatch.delenv("HERMES_OPENAI_API_KEY", raising=False)
+    payload = _role_compose_payload(role)
+
+    response = _request("POST", f"/api/v1/operators/{role}/compose", json=payload)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["role_id"] == role
+    assert data["status"] == "content_ready"
+    assert data["critic"]["passed"] is True
+    assert data["blocks"][0]["text"] == payload["claims"][0]["text"]
+    assert data["blocks"][0]["evidence_ids"] == ["record-1"]
+
+
+def test_compose_uses_the_same_byte_stable_role_prompt(monkeypatch):
+    prompts: list[str] = []
+
+    async def fake_llm(system, payload, fallback, *args, **kwargs):
+        prompts.append(system)
+        return fallback
+
+    monkeypatch.setattr(marketing_api, "_llm_json", fake_llm)
+    proposal = _request("POST", "/api/v1/operators/industry/propose", json=_base_payload()).json()
+    compose_payload = _base_payload()
+    compose_payload.update(
+        {"approved_proposal": proposal["proposal"], "claims": proposal["claims"]}
+    )
+    composed = _request(
+        "POST",
+        "/api/v1/operators/industry/compose",
+        json=compose_payload,
+    )
+
+    assert composed.status_code == 200
+    assert len(prompts) == 2
+    assert prompts[0].encode("utf-8") == prompts[1].encode("utf-8")
+    assert composed.json()["system_prompt_sha256"] == hashlib.sha256(
+        prompts[1].encode("utf-8")
+    ).hexdigest()
+
+
+def test_blocked_compose_never_calls_the_model(monkeypatch):
+    payload = _compose_payload()
+    called = False
+
+    async def forbidden_llm(*args, **kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("blocked evidence must not reach the model")
+
+    monkeypatch.setattr(marketing_api, "_llm_json", forbidden_llm)
+    payload["authorized_context"][0]["source_tier"] = "secondary"
+
+    response = _request("POST", "/api/v1/operators/industry/compose", json=payload)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "evidence_insufficient"
+    assert response.json()["master_content"] is None
+    assert called is False
+
+
+def test_compose_rejects_extra_fields_and_cross_role_context_before_model(monkeypatch):
+    extra = _compose_payload()
+    cross_role = _compose_payload()
+    called = False
+
+    async def forbidden_llm(*args, **kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("invalid compose input must not reach the model")
+
+    monkeypatch.setattr(marketing_api, "_llm_json", forbidden_llm)
+    extra["direct_database"] = "please"
+    extra_response = _request(
+        "POST", "/api/v1/operators/industry/compose", json=extra
+    )
+
+    cross_role["authorized_context"][0]["space"] = "company_internal"
+    cross_role["authorized_context"][0]["record_type"] = "delivery_boundary"
+    cross_role_response = _request(
+        "POST", "/api/v1/operators/industry/compose", json=cross_role
+    )
+
+    assert extra_response.status_code == 422
+    assert cross_role_response.status_code == 403
+    assert cross_role_response.json()["detail"]["code"] == "knowledge_space_denied"
+    assert called is False
 
 
 def test_system_prompt_bytes_do_not_change_between_propose_and_revise(monkeypatch):
@@ -246,3 +440,166 @@ def test_unknown_role_is_rejected_by_the_router():
     response = _request("POST", "/api/v1/operators/chief/propose", json={"objective": "Do everything"})
 
     assert response.status_code == 422
+
+
+def test_caller_selected_llm_endpoint_never_inherits_the_service_key(monkeypatch):
+    monkeypatch.setenv("HERMES_OPENAI_API_KEY", "server-owned-secret")
+
+    class ForbiddenClient:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("an incomplete endpoint override must not reach the network")
+
+    monkeypatch.setattr(marketing_api.httpx, "AsyncClient", ForbiddenClient)
+    fallback = {"status": "safe-fallback"}
+    result = asyncio.run(
+        marketing_api._llm_json(
+            "system",
+            {"request": True},
+            fallback,
+            openai_base_url="https://attacker.example/v1",
+            openai_api_key=None,
+        )
+    )
+
+    assert result["status"] == "safe-fallback"
+    assert result["_error"] == "openai_override_base_url_and_api_key_must_be_supplied_together"
+    assert "server-owned-secret" not in str(result)
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "http://93.184.216.34/v1",
+        "http://127.0.0.1:8000/v1",
+        "http://169.254.169.254/latest",
+        "http://10.0.0.8/v1",
+        "http://[::1]/v1",
+    ],
+)
+def test_llm_endpoint_rejects_non_public_ip_targets(monkeypatch, base_url):
+    class ForbiddenClient:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("a private endpoint must not reach the network")
+
+    monkeypatch.setattr(marketing_api.httpx, "AsyncClient", ForbiddenClient)
+    result = asyncio.run(
+        marketing_api._llm_json(
+            "system",
+            {"request": True},
+            {"status": "safe-fallback"},
+            openai_base_url=base_url,
+            openai_api_key="caller-owned-secret",
+        )
+    )
+
+    assert result["status"] == "safe-fallback"
+    assert result["_error"] == "invalid_openai_base_url"
+    assert "caller-owned-secret" not in str(result)
+
+
+def test_llm_endpoint_rejects_dns_with_any_private_answer(monkeypatch):
+    monkeypatch.setattr(
+        marketing_api,
+        "_resolve_host_addresses",
+        lambda _host, _port: {"203.0.113.10", "10.0.0.8"},
+    )
+
+    result = asyncio.run(
+        marketing_api._llm_json(
+            "system",
+            {"request": True},
+            {"status": "safe-fallback"},
+            openai_base_url="https://model.example/v1",
+            openai_api_key="caller-owned-secret",
+        )
+    )
+
+    assert result["_error"] == "invalid_openai_base_url"
+
+
+def test_llm_endpoint_never_follows_redirects(monkeypatch):
+    monkeypatch.setattr(
+        marketing_api,
+        "_resolve_host_addresses",
+        lambda _host, _port: {"93.184.216.34"},
+    )
+
+    class RedirectClient:
+        def __init__(self, *args, **kwargs):
+            assert kwargs["follow_redirects"] is False
+            assert kwargs["trust_env"] is False
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, url, **kwargs):
+            assert url == "https://93.184.216.34/v1/chat/completions"
+            assert kwargs["headers"]["Host"] == "model.example"
+            assert kwargs["extensions"] == {"sni_hostname": "model.example"}
+            return httpx.Response(
+                307,
+                headers={"Location": "http://169.254.169.254/latest"},
+            )
+
+    monkeypatch.setattr(marketing_api.httpx, "AsyncClient", RedirectClient)
+    result = asyncio.run(
+        marketing_api._llm_json(
+            "system",
+            {"request": True},
+            {"status": "safe-fallback"},
+            openai_base_url="https://model.example/v1",
+            openai_api_key="caller-owned-secret",
+        )
+    )
+
+    assert result["status"] == "safe-fallback"
+    assert result["_error"] == "llm_redirect_forbidden"
+
+
+def test_llm_endpoint_connects_to_the_validated_ip_without_resolving_hostname_again(monkeypatch):
+    resolutions = []
+
+    def resolve_once(host, port):
+        resolutions.append((host, port))
+        return {"93.184.216.34"}
+
+    monkeypatch.setattr(marketing_api, "_resolve_host_addresses", resolve_once)
+
+    class PinnedClient:
+        def __init__(self, *args, **kwargs):
+            assert kwargs["follow_redirects"] is False
+            assert kwargs["trust_env"] is False
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, url, **kwargs):
+            assert "model.example" not in url
+            assert url == "https://93.184.216.34/v1/chat/completions"
+            assert kwargs["headers"]["Host"] == "model.example"
+            assert kwargs["extensions"] == {"sni_hostname": "model.example"}
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": '{"status":"ok"}'}}]},
+                request=httpx.Request("POST", url),
+            )
+
+    monkeypatch.setattr(marketing_api.httpx, "AsyncClient", PinnedClient)
+    result = asyncio.run(
+        marketing_api._llm_json(
+            "system",
+            {"request": True},
+            {"status": "safe-fallback"},
+            openai_base_url="https://model.example/v1",
+            openai_api_key="caller-owned-secret",
+        )
+    )
+
+    assert resolutions == [("model.example", 443)]
+    assert result["status"] == "ok"

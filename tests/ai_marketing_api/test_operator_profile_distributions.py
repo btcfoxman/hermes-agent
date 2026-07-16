@@ -39,6 +39,7 @@ def test_bundled_operator_assets_install_as_three_isolated_profiles(profile_env,
         permissions = json.loads((path / "operator.json").read_text(encoding="utf-8"))
         assert permissions["role_id"] == role
         assert permissions["version"] == read_manifest(path).version
+        assert permissions["allowed_actions"] == ["propose", "revise", "compose"]
         assert permissions["allowed_tools"] == []
         assert "cross_profile_memory" in permissions["denied_capabilities"]
         assert not (path / ".env").exists()
@@ -57,7 +58,12 @@ def test_profile_configs_have_no_runtime_tool_or_memory_access():
         permissions = json.loads(
             (PROFILE_ROOT / role.value / "operator.json").read_text(encoding="utf-8")
         )
+        assert permissions["version"] == "1.1.0"
+        assert set(permissions["allowed_actions"]) == {"propose", "revise", "compose"}
         assert permissions["allowed_tools"] == []
         assert {"direct_database", "direct_cache", "filesystem_knowledge"}.issubset(
             permissions["denied_capabilities"]
         )
+        soul = (PROFILE_ROOT / role.value / "SOUL.md").read_text(encoding="utf-8")
+        assert "`compose`" in soul
+        assert "response_contract" in soul

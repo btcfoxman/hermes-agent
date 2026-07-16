@@ -8,11 +8,13 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Sequence, Set
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
 SCHEMA_VERSION = "operator.proposal.v1"
+CONTENT_SCHEMA_VERSION = "operator.content.v1"
 PROFILE_ROOT = Path(__file__).resolve().parent / "profiles"
 
 
@@ -219,8 +221,15 @@ def _load_profile(profile_dir: Path) -> OperatorProfile:
     denied_capabilities = tuple(str(value) for value in raw.get("denied_capabilities") or [])
     if profile_id != role_id.value or not version:
         raise RuntimeError(f"operator profile {role_id.value!r} has invalid identity metadata")
-    if allowed_actions != {OperatorAction.PROPOSE.value, OperatorAction.REVISE.value}:
-        raise RuntimeError(f"operator profile {role_id.value!r} must support propose and revise only")
+    expected_actions = {
+        OperatorAction.PROPOSE.value,
+        OperatorAction.REVISE.value,
+        "compose",
+    }
+    if allowed_actions != expected_actions:
+        raise RuntimeError(
+            f"operator profile {role_id.value!r} must support propose, revise, and compose only"
+        )
     required_denials = {
         "direct_database",
         "direct_cache",
@@ -270,12 +279,17 @@ class OperatorRegistry:
         return {
             "status": "ok",
             "schema_version": SCHEMA_VERSION,
+            "schema_versions": {
+                "proposal": SCHEMA_VERSION,
+                "content": CONTENT_SCHEMA_VERSION,
+            },
             "roles": {
                 role.value: {
                     "ready": True,
                     "profile_id": profile.profile_id,
                     "profile_version": profile.version,
                     "system_prompt_sha256": profile.prompt_sha256,
+                    "supported_actions": sorted(profile.allowed_actions),
                 }
                 for role, profile in sorted(self._profiles.items(), key=lambda item: item[0].value)
             },
@@ -345,7 +359,23 @@ class OperatorRegistry:
 
 def _context_text(context: AuthorizedContext, limit: int = 480) -> str:
     value = context.content.strip() or context.title.strip()
-    return re.sub(r"\s+", " ", value)[:limit]
+    # Content claims are later reused by operator.content.v1. Preserve their
+    # exact source bytes (apart from surrounding whitespace) so the composer
+    # can prove that every factual block is a verbatim authorized excerpt.
+    return value[:limit]
+
+
+def _context_publisher_identity(context: AuthorizedContext) -> str:
+    for key in ("publisher_id", "publisher", "source_domain"):
+        identity = str(context.structured_data.get(key) or "").strip().lower()
+        if identity:
+            return identity.removeprefix("www.")
+    return (
+        str(urlsplit(context.source_uri or "").hostname or "")
+        .strip()
+        .lower()
+        .removeprefix("www.")
+    )
 
 
 def _title(request: OperatorProposeRequest) -> str:
@@ -461,7 +491,20 @@ def _industry_fallback(
     contexts: Sequence[AuthorizedContext],
 ) -> Dict[str, Any]:
     industry_sources = [context for context in contexts if _enum_value(context.space) == "industry"]
-    claims = [_fact_claim(context) for context in industry_sources[:8]]
+    grouped_sources: Dict[str, List[AuthorizedContext]] = {}
+    for context in industry_sources:
+        text = _context_text(context)
+        if text:
+            grouped_sources.setdefault(text, []).append(context)
+    claims = [
+        OperatorClaim(
+            text=text,
+            kind=ClaimKind.FACT,
+            evidence_ids=[context.record_id for context in rows[:20]],
+            verification_status=VerificationStatus.VERIFIED,
+        )
+        for text, rows in list(grouped_sources.items())[:8]
+    ]
     if industry_sources:
         claims.append(
             OperatorClaim(
@@ -471,8 +514,18 @@ def _industry_fallback(
                 verification_status=VerificationStatus.OPINION,
             )
         )
-    distinct_sources = {context.source_uri for context in industry_sources if context.source_uri}
-    has_first_party = any(context.source_tier in {"official", "primary"} for context in industry_sources)
+    unsupported_claims = []
+    for text, rows in grouped_sources.items():
+        source_domains = {
+            identity
+            for context in rows
+            if (identity := _context_publisher_identity(context))
+        }
+        has_first_party = any(
+            context.source_tier in {"official", "primary"} for context in rows
+        )
+        if not has_first_party and len(source_domains) < 2:
+            unsupported_claims.append(text)
     risks: List[OperatorRisk] = []
     questions: List[OperatorQuestion] = []
     status = OutputStatus.PROPOSAL
@@ -485,12 +538,12 @@ def _industry_fallback(
                 "行业事实必须可回溯，当前没有可用于提案的行业证据。",
             )
         )
-    elif len(distinct_sources) < 2 and not has_first_party:
+    elif unsupported_claims:
         status = OutputStatus.EVIDENCE_INSUFFICIENT
         risks.append(
             _risk(
                 "single_source_unverified",
-                "The event has only one non-primary source and must remain a candidate until corroborated.",
+                "At least one fact has only one non-primary publisher and must remain a candidate until corroborated.",
                 blocking=True,
             )
         )
@@ -670,6 +723,9 @@ def _normalize_model_claims(
 
     fallback_objects = [OperatorClaim(**claim) for claim in fallback_claims]
     fallback_facts = [claim for claim in fallback_objects if claim.kind == ClaimKind.FACT.value]
+    fallback_opinions = [
+        claim for claim in fallback_objects if claim.kind == ClaimKind.OPINION.value
+    ]
     claims: List[OperatorClaim] = list(fallback_facts)
     for raw in candidate[:50]:
         if not isinstance(raw, dict):
@@ -682,14 +738,28 @@ def _normalize_model_claims(
             str(value) for value in raw.get("evidence_ids") or [] if str(value) in context_by_id
         ][:20]
         if kind == ClaimKind.OPINION.value:
-            claims.append(
-                OperatorClaim(
-                    text=text,
-                    kind=ClaimKind.OPINION,
-                    evidence_ids=evidence_ids,
-                    verification_status=VerificationStatus.OPINION,
+            # A model-selected "opinion" label cannot prove that a sentence is
+            # non-factual.  Keep only the deterministic editorial direction
+            # already present in the frozen fallback contract.
+            if any(
+                text == fallback_opinion.text and not evidence_ids
+                for fallback_opinion in fallback_opinions
+            ):
+                claims.append(
+                    OperatorClaim(
+                        text=text,
+                        kind=ClaimKind.OPINION,
+                        evidence_ids=[],
+                        verification_status=VerificationStatus.OPINION,
+                    )
                 )
-            )
+            else:
+                risks.append(
+                    _risk(
+                        "discarded_unapproved_model_opinion",
+                        "A model-labelled opinion was not part of the deterministic approved editorial contract and was discarded.",
+                    )
+                )
             continue
         exact_source_text = any(
             text == _context_text(context_by_id[record_id]) for record_id in evidence_ids

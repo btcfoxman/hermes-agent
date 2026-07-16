@@ -24,6 +24,7 @@ env:
 jobs:
   quality:
     name: Test operator profiles
+    if: github.ref == 'refs/heads/test'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -46,6 +47,7 @@ jobs:
 
   build:
     name: Build image
+    if: github.ref == 'refs/heads/test'
     needs: quality
     runs-on: ubuntu-latest
     steps:
@@ -87,6 +89,7 @@ jobs:
 
   deploy:
     name: Deploy to 192.168.3.6
+    if: github.ref == 'refs/heads/test'
     needs: build
     environment: test
     runs-on:
@@ -94,7 +97,9 @@ jobs:
       - linux
       - aitoearn-test
     env:
-      APP_DIR: /home/btcfoxman/docker/hermes-agent
+      APP_DIR: /home/btcfoxman/docker/hermes-agent-test
+      COMPOSE_PROJECT_NAME: hermes-agent-test
+      HERMES_HOST_PORT: '18095'
       IMAGE_REGISTRY: ghcr.io
       IMAGE_NAMESPACE: ${{ github.repository_owner }}
       IMAGE_NAME: hermes-agent
@@ -102,6 +107,8 @@ jobs:
       GHCR_USERNAME: ${{ secrets.GHCR_USERNAME || github.actor }}
       GHCR_TOKEN: ${{ secrets.GHCR_TOKEN || github.token }}
       HERMES_API_KEY: ${{ secrets.HERMES_API_KEY }}
+      HERMES_OPENAI_BASE_URL: ${{ vars.HERMES_OPENAI_BASE_URL || 'https://api.openai.com/v1' }}
+      HERMES_MODEL: ${{ vars.HERMES_MODEL || 'gpt-4.1-mini' }}
     steps:
       - name: Fetch deployment files
         env:
@@ -113,6 +120,13 @@ jobs:
           rm -rf "${work_dir}"
           mkdir -p "${work_dir}"
 
+          auth_config=""
+          cleanup_auth() {
+            if [ -n "${auth_config}" ]; then
+              rm -f -- "${auth_config}"
+            fi
+          }
+          trap cleanup_auth EXIT
           auth_config="${work_dir}/.curl-auth"
           {
             printf 'header = "Authorization: Bearer %s"\n' "${CHECKOUT_TOKEN}"
@@ -137,6 +151,7 @@ jobs:
           done
 
           rm -f "${auth_config}"
+          auth_config=""
           chmod +x "${work_dir}/test/deploy.sh"
           echo "REPO_WORK_DIR=${work_dir}" >> "${GITHUB_ENV}"
 

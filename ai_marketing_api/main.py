@@ -1,15 +1,29 @@
 from __future__ import annotations
 
+import asyncio
+import ipaddress
 import json
 import os
 import re
 import secrets
+import socket
+from dataclasses import dataclass
+from urllib.parse import urlsplit
 from typing import Any, Dict, List, Optional
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException
 
+from ai_marketing_api.operator_content import (
+    OperatorComposeRequest,
+    OperatorContentOutput,
+    build_content_fallback,
+    content_request_payload,
+    normalize_content_output,
+)
 from ai_marketing_api.operator_runtime import (
+    CONTENT_SCHEMA_VERSION,
+    SCHEMA_VERSION,
     ContextAuthorizationError,
     OperatorAction,
     OperatorOutput,
@@ -44,6 +58,7 @@ def root() -> Dict[str, Any]:
             "operatorHealth": "/api/v1/operators/health",
             "operatorPropose": "/api/v1/operators/{role_id}/propose",
             "operatorRevise": "/api/v1/operators/{role_id}/revise",
+            "operatorCompose": "/api/v1/operators/{role_id}/compose",
         },
     }
 
@@ -407,6 +422,77 @@ def _timeout_seconds(value: Optional[str] = None) -> float:
     return timeout if timeout > 0 else DEFAULT_LLM_TIMEOUT_SECONDS
 
 
+def _resolve_host_addresses(hostname: str, port: int) -> set[str]:
+    addresses: set[str] = set()
+    for family, _type, _proto, _canonname, sockaddr in socket.getaddrinfo(
+        hostname,
+        port,
+        type=socket.SOCK_STREAM,
+    ):
+        if family not in {socket.AF_INET, socket.AF_INET6}:
+            continue
+        addresses.add(str(sockaddr[0]).split("%", 1)[0])
+    return addresses
+
+
+@dataclass(frozen=True)
+class _PinnedOpenAITarget:
+    request_base_urls: tuple[str, ...]
+    host_header: str
+    sni_hostname: str
+
+
+async def _resolve_public_openai_target(base_url: str) -> Optional[_PinnedOpenAITarget]:
+    try:
+        parsed = urlsplit(base_url)
+        port = parsed.port or 443
+        hostname = str(parsed.hostname or "").rstrip(".").lower()
+        ascii_hostname = hostname.encode("idna").decode("ascii")
+    except (UnicodeError, ValueError):
+        return None
+    if (
+        parsed.scheme != "https"
+        or not ascii_hostname
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or ascii_hostname in {"localhost", "localhost.localdomain"}
+    ):
+        return None
+    try:
+        addresses = await asyncio.to_thread(_resolve_host_addresses, ascii_hostname, port)
+    except (OSError, UnicodeError, ValueError):
+        return None
+    if not addresses:
+        return None
+    try:
+        public_addresses = [ipaddress.ip_address(address) for address in addresses]
+    except ValueError:
+        return None
+    if any(not address.is_global for address in public_addresses):
+        return None
+
+    public_addresses.sort(key=lambda address: (address.version, int(address)))
+    base_path = parsed.path.rstrip("/")
+    request_base_urls = tuple(
+        f"https://{'[' + str(address) + ']' if address.version == 6 else address}"
+        f"{':' + str(port) if port != 443 else ''}{base_path}"
+        for address in public_addresses
+    )
+    try:
+        source_ip = ipaddress.ip_address(ascii_hostname)
+    except ValueError:
+        source_ip = None
+    host = f"[{ascii_hostname}]" if source_ip and source_ip.version == 6 else ascii_hostname
+    host_header = f"{host}:{port}" if port != 443 else host
+    return _PinnedOpenAITarget(
+        request_base_urls=request_base_urls,
+        host_header=host_header,
+        sni_hostname=ascii_hostname,
+    )
+
+
 async def _llm_json(
     system: str,
     payload: Dict[str, Any],
@@ -416,10 +502,29 @@ async def _llm_json(
     model_name: Optional[str] = None,
     timeout_seconds: Optional[str] = None,
 ) -> Dict[str, Any]:
-    api_key = (openai_api_key or os.getenv("HERMES_OPENAI_API_KEY", "")).strip()
+    requested_base_url = str(openai_base_url or "").strip()
+    requested_api_key = str(openai_api_key or "").strip()
+    if bool(requested_base_url) != bool(requested_api_key):
+        blocked = dict(fallback)
+        blocked["_error"] = "openai_override_base_url_and_api_key_must_be_supplied_together"
+        return blocked
+    if requested_base_url:
+        # A caller-selected endpoint must never inherit the service's own key.
+        base_url = requested_base_url.rstrip("/")
+        api_key = requested_api_key
+    else:
+        api_key = os.getenv("HERMES_OPENAI_API_KEY", "").strip()
+        base_url = os.getenv(
+            "HERMES_OPENAI_BASE_URL",
+            "https://api.openai.com/v1",
+        ).strip().rstrip("/")
     if not api_key:
         return fallback
-    base_url = (openai_base_url or os.getenv("HERMES_OPENAI_BASE_URL", "https://api.openai.com/v1")).rstrip("/")
+    target = await _resolve_public_openai_target(base_url)
+    if target is None:
+        blocked = dict(fallback)
+        blocked["_error"] = "invalid_openai_base_url"
+        return blocked
     model = (model_name or os.getenv("HERMES_MODEL", "gpt-4.1-mini")).strip() or "gpt-4.1-mini"
     request = {
         "model": model,
@@ -432,14 +537,35 @@ async def _llm_json(
     }
     resolved_timeout = _timeout_seconds(timeout_seconds)
     try:
-        async with httpx.AsyncClient(timeout=resolved_timeout) as client:
-            resp = await client.post(
-                f"{base_url}/chat/completions",
-                json=request,
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        async with httpx.AsyncClient(
+            timeout=resolved_timeout,
+            follow_redirects=False,
+            trust_env=False,
+        ) as client:
+            last_error: Optional[Exception] = None
+            for request_base_url in target.request_base_urls:
+                try:
+                    resp = await client.post(
+                        f"{request_base_url}/chat/completions",
+                        json=request,
+                        headers={
+                            "Authorization": f"Bearer {api_key}",
+                            "Content-Type": "application/json",
+                            "Host": target.host_header,
+                        },
+                        extensions={"sni_hostname": target.sni_hostname},
+                    )
+                    if resp.is_redirect:
+                        raise RuntimeError("llm_redirect_forbidden")
+                    resp.raise_for_status()
+                    data = resp.json()
+                    break
+                except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+                    last_error = exc
+            else:
+                if last_error is not None:
+                    raise last_error
+                raise RuntimeError("no_public_llm_address")
         content = data["choices"][0]["message"]["content"]
         result = _json_from_response(content)
         result["_model"] = model
@@ -479,6 +605,11 @@ def operator_probe(
         "system_prompt_sha256": profile.prompt_sha256,
         "knowledge_source": "request_authorized_context_only",
         "direct_tools": list(profile.allowed_tools),
+        "supported_actions": sorted(profile.allowed_actions),
+        "schema_versions": {
+            "proposal": SCHEMA_VERSION,
+            "content": CONTENT_SCHEMA_VERSION,
+        },
     }
 
 
@@ -533,6 +664,60 @@ async def _run_operator(
     )
 
 
+async def _run_compose(
+    role_id: OperatorRole,
+    payload: OperatorComposeRequest,
+    authorization: Optional[str],
+    openai_base_url: Optional[str],
+    openai_api_key: Optional[str],
+    model_name: Optional[str],
+    timeout_seconds: Optional[str],
+) -> OperatorContentOutput:
+    """Compose publishable drafts from an orchestration-approved direction.
+
+    The model never receives a database/cache/tool handle.  The current
+    request context is re-authorized here and the content normalizer rebuilds
+    every factual block before any prose is returned.
+    """
+
+    _require_operator_auth(authorization)
+    profile = OPERATOR_REGISTRY.get(role_id)
+    if "compose" not in profile.allowed_actions:
+        raise HTTPException(status_code=403, detail={"code": "operator_action_denied"})
+    try:
+        contexts = OPERATOR_REGISTRY.authorize(role_id, payload.authorized_context, payload.as_of)
+    except ContextAuthorizationError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": exc.code, "record_id": exc.record_id, "message": str(exc)},
+        ) from exc
+
+    fallback = build_content_fallback(OPERATOR_REGISTRY, role_id, payload, contexts)
+    if fallback.get("_fallback_errors"):
+        # A blocked evidence/disclosure gate must not be sent to the model.
+        # The deterministic result already contains the questions and critic
+        # state orchestration needs to recover safely.
+        candidate = fallback
+    else:
+        candidate = await _llm_json(
+            profile.system_prompt,
+            content_request_payload(role_id, payload, contexts),
+            fallback,
+            openai_base_url,
+            openai_api_key,
+            model_name,
+            timeout_seconds,
+        )
+    return normalize_content_output(
+        OPERATOR_REGISTRY,
+        role_id,
+        payload,
+        contexts,
+        fallback,
+        candidate,
+    )
+
+
 @app.post("/api/v1/operators/{role_id}/propose", response_model=OperatorOutput)
 async def operator_propose(
     role_id: OperatorRole,
@@ -568,6 +753,27 @@ async def operator_revise(
     return await _run_operator(
         role_id,
         OperatorAction.REVISE,
+        payload,
+        authorization,
+        x_hermes_openai_base_url,
+        x_hermes_openai_api_key,
+        x_hermes_model,
+        x_hermes_timeout_seconds,
+    )
+
+
+@app.post("/api/v1/operators/{role_id}/compose", response_model=OperatorContentOutput)
+async def operator_compose(
+    role_id: OperatorRole,
+    payload: OperatorComposeRequest,
+    authorization: Optional[str] = Header(default=None),
+    x_hermes_openai_base_url: Optional[str] = Header(default=None, alias="X-Hermes-OpenAI-Base-URL"),
+    x_hermes_openai_api_key: Optional[str] = Header(default=None, alias="X-Hermes-OpenAI-API-Key"),
+    x_hermes_model: Optional[str] = Header(default=None, alias="X-Hermes-Model"),
+    x_hermes_timeout_seconds: Optional[str] = Header(default=None, alias="X-Hermes-Timeout-Seconds"),
+) -> OperatorContentOutput:
+    return await _run_compose(
+        role_id,
         payload,
         authorization,
         x_hermes_openai_base_url,

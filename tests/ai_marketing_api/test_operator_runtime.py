@@ -288,6 +288,88 @@ def test_industry_two_independent_sources_can_form_a_proposal():
     assert "single_source_unverified" not in {risk.code for risk in output.risk_flags}
 
 
+def test_industry_two_urls_from_the_same_publisher_are_not_independent_sources():
+    contexts = [
+        _context(
+            "source-1",
+            "industry",
+            "industry",
+            "source_item",
+            source_uri="https://publisher.test/story-one",
+            source_tier="secondary",
+        ),
+        _context(
+            "source-2",
+            "industry",
+            "industry",
+            "report",
+            source_uri="https://www.publisher.test/story-two",
+            source_tier="secondary",
+        ),
+    ]
+
+    output = _run(OperatorRegistry(), OperatorRole.INDUSTRY, _request(), contexts)
+
+    assert output.status == OutputStatus.EVIDENCE_INSUFFICIENT.value
+    assert "single_source_unverified" in {risk.code for risk in output.risk_flags}
+
+
+def test_industry_publisher_id_prevents_two_domain_false_independence():
+    contexts = [
+        _context(
+            "source-1",
+            "industry",
+            "industry",
+            "source_item",
+            source_uri="https://brand-news.test/story-one",
+            source_tier="secondary",
+            structured_data={"publisher_id": "publisher-one"},
+        ),
+        _context(
+            "source-2",
+            "industry",
+            "industry",
+            "report",
+            source_uri="https://brand-report.test/story-two",
+            source_tier="secondary",
+            structured_data={"publisher_id": "publisher-one"},
+        ),
+    ]
+
+    output = _run(OperatorRegistry(), OperatorRole.INDUSTRY, _request(), contexts)
+
+    assert output.status == OutputStatus.EVIDENCE_INSUFFICIENT.value
+    assert "single_source_unverified" in {risk.code for risk in output.risk_flags}
+
+
+def test_one_official_fact_does_not_launder_an_unverified_secondary_fact():
+    contexts = [
+        _context(
+            "official-1",
+            "industry",
+            "industry",
+            "source_item",
+            content="The regulator published the final policy.",
+            source_uri="https://regulator.test/policy",
+            source_tier="official",
+        ),
+        _context(
+            "rumour-1",
+            "industry",
+            "industry",
+            "source_item",
+            content="An unnamed company has already changed its pricing.",
+            source_uri="https://publisher.test/rumour",
+            source_tier="secondary",
+        ),
+    ]
+
+    output = _run(OperatorRegistry(), OperatorRole.INDUSTRY, _request(), contexts)
+
+    assert output.status == OutputStatus.EVIDENCE_INSUFFICIENT.value
+    assert "single_source_unverified" in {risk.code for risk in output.risk_flags}
+
+
 def test_industry_model_fact_with_unknown_evidence_is_flagged():
     source = _context(
         "source-1",
@@ -312,6 +394,35 @@ def test_industry_model_fact_with_unknown_evidence_is_flagged():
     assert fact.verification_status == VerificationStatus.VERIFIED.value
     assert all(claim.text != "Unsupported market-size claim." for claim in output.claims)
     assert "unsupported_fact" in {risk.code for risk in output.risk_flags}
+
+
+def test_industry_model_cannot_smuggle_a_fact_as_an_opinion():
+    source = _context(
+        "source-safe",
+        "industry",
+        "industry",
+        "source_item",
+        source_uri="https://official.test/news",
+        source_tier="official",
+    )
+    smuggled = "某公司已经秘密收购竞争对手"
+    output = _run(
+        OperatorRegistry(),
+        OperatorRole.INDUSTRY,
+        _request(),
+        [source],
+        {
+            "_model": "test-model",
+            "claims": [
+                {"text": smuggled, "kind": "opinion", "evidence_ids": []}
+            ],
+        },
+    )
+
+    assert all(claim.text != smuggled for claim in output.claims)
+    assert "discarded_unapproved_model_opinion" in {
+        risk.code for risk in output.risk_flags
+    }
 
 
 def test_personal_ip_without_approved_cards_returns_interview_questions():
