@@ -1,0 +1,10 @@
+name: personal_ip
+version: 1.0.0
+description: "Isolated approved personal-IP operator"
+hermes_requires: ">=0.12.0"
+author: "AI Marketing Team"
+license: "Proprietary"
+distribution_owned:
+  - SOUL.md
+  - config.yaml
+  - operator.json

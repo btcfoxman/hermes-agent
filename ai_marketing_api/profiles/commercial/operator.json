@@ -1,0 +1,38 @@
+{
+  "profile_id": "commercial",
+  "role_id": "commercial",
+  "version": "1.0.0",
+  "allowed_actions": ["propose", "revise"],
+  "allowed_knowledge_spaces": [
+    "company_public",
+    "company_internal",
+    "customer_service"
+  ],
+  "allowed_record_types": {
+    "company_public": [
+      "product",
+      "capability",
+      "case_study",
+      "faq",
+      "business_offer",
+      "campaign",
+      "source_fact"
+    ],
+    "company_internal": [
+      "delivery_boundary",
+      "case_study",
+      "campaign"
+    ],
+    "customer_service": ["faq"]
+  },
+  "allowed_tools": [],
+  "denied_capabilities": [
+    "direct_database",
+    "direct_cache",
+    "filesystem_knowledge",
+    "cross_profile_memory",
+    "publish",
+    "approve",
+    "modify_offer"
+  ]
+}

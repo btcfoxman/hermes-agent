@@ -1,0 +1,36 @@
+{
+  "profile_id": "industry",
+  "role_id": "industry",
+  "version": "1.0.0",
+  "allowed_actions": ["propose", "revise"],
+  "allowed_knowledge_spaces": ["company_public", "industry"],
+  "allowed_record_types": {
+    "company_public": [
+      "product",
+      "capability",
+      "case_study",
+      "faq",
+      "source_fact"
+    ],
+    "industry": [
+      "source_item",
+      "source_fact",
+      "event",
+      "report",
+      "policy",
+      "technology",
+      "company_update"
+    ]
+  },
+  "allowed_tools": [],
+  "denied_capabilities": [
+    "direct_database",
+    "direct_cache",
+    "filesystem_knowledge",
+    "cross_profile_memory",
+    "company_internal",
+    "personal_knowledge",
+    "publish",
+    "approve"
+  ]
+}

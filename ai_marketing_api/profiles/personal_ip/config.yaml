@@ -1,0 +1,9 @@
+toolsets: []
+agent:
+  max_turns: 4
+  disabled_toolsets: []
+  task_completion_guidance: false
+  parallel_tool_call_guidance: false
+memory:
+  memory_enabled: false
+  user_profile_enabled: false

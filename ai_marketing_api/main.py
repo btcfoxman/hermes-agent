@@ -3,14 +3,29 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 from typing import Any, Dict, List, Optional
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException
 
-app = FastAPI(title="Hermes AI Marketing API", version="0.1.0")
+from ai_marketing_api.operator_runtime import (
+    ContextAuthorizationError,
+    OperatorAction,
+    OperatorOutput,
+    OperatorProposeRequest,
+    OperatorRegistry,
+    OperatorReviseRequest,
+    OperatorRole,
+    build_fallback,
+    normalize_output,
+    request_payload,
+)
+
+app = FastAPI(title="Hermes AI Marketing API", version="0.2.0")
 
 DEFAULT_LLM_TIMEOUT_SECONDS = 180.0
+OPERATOR_REGISTRY = OperatorRegistry()
 
 
 @app.get("/")
@@ -26,6 +41,9 @@ def root() -> Dict[str, Any]:
             "draftGenerate": "/api/v1/draft/generate",
             "draftHumanize": "/api/v1/draft/humanize",
             "riskReview": "/api/v1/risk/review",
+            "operatorHealth": "/api/v1/operators/health",
+            "operatorPropose": "/api/v1/operators/{role_id}/propose",
+            "operatorRevise": "/api/v1/operators/{role_id}/revise",
         },
     }
 
@@ -33,13 +51,19 @@ def root() -> Dict[str, Any]:
 def _require_auth(authorization: Optional[str]) -> None:
     expected = os.getenv("HERMES_API_KEY", "").strip()
     if not expected:
-        return
+        raise HTTPException(status_code=503, detail="hermes authentication is not configured")
     prefix = "bearer "
     token = ""
     if authorization and authorization.lower().startswith(prefix):
         token = authorization[len(prefix):].strip()
-    if token != expected:
+    if not token or not secrets.compare_digest(token, expected):
         raise HTTPException(status_code=401, detail="invalid hermes token")
+
+
+def _require_operator_auth(authorization: Optional[str]) -> None:
+    """Operator profiles are never exposed when their service key is absent."""
+
+    _require_auth(authorization)
 
 
 def _text(payload: Dict[str, Any]) -> str:
@@ -430,6 +454,127 @@ async def _llm_json(
 @app.get("/health")
 def health() -> Dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/v1/operators/health")
+def operator_health(authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+    """Deployment probe for the three bundled, immutable operator profiles."""
+
+    _require_operator_auth(authorization)
+    return OPERATOR_REGISTRY.health()
+
+
+@app.get("/api/v1/operators/{role_id}/probe")
+def operator_probe(
+    role_id: OperatorRole,
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _require_operator_auth(authorization)
+    profile = OPERATOR_REGISTRY.get(role_id)
+    return {
+        "status": "ok",
+        "role_id": role_id.value,
+        "profile_id": profile.profile_id,
+        "profile_version": profile.version,
+        "system_prompt_sha256": profile.prompt_sha256,
+        "knowledge_source": "request_authorized_context_only",
+        "direct_tools": list(profile.allowed_tools),
+    }
+
+
+async def _run_operator(
+    role_id: OperatorRole,
+    action: OperatorAction,
+    payload: OperatorProposeRequest,
+    authorization: Optional[str],
+    openai_base_url: Optional[str],
+    openai_api_key: Optional[str],
+    model_name: Optional[str],
+    timeout_seconds: Optional[str],
+) -> OperatorOutput:
+    _require_operator_auth(authorization)
+    profile = OPERATOR_REGISTRY.get(role_id)
+    if action.value not in profile.allowed_actions:
+        raise HTTPException(status_code=403, detail={"code": "operator_action_denied"})
+    if isinstance(payload, OperatorReviseRequest) and payload.previous.role_id != role_id.value:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "operator_role_mismatch",
+                "message": "A revision must stay inside the profile that produced the previous output.",
+            },
+        )
+    try:
+        contexts = OPERATOR_REGISTRY.authorize(role_id, payload.authorized_context, payload.as_of)
+    except ContextAuthorizationError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": exc.code, "record_id": exc.record_id, "message": str(exc)},
+        ) from exc
+
+    fallback = build_fallback(role_id, action, payload, contexts)
+    candidate = await _llm_json(
+        profile.system_prompt,
+        request_payload(payload),
+        fallback,
+        openai_base_url,
+        openai_api_key,
+        model_name,
+        timeout_seconds,
+    )
+    return normalize_output(
+        OPERATOR_REGISTRY,
+        role_id,
+        action,
+        payload,
+        contexts,
+        fallback,
+        candidate,
+    )
+
+
+@app.post("/api/v1/operators/{role_id}/propose", response_model=OperatorOutput)
+async def operator_propose(
+    role_id: OperatorRole,
+    payload: OperatorProposeRequest,
+    authorization: Optional[str] = Header(default=None),
+    x_hermes_openai_base_url: Optional[str] = Header(default=None, alias="X-Hermes-OpenAI-Base-URL"),
+    x_hermes_openai_api_key: Optional[str] = Header(default=None, alias="X-Hermes-OpenAI-API-Key"),
+    x_hermes_model: Optional[str] = Header(default=None, alias="X-Hermes-Model"),
+    x_hermes_timeout_seconds: Optional[str] = Header(default=None, alias="X-Hermes-Timeout-Seconds"),
+) -> OperatorOutput:
+    return await _run_operator(
+        role_id,
+        OperatorAction.PROPOSE,
+        payload,
+        authorization,
+        x_hermes_openai_base_url,
+        x_hermes_openai_api_key,
+        x_hermes_model,
+        x_hermes_timeout_seconds,
+    )
+
+
+@app.post("/api/v1/operators/{role_id}/revise", response_model=OperatorOutput)
+async def operator_revise(
+    role_id: OperatorRole,
+    payload: OperatorReviseRequest,
+    authorization: Optional[str] = Header(default=None),
+    x_hermes_openai_base_url: Optional[str] = Header(default=None, alias="X-Hermes-OpenAI-Base-URL"),
+    x_hermes_openai_api_key: Optional[str] = Header(default=None, alias="X-Hermes-OpenAI-API-Key"),
+    x_hermes_model: Optional[str] = Header(default=None, alias="X-Hermes-Model"),
+    x_hermes_timeout_seconds: Optional[str] = Header(default=None, alias="X-Hermes-Timeout-Seconds"),
+) -> OperatorOutput:
+    return await _run_operator(
+        role_id,
+        OperatorAction.REVISE,
+        payload,
+        authorization,
+        x_hermes_openai_base_url,
+        x_hermes_openai_api_key,
+        x_hermes_model,
+        x_hermes_timeout_seconds,
+    )
 
 
 @app.post("/api/v1/topic/analyze")

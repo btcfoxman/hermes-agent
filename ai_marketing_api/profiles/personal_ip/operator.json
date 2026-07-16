@@ -1,0 +1,48 @@
+{
+  "profile_id": "personal_ip",
+  "role_id": "personal_ip",
+  "version": "1.0.0",
+  "allowed_actions": ["propose", "revise"],
+  "allowed_knowledge_spaces": [
+    "company_public",
+    "industry",
+    "personal_approved"
+  ],
+  "allowed_record_types": {
+    "company_public": [
+      "product",
+      "capability",
+      "case_study",
+      "faq",
+      "source_fact"
+    ],
+    "industry": [
+      "source_item",
+      "source_fact",
+      "event",
+      "report",
+      "policy",
+      "technology",
+      "company_update"
+    ],
+    "personal_approved": [
+      "identity_fact",
+      "experience",
+      "opinion",
+      "story",
+      "signature_expression",
+      "boundary"
+    ]
+  },
+  "allowed_tools": [],
+  "denied_capabilities": [
+    "direct_database",
+    "direct_cache",
+    "filesystem_knowledge",
+    "cross_profile_memory",
+    "personal_private",
+    "unapproved_identity",
+    "publish",
+    "approve"
+  ]
+}

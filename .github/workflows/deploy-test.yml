@@ -6,6 +6,10 @@ on:
       - test
   workflow_dispatch:
 
+concurrency:
+  group: hermes-agent-test-deploy
+  cancel-in-progress: false
+
 permissions:
   contents: read
   packages: write
@@ -18,8 +22,31 @@ env:
   IMAGE_TAG_LATEST: test-latest
 
 jobs:
+  quality:
+    name: Test operator profiles
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: ai_marketing_api/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest -r ai_marketing_api/requirements.txt
+
+      - name: Run operator contract and isolation tests
+        run: python -m pytest tests/ai_marketing_api -q
+
   build:
     name: Build image
+    needs: quality
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -40,9 +67,8 @@ jobs:
       - name: Prepare image metadata
         id: meta
         run: |
-          short_sha="$(git rev-parse --short HEAD)"
           echo "image=${IMAGE_REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}" >> "${GITHUB_OUTPUT}"
-          echo "image_sha_tag=test-${short_sha}" >> "${GITHUB_OUTPUT}"
+          echo "image_sha_tag=test-${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -62,6 +88,7 @@ jobs:
   deploy:
     name: Deploy to 192.168.3.6
     needs: build
+    environment: test
     runs-on:
       - self-hosted
       - linux
@@ -71,9 +98,10 @@ jobs:
       IMAGE_REGISTRY: ghcr.io
       IMAGE_NAMESPACE: ${{ github.repository_owner }}
       IMAGE_NAME: hermes-agent
-      IMAGE_TAG: test-latest
+      IMAGE_TAG: test-${{ github.sha }}
       GHCR_USERNAME: ${{ secrets.GHCR_USERNAME || github.actor }}
       GHCR_TOKEN: ${{ secrets.GHCR_TOKEN || github.token }}
+      HERMES_API_KEY: ${{ secrets.HERMES_API_KEY }}
     steps:
       - name: Fetch deployment files
         env:
