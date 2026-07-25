@@ -130,6 +130,16 @@ _PRICE_INTENT_RE = re.compile(
     r"(?:报价|价格|售价|费用|折扣|优惠|多少钱|price|pricing|quote|discount|cost)",
     re.IGNORECASE,
 )
+_PRICE_INTENT_CLAUSE_SPLIT_RE = re.compile(
+    r"(?:[；;。.!！？?\n]+|但(?:是)?|不过|然而|\bbut\b|\bhowever\b)",
+    re.IGNORECASE,
+)
+_NEGATED_PRICE_INTENT_RE = re.compile(
+    r"(?:不(?:得|涉及|包含|含|添加|需要|要|提及|写|发布|使用|讨论)?|"
+    r"无|无需|禁止|排除|避免|"
+    r"\b(?:no|not|without|exclude|omit|avoid|do\s+not|don't)\b)",
+    re.IGNORECASE,
+)
 _PRICE_VALUE_RE = re.compile(
     r"(?:[¥￥$€£]\s*\d|\d+(?:\.\d+)?\s*(?:元|万元|美元|usd|rmb|%\s*(?:off|折)))",
     re.IGNORECASE,
@@ -482,7 +492,12 @@ def _commercial_gate(
         for context in contexts
         if context.record_type == "business_offer" and _source_text(context)
     ]
-    price_sensitive = bool(_PRICE_INTENT_RE.search(rendered_direction)) or any(
+    price_requested = any(
+        _PRICE_INTENT_RE.search(clause)
+        and not _NEGATED_PRICE_INTENT_RE.search(clause)
+        for clause in _PRICE_INTENT_CLAUSE_SPLIT_RE.split(rendered_direction)
+    )
+    price_sensitive = price_requested or any(
         _PRICE_VALUE_RE.search(block.text) for block in blocks
     )
     if price_sensitive and len(offers) != 1:

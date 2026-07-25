@@ -432,6 +432,36 @@ def test_commercial_business_offer_contiguous_excerpt_is_allowed():
     assert public_text not in (output.master_content or "")
 
 
+@pytest.mark.parametrize(
+    "objective",
+    [
+        "不涉及报价、活动、折扣或交付承诺，只说明已批准能力。",
+        "Do not include price, quote, discount, or cost; use approved capability only.",
+    ],
+)
+def test_commercial_explicit_no_offer_direction_does_not_require_business_offer(
+    objective,
+):
+    capability = _context(
+        "cap-no-offer",
+        "commercial",
+        "company_public",
+        "capability",
+        content="已批准能力：内容任务保留人工终审与排期确认。",
+    )
+    request = _request(
+        [capability],
+        [_claim(capability.content, "fact", [capability.record_id])],
+        objective=objective,
+    )
+
+    output = _run(OperatorRole.COMMERCIAL, request)
+
+    assert output.status == ContentStatus.CONTENT_READY.value
+    assert output.critic.passed is True
+    assert "unique_public_business_offer_required" not in output.critic.errors
+
+
 def test_commercial_offer_excerpt_cannot_mix_non_offer_evidence() -> None:
     public_text = "标准公开方案：每月 3000 元，适用于已批准渠道。"
     excerpt = "每月 3000 元"
