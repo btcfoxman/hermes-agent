@@ -168,6 +168,28 @@ def test_commercial_price_intent_without_unique_offer_requests_input():
     assert all("¥99" not in claim.text for claim in output.claims)
 
 
+def test_commercial_explicit_no_offer_intent_uses_approved_capability_without_offer():
+    capability = _context(
+        "cap-1",
+        "commercial",
+        "company_public",
+        "capability",
+        content="已批准的自动化内容运营能力。",
+    )
+
+    output = _run(
+        OperatorRegistry(),
+        OperatorRole.COMMERCIAL,
+        _request("仅形成能力说明，不涉及报价、活动、折扣或交付承诺"),
+        [capability],
+    )
+
+    assert output.status == OutputStatus.PROPOSAL.value
+    assert output.claims[0].text == capability.content
+    assert "missing_unique_active_offer" not in {risk.code for risk in output.risk_flags}
+    assert output.questions == []
+
+
 def test_commercial_offer_text_is_copied_from_the_authorized_record():
     offer = _context(
         "offer-1",
@@ -246,7 +268,7 @@ def test_commercial_model_cannot_invent_price_or_guarantee():
     assert output.claims[0].text == "Approved automation capability."
 
 
-def test_industry_single_non_primary_source_is_blocked_and_opinion_is_separate():
+def test_industry_single_non_primary_source_is_blocked_without_manifest_editorial_claim():
     source = _context(
         "source-1",
         "industry",
@@ -260,9 +282,40 @@ def test_industry_single_non_primary_source_is_blocked_and_opinion_is_separate()
 
     assert output.status == OutputStatus.EVIDENCE_INSUFFICIENT.value
     assert "single_source_unverified" in {risk.code for risk in output.risk_flags}
-    assert {claim.kind for claim in output.claims} == {ClaimKind.FACT.value, ClaimKind.OPINION.value}
-    fact = next(claim for claim in output.claims if claim.kind == ClaimKind.FACT.value)
+    assert {claim.kind for claim in output.claims} == {ClaimKind.FACT.value}
+    fact = output.claims[0]
     assert fact.evidence_ids == ["source-1"]
+    assert output.proposal is not None
+    assert "编辑观点" in output.proposal.angle
+    assert "missing_fact_opinion_separation" not in {
+        risk.code for risk in output.risk_flags
+    }
+
+
+def test_industry_official_fact_keeps_real_evidence_and_no_source_free_claim():
+    source = _context(
+        "official-1",
+        "industry",
+        "industry",
+        "source_item",
+        content="供应商发布了经批准记录的新版本。",
+        source_uri="https://official.test/releases/v2",
+        source_tier="official",
+    )
+
+    output = _run(OperatorRegistry(), OperatorRole.INDUSTRY, _request(), [source])
+
+    assert output.status == OutputStatus.PROPOSAL.value
+    assert [
+        (claim.text, claim.kind, claim.evidence_ids)
+        for claim in output.claims
+    ] == [
+        (
+            "供应商发布了经批准记录的新版本。",
+            ClaimKind.FACT.value,
+            ["official-1"],
+        )
+    ]
 
 
 def test_industry_two_independent_sources_can_form_a_proposal():

@@ -171,10 +171,7 @@ def test_three_roles_compose_safe_fallback_with_exact_evidence_and_all_channels(
             source_uri="https://vendor.example/releases/model",
             source_tier="official",
         )
-        claims = [
-            _claim(context.content, "fact", [context.record_id]),
-            _claim("编辑观点：这项变化值得持续观察。", "opinion", [], "opinion"),
-        ]
+        claims = [_claim(context.content, "fact", [context.record_id])]
     else:
         context = _context(
             "card-1",

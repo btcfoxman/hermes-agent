@@ -408,8 +408,20 @@ def _fact_claim(
     )
 
 
-_PRICE_INTENT_RE = re.compile(
-    r"(?:报价|价格|售价|费用|折扣|优惠|多少钱|price|pricing|quote|discount|cost)", re.IGNORECASE
+_OFFER_INTENT_RE = re.compile(
+    r"(?:报价|价格|售价|费用|折扣|优惠|多少钱|活动|促销|交付(?:承诺|周期|日期)|"
+    r"price|pricing|quote|discount|cost|offer|promotion|campaign|delivery commitment)",
+    re.IGNORECASE,
+)
+_OFFER_INTENT_CLAUSE_SPLIT_RE = re.compile(
+    r"(?:[，,；;。.!！？?\n]+|但(?:是)?|不过|然而|\bbut\b|\bhowever\b)",
+    re.IGNORECASE,
+)
+_NEGATED_OFFER_INTENT_RE = re.compile(
+    r"(?:不(?:得|涉及|包含|含|添加|需要|要|提及|写|发布|使用|讨论)?|"
+    r"无|无需|禁止|排除|避免|"
+    r"\b(?:no|not|without|exclude|omit|avoid|do\s+not|don't)\b)",
+    re.IGNORECASE,
 )
 _PRICE_VALUE_RE = re.compile(
     r"(?:[¥￥$€£]\s*\d|\d+(?:\.\d+)?\s*(?:元|万元|美元|usd|rmb|%\s*(?:off|折)))",
@@ -431,12 +443,31 @@ def _active_offers(contexts: Sequence[AuthorizedContext]) -> List[AuthorizedCont
     ]
 
 
+def _commercial_offer_requested(request: OperatorProposeRequest) -> bool:
+    """Treat explicit no-offer wording as a constraint, not a request.
+
+    On revise, a human change request that mentions offer terms is the latest
+    intent and therefore overrides the earlier objective.
+    """
+
+    change_request = str(getattr(request, "change_request", "") or "").strip()
+    intent_text = (
+        change_request
+        if _OFFER_INTENT_RE.search(change_request)
+        else f"{request.objective}\n{request.topic}"
+    )
+    for clause in _OFFER_INTENT_CLAUSE_SPLIT_RE.split(intent_text):
+        if _OFFER_INTENT_RE.search(clause) and not _NEGATED_OFFER_INTENT_RE.search(clause):
+            return True
+    return False
+
+
 def _commercial_fallback(
     request: OperatorProposeRequest,
     contexts: Sequence[AuthorizedContext],
 ) -> Dict[str, Any]:
     offers = _active_offers(contexts)
-    price_requested = bool(_PRICE_INTENT_RE.search(f"{request.objective}\n{request.topic}"))
+    price_requested = _commercial_offer_requested(request)
     claims = [_fact_claim(context) for context in contexts if context.record_type != "business_offer"][:8]
     for offer in offers[:1] if price_requested and len(offers) == 1 else []:
         public_text = str(offer.structured_data.get("public_text") or "").strip()
@@ -505,15 +536,6 @@ def _industry_fallback(
         )
         for text, rows in list(grouped_sources.items())[:8]
     ]
-    if industry_sources:
-        claims.append(
-            OperatorClaim(
-                text="编辑观点：说明该变化为何重要、影响谁，以及后续应观察什么；这不是来源事实。",
-                kind=ClaimKind.OPINION,
-                evidence_ids=[],
-                verification_status=VerificationStatus.OPINION,
-            )
-        )
     unsupported_claims = []
     for text, rows in grouped_sources.items():
         source_domains = {
@@ -802,14 +824,6 @@ def normalize_output(
     risk_codes = {risk.code for risk in risks}
     if role is OperatorRole.INDUSTRY:
         facts = [claim for claim in claims if claim.kind == ClaimKind.FACT.value]
-        opinions = [claim for claim in claims if claim.kind == ClaimKind.OPINION.value]
-        if facts and not opinions:
-            risks.append(
-                _risk(
-                    "missing_fact_opinion_separation",
-                    "Industry output must contain a separately labelled editorial opinion.",
-                )
-            )
         if any(claim.verification_status == VerificationStatus.NEEDS_EVIDENCE.value for claim in facts):
             if "unsupported_fact" not in risk_codes:
                 risks.append(_risk("unsupported_fact", "Industry facts require authorized evidence.", blocking=True))
