@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from copy import deepcopy
 from datetime import datetime, timezone
 
@@ -112,8 +114,44 @@ def _run(
     )
 
 
+def _candidate_from_required_refs(
+    payload: dict,
+    channels: list[str],
+) -> dict:
+    blocks = [
+        {"block_ref": block["block_ref"]}
+        for block in payload["canonical_block_registry"]
+        if block["required"]
+    ]
+    return {
+        "_model": "structured-ref-test-model",
+        "blocks": deepcopy(blocks),
+        "platform_variants": [
+            {
+                "platform": channel,
+                "blocks": deepcopy(blocks),
+            }
+            for channel in channels
+        ],
+    }
+
+
 @pytest.mark.parametrize("role", list(OperatorRole))
 def test_three_roles_compose_safe_fallback_with_exact_evidence_and_all_channels(role):
+    expected_templates = {
+        OperatorRole.COMMERCIAL: {
+            "沟通建议：结合具体业务场景判断适用性，并由人工确认下一步。",
+            "如需判断适用性，请提交具体业务场景，由人工商务沟通。",
+        },
+        OperatorRole.INDUSTRY: {
+            "编辑说明：以下分析严格区分来源事实与编辑观点。",
+            "欢迎围绕公开证据分享不同观察。",
+        },
+        OperatorRole.PERSONAL_IP: {
+            "先看已确认的经历与观点，再讨论其中的启发。",
+            "欢迎分享你的观察与不同视角。",
+        },
+    }
     if role is OperatorRole.COMMERCIAL:
         context = _context(
             "cap-1",
@@ -166,6 +204,11 @@ def test_three_roles_compose_safe_fallback_with_exact_evidence_and_all_channels(
     assert all(block.evidence_ids == [context.record_id] for block in exact_blocks)
     assert context.content in (output.master_content or "")
     assert all(context.content in variant.body for variant in output.platform_variants)
+    templates = [block for block in output.blocks if block.origin == "server_template"]
+    assert {block.text for block in templates} == expected_templates[role]
+    assert all(block.locked is True for block in templates)
+    assert all(block.required is False for block in templates)
+    assert all(len(block.binding_hash) == 64 for block in templates)
 
 
 def test_claim_text_drift_blocks_every_publishable_field():
@@ -223,6 +266,57 @@ def test_only_claim_references_are_disclosed_to_the_model():
     assert [context.record_id for context in visible] == [approved.record_id]
     assert [context["record_id"] for context in payload["authorized_context"]] == [approved.record_id]
     assert unrelated.content not in str(payload)
+
+
+def test_content_request_exposes_server_owned_canonical_block_refs():
+    approved = _context(
+        "approved-ref",
+        "commercial",
+        "company_public",
+        "capability",
+        content="Approved public capability.",
+    )
+    request = _request(
+        [approved],
+        [_claim(approved.content, "fact", [approved.record_id])],
+    )
+
+    payload = content_request_payload(
+        OperatorRole.COMMERCIAL,
+        request,
+        request.authorized_context,
+    )
+
+    registry = payload["canonical_block_registry"]
+    required = [block for block in registry if block["required"]]
+    assert len(required) == 1
+    assert required[0]["text"] == approved.content
+    assert required[0]["evidence_ids"] == [approved.record_id]
+    assert required[0]["origin"] == "approved_claim"
+    assert required[0]["locked"] is True
+    assert required[0]["block_ref"] == required[0]["binding_hash"]
+    assert len(required[0]["block_ref"]) == 64
+    canonical = {
+        "kind": required[0]["kind"],
+        "text": required[0]["text"],
+        "claim_id": required[0]["claim_id"] or None,
+        "evidence_ids": required[0]["evidence_ids"],
+        "origin": required[0]["origin"],
+        "locked": required[0]["locked"],
+        "required": required[0]["required"],
+    }
+    expected_hash = hashlib.sha256(
+        json.dumps(
+            canonical,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    assert required[0]["binding_hash"] == expected_hash
+    assert payload["response_contract"]["blocks"][0] == {
+        "block_ref": "one exact block_ref from canonical_block_registry"
+    }
 
 
 def test_commercial_internal_context_is_readable_but_never_publishable_or_model_visible():
@@ -441,7 +535,7 @@ def test_commercial_model_cannot_add_price_promise_or_capability(unsafe_text):
     assert output.status == ContentStatus.EVIDENCE_INSUFFICIENT.value
     assert output.master_content is None
     assert unsafe_text not in output.model_dump_json()
-    assert any(error.startswith("unsafe_model_freeform") for error in output.critic.errors)
+    assert any(error.startswith("model_block_ref_required") for error in output.critic.errors)
 
 
 def test_approved_commercial_effect_guarantee_is_still_blocked():
@@ -584,7 +678,7 @@ def test_industry_official_fact_cannot_launder_unrelated_secondary_fact():
     )
 
 
-def test_industry_two_independent_sources_for_same_fact_pass_and_model_opinion_is_labelled():
+def test_industry_two_independent_sources_allow_server_template_refs():
     exact_fact = "Two independent publishers report the same exact statement."
     sources = [
         _context(
@@ -613,13 +707,26 @@ def test_industry_two_independent_sources_for_same_fact_pass_and_model_opinion_i
     registry = OperatorRegistry()
     authorized = registry.authorize(OperatorRole.INDUSTRY, sources, AS_OF)
     fallback = build_content_fallback(registry, OperatorRole.INDUSTRY, request, authorized)
-    candidate = deepcopy(fallback)
-    candidate["_model"] = "safe-test-model"
-    candidate["blocks"].append(
-        {"kind": "opinion", "text": "变化的长期影响仍需观察。", "evidence_ids": []}
+    payload = content_request_payload(
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
     )
+    candidate = _candidate_from_required_refs(payload, request.channels)
+    candidate["_model"] = "safe-test-model"
+    transition = next(
+        block
+        for block in payload["canonical_block_registry"]
+        if block["text"] == "编辑说明：以下分析严格区分来源事实与编辑观点。"
+    )
+    cta = next(
+        block
+        for block in payload["canonical_block_registry"]
+        if block["text"] == "欢迎围绕公开证据分享不同观察。"
+    )
+    candidate["blocks"].append({"block_ref": transition["block_ref"]})
     candidate["platform_variants"][0]["blocks"].append(
-        {"kind": "transition", "text": "先看已核验事实，再看后续影响。", "evidence_ids": []}
+        {"block_ref": cta["block_ref"]}
     )
 
     output = normalize_content_output(
@@ -633,12 +740,15 @@ def test_industry_two_independent_sources_for_same_fact_pass_and_model_opinion_i
 
     assert output.status == ContentStatus.CONTENT_READY.value
     assert output.critic.passed is True
-    assert "变化的长期影响仍需观察" not in (output.master_content or "")
-    assert "先看已核验事实，再看后续影响" not in output.platform_variants[0].body
-    assert any(
-        warning.startswith("discarded_unapproved_model_freeform")
-        for warning in output.critic.warnings
+    assert transition["text"] in (output.master_content or "")
+    assert cta["text"] in output.platform_variants[0].body
+    selected_template = next(
+        block for block in output.blocks if block.text == transition["text"]
     )
+    assert selected_template.origin == "server_template"
+    assert selected_template.locked is True
+    assert selected_template.required is False
+    assert selected_template.binding_hash == transition["block_ref"]
     exact = [block for block in output.blocks if block.source_exact]
     assert {block.text for block in exact} == {source.content for source in sources}
 
@@ -716,11 +826,62 @@ def test_model_cannot_smuggle_an_unsupported_fact_through_a_non_fact_label(kind)
         candidate,
     )
 
-    assert output.status == ContentStatus.CONTENT_READY.value
+    assert output.status == ContentStatus.EVIDENCE_INSUFFICIENT.value
     assert unsupported not in output.model_dump_json()
     assert any(
-        warning.startswith("discarded_unapproved_model_freeform")
-        for warning in output.critic.warnings
+        error.startswith("model_block_ref_required")
+        for error in output.critic.errors
+    )
+
+
+def test_plausible_transition_label_cannot_smuggle_a_model_authored_claim():
+    source = _context(
+        "official-transition-attack",
+        "industry",
+        "industry",
+        "source_item",
+        content="OpenAI published an official product update.",
+        source_uri="https://openai.com/news/",
+        source_tier="official",
+    )
+    request = _request(
+        [source],
+        [_claim(source.content, "fact", [source.record_id])],
+    )
+    registry = OperatorRegistry()
+    authorized = registry.authorize(OperatorRole.INDUSTRY, [source], AS_OF)
+    fallback = build_content_fallback(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    payload = content_request_payload(
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    candidate = _candidate_from_required_refs(payload, request.channels)
+    attack = "以下值得关注：OpenAI 是全球最领先的公司。"
+    candidate["blocks"].append(
+        {"kind": "transition", "text": attack, "evidence_ids": []}
+    )
+
+    output = normalize_content_output(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+        fallback,
+        candidate,
+    )
+
+    assert output.status == ContentStatus.EVIDENCE_INSUFFICIENT.value
+    assert output.master_content is None
+    assert attack not in output.model_dump_json()
+    assert any(
+        error.startswith("model_block_ref_required:master")
+        for error in output.critic.errors
     )
 
 
@@ -759,7 +920,7 @@ def test_industry_model_fact_outside_approved_claims_blocks_the_entire_draft():
     assert output.status == ContentStatus.EVIDENCE_INSUFFICIENT.value
     assert output.master_content is None
     assert "Invented market result" not in output.model_dump_json()
-    assert any(error.startswith("unsupported_model_claim") for error in output.critic.errors)
+    assert any(error.startswith("model_block_ref_required") for error in output.critic.errors)
 
 
 def test_master_and_variant_bodies_are_deterministically_rendered_from_safe_blocks():
@@ -779,7 +940,12 @@ def test_master_and_variant_bodies_are_deterministically_rendered_from_safe_bloc
     registry = OperatorRegistry()
     authorized = registry.authorize(OperatorRole.INDUSTRY, [source], AS_OF)
     fallback = build_content_fallback(registry, OperatorRole.INDUSTRY, request, authorized)
-    candidate = deepcopy(fallback)
+    payload = content_request_payload(
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    candidate = _candidate_from_required_refs(payload, request.channels)
     candidate["_model"] = "body-injection-test-model"
     candidate["master_content"] = "Invented text outside structured blocks."
     candidate["platform_variants"][0]["body"] = "Invented variant body."
@@ -800,6 +966,274 @@ def test_master_and_variant_bodies_are_deterministically_rendered_from_safe_bloc
     assert all(
         variant.body == "\n\n".join(block.text for block in variant.blocks)
         for variant in output.platform_variants
+    )
+
+
+@pytest.mark.parametrize(
+    ("tamper", "error_prefix"),
+    [
+        ("ref", "unknown_model_block_ref"),
+        ("text", "tampered_model_block_ref"),
+        ("evidence", "tampered_model_block_ref"),
+    ],
+)
+def test_canonical_block_ref_tampering_fails_closed(tamper, error_prefix):
+    source = _context(
+        "official-ref",
+        "industry",
+        "industry",
+        "source_item",
+        content="Official exact statement.",
+        source_uri="https://official.example/release",
+        source_tier="official",
+    )
+    request = _request(
+        [source],
+        [_claim(source.content, "fact", [source.record_id])],
+    )
+    registry = OperatorRegistry()
+    authorized = registry.authorize(OperatorRole.INDUSTRY, [source], AS_OF)
+    fallback = build_content_fallback(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    payload = content_request_payload(
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    candidate = _candidate_from_required_refs(payload, request.channels)
+    if tamper == "ref":
+        candidate["blocks"][0]["block_ref"] = "f" * 64
+    elif tamper == "text":
+        candidate["blocks"][0]["text"] = "Forged model text."
+    else:
+        candidate["blocks"][0]["evidence_ids"] = ["forged-evidence"]
+
+    output = normalize_content_output(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+        fallback,
+        candidate,
+    )
+
+    assert output.status == ContentStatus.EVIDENCE_INSUFFICIENT.value
+    assert output.master_content is None
+    assert "Forged model text" not in output.model_dump_json()
+    assert "forged-evidence" not in output.model_dump_json()
+    assert any(
+        error.startswith(error_prefix) for error in output.critic.errors
+    )
+
+
+def test_model_ref_order_and_server_templates_create_distinct_channel_drafts():
+    source = _context(
+        "cap-structured",
+        "commercial",
+        "company_public",
+        "capability",
+        content="已批准能力：把内容任务交接到人工终审。",
+    )
+    request = _request(
+        [source],
+        [_claim(source.content, "fact", [source.record_id])],
+    )
+    registry = OperatorRegistry()
+    authorized = registry.authorize(OperatorRole.COMMERCIAL, [source], AS_OF)
+    fallback = build_content_fallback(
+        registry,
+        OperatorRole.COMMERCIAL,
+        request,
+        authorized,
+    )
+    payload = content_request_payload(
+        OperatorRole.COMMERCIAL,
+        request,
+        authorized,
+    )
+    required_ref = next(
+        block["block_ref"]
+        for block in payload["canonical_block_registry"]
+        if block["required"]
+    )
+    transition = next(
+        block
+        for block in payload["canonical_block_registry"]
+        if block["kind"] == "transition" and block["origin"] == "server_template"
+    )
+    cta = next(
+        block
+        for block in payload["canonical_block_registry"]
+        if block["kind"] == "cta" and block["origin"] == "server_template"
+    )
+    candidate = {
+        "_model": "structured-editorial-model",
+        "blocks": [
+            {"block_ref": required_ref},
+            {"block_ref": transition["block_ref"]},
+        ],
+        "platform_variants": [
+            {
+                "platform": "wechat_mp",
+                "blocks": [
+                    {"block_ref": required_ref},
+                    {"block_ref": cta["block_ref"]},
+                ],
+            },
+            {
+                "platform": "xiaohongshu",
+                "blocks": [
+                    {"block_ref": transition["block_ref"]},
+                    {"block_ref": required_ref},
+                ],
+            },
+        ],
+    }
+
+    output = normalize_content_output(
+        registry,
+        OperatorRole.COMMERCIAL,
+        request,
+        authorized,
+        fallback,
+        candidate,
+    )
+
+    assert output.status == ContentStatus.CONTENT_READY.value
+    assert output.critic.passed is True
+    assert transition["text"] in (output.master_content or "")
+    assert output.platform_variants[0].body != output.platform_variants[1].body
+    assert output.platform_variants[0].blocks[0].binding_hash == required_ref
+    assert output.platform_variants[1].blocks[-1].binding_hash == required_ref
+    assert all(
+        any(block.required for block in variant.blocks)
+        for variant in output.platform_variants
+    )
+    server_templates = [
+        block
+        for block in [
+            *output.blocks,
+            *(block for variant in output.platform_variants for block in variant.blocks),
+        ]
+        if block.origin == "server_template"
+    ]
+    assert server_templates
+    assert all(block.locked is True for block in server_templates)
+    assert all(block.required is False for block in server_templates)
+    assert all(len(block.binding_hash) == 64 for block in server_templates)
+    approved_claim = next(block for block in output.blocks if block.required)
+    assert approved_claim.origin == "approved_claim"
+    assert approved_claim.locked is True
+    assert approved_claim.binding_hash == required_ref
+
+
+def test_each_model_channel_plan_must_cover_every_required_claim():
+    source = _context(
+        "cap-required",
+        "commercial",
+        "company_public",
+        "capability",
+        content="Approved public capability.",
+    )
+    request = _request(
+        [source],
+        [_claim(source.content, "fact", [source.record_id])],
+    )
+    registry = OperatorRegistry()
+    authorized = registry.authorize(OperatorRole.COMMERCIAL, [source], AS_OF)
+    fallback = build_content_fallback(
+        registry,
+        OperatorRole.COMMERCIAL,
+        request,
+        authorized,
+    )
+    payload = content_request_payload(
+        OperatorRole.COMMERCIAL,
+        request,
+        authorized,
+    )
+    candidate = _candidate_from_required_refs(payload, request.channels)
+    candidate["platform_variants"][0]["blocks"] = [
+        {
+            "kind": "transition",
+            "text": "先看已核验事实，再讨论具体场景。",
+            "evidence_ids": [],
+        }
+    ]
+
+    output = normalize_content_output(
+        registry,
+        OperatorRole.COMMERCIAL,
+        request,
+        authorized,
+        fallback,
+        candidate,
+    )
+
+    assert output.status == ContentStatus.EVIDENCE_INSUFFICIENT.value
+    assert output.platform_variants == []
+    assert any(
+        error.startswith(
+            "required_model_blocks_missing:variant-wechat_mp"
+        )
+        for error in output.critic.errors
+    )
+
+
+def test_new_industry_model_opinion_is_not_accepted():
+    source = _context(
+        "official-opinion-gate",
+        "industry",
+        "industry",
+        "source_item",
+        content="Official exact statement.",
+        source_uri="https://official.example/release",
+        source_tier="official",
+    )
+    request = _request(
+        [source],
+        [_claim(source.content, "fact", [source.record_id])],
+    )
+    registry = OperatorRegistry()
+    authorized = registry.authorize(OperatorRole.INDUSTRY, [source], AS_OF)
+    fallback = build_content_fallback(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    payload = content_request_payload(
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    candidate = _candidate_from_required_refs(payload, request.channels)
+    candidate["blocks"].append(
+        {
+            "kind": "opinion",
+            "text": "编辑观点：这项变化值得持续观察。",
+            "evidence_ids": [],
+        }
+    )
+
+    output = normalize_content_output(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+        fallback,
+        candidate,
+    )
+
+    assert output.status == ContentStatus.EVIDENCE_INSUFFICIENT.value
+    assert output.master_content is None
+    assert any(
+        error.startswith("model_block_ref_required")
+        for error in output.critic.errors
     )
 
 
@@ -894,14 +1328,95 @@ def test_personal_approved_viewpoint_stays_verbatim_and_keeps_card_evidence():
 
     assert output.status == ContentStatus.CONTENT_READY.value
     assert output.critic.passed is True
-    assert len(output.blocks) == 1
-    block = output.blocks[0]
+    block = next(block for block in output.blocks if block.required)
     assert block.kind == ContentBlockKind.OPINION.value
     assert block.text == viewpoint.content
     assert block.evidence_ids == [viewpoint.record_id]
     assert block.verification_status == "verified"
     assert block.source_exact is True
     assert all(viewpoint.content in variant.body for variant in output.platform_variants)
+
+
+def test_personal_server_template_refs_are_selectable_without_dropping_required_claims():
+    experience = _context(
+        "experience-template-ref",
+        "personal_ip",
+        "personal_approved",
+        "experience",
+        content="第一次带团队出海时，我暂停了未经验证的投放。",
+    )
+    request = _request(
+        [experience],
+        [_claim(experience.content, "experience", [experience.record_id])],
+    )
+    registry = OperatorRegistry()
+    authorized = registry.authorize(
+        OperatorRole.PERSONAL_IP,
+        [experience],
+        AS_OF,
+    )
+    fallback = build_content_fallback(
+        registry,
+        OperatorRole.PERSONAL_IP,
+        request,
+        authorized,
+    )
+    payload = content_request_payload(
+        OperatorRole.PERSONAL_IP,
+        request,
+        authorized,
+    )
+    required_refs = [
+        block["block_ref"]
+        for block in payload["canonical_block_registry"]
+        if block["required"]
+    ]
+    template_refs = [
+        block["block_ref"]
+        for block in payload["canonical_block_registry"]
+        if block["origin"] == "server_template"
+    ]
+    selected = [
+        {"block_ref": block_ref}
+        for block_ref in [*required_refs, *template_refs]
+    ]
+    candidate = {
+        "_model": "structured-ref-test-model",
+        "blocks": deepcopy(selected),
+        "platform_variants": [
+            {"platform": channel, "blocks": deepcopy(selected)}
+            for channel in request.channels
+        ],
+    }
+
+    output = normalize_content_output(
+        registry,
+        OperatorRole.PERSONAL_IP,
+        request,
+        authorized,
+        fallback,
+        candidate,
+    )
+
+    assert output.status == ContentStatus.CONTENT_READY.value
+    assert output.critic.passed is True
+    assert {
+        block.text
+        for block in output.blocks
+        if block.origin == "server_template"
+    } == {
+        "先看已确认的经历与观点，再讨论其中的启发。",
+        "欢迎分享你的观察与不同视角。",
+    }
+    assert all(
+        {
+            block.binding_hash
+            for block in variant.blocks
+            if block.required
+        }
+        == set(required_refs)
+        for variant in output.platform_variants
+    )
 
 
 def test_personal_model_cannot_add_first_person_experience_or_stance():

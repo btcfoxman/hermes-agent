@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from enum import Enum
@@ -40,6 +41,13 @@ class ContentBlockKind(str, Enum):
     CTA = "cta"
 
 
+class ContentBlockOrigin(str, Enum):
+    LEGACY = "legacy"
+    APPROVED_CLAIM = "approved_claim"
+    SERVER_TEMPLATE = "server_template"
+    MODEL_EDITORIAL = "model_editorial"
+
+
 class OperatorComposeRequest(OperatorProposeRequest):
     """A frozen editorial direction plus its currently authorized evidence.
 
@@ -61,6 +69,10 @@ class ContentBlock(StrictModel):
     evidence_ids: List[str] = Field(default_factory=list, max_length=20)
     verification_status: VerificationStatus
     source_exact: bool = False
+    origin: ContentBlockOrigin = ContentBlockOrigin.LEGACY
+    locked: bool = False
+    required: bool = False
+    binding_hash: str = Field(default="", max_length=64)
 
 
 class PlatformVariant(StrictModel):
@@ -135,8 +147,6 @@ _PERSONAL_ATTRIBUTION_RE = re.compile(
     r"\b(?:i|i['’]m|i['’]ve|me|my|mine|myself|we|us|our|ours|ourselves)\b)",
     re.IGNORECASE,
 )
-_HTML_RE = re.compile(r"<\s*(?:script|iframe|object|embed|style|link)\b", re.IGNORECASE)
-_NUMBER_RE = re.compile(r"\d")
 
 
 def _value(value: Any) -> str:
@@ -149,6 +159,44 @@ def _dump(model: Any) -> Dict[str, Any]:
     if hasattr(model, "json"):
         return json.loads(model.json())
     return dict(model)
+
+
+def _binding_hash(data: Dict[str, Any]) -> str:
+    payload = {
+        "kind": _value(data.get("kind")),
+        "text": str(data.get("text") or ""),
+        "claim_id": data.get("claim_id") or None,
+        "evidence_ids": [str(value) for value in data.get("evidence_ids") or []],
+        "origin": _value(data.get("origin") or ContentBlockOrigin.LEGACY),
+        "locked": bool(data.get("locked")),
+        "required": bool(data.get("required")),
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _stamp_block(
+    block: ContentBlock,
+    *,
+    origin: ContentBlockOrigin,
+    locked: bool,
+    required: bool,
+) -> ContentBlock:
+    data = _dump(block)
+    data.update(
+        {
+            "origin": origin.value,
+            "locked": locked,
+            "required": required,
+        }
+    )
+    data["binding_hash"] = _binding_hash(data)
+    return ContentBlock(**data)
 
 
 def _source_text(context: AuthorizedContext) -> str:
@@ -264,14 +312,19 @@ def _build_approved_blocks(
             if key not in seen:
                 seen.add(key)
                 blocks.append(
-                    ContentBlock(
-                        block_id=f"block-{len(blocks) + 1}",
-                        kind=ContentBlockKind.OPINION,
-                        text=claim.text,
-                        claim_id=claim_id,
-                        evidence_ids=[],
-                        verification_status=VerificationStatus.OPINION,
-                        source_exact=False,
+                    _stamp_block(
+                        ContentBlock(
+                            block_id=f"block-{len(blocks) + 1}",
+                            kind=ContentBlockKind.OPINION,
+                            text=claim.text,
+                            claim_id=claim_id,
+                            evidence_ids=[],
+                            verification_status=VerificationStatus.OPINION,
+                            source_exact=False,
+                        ),
+                        origin=ContentBlockOrigin.APPROVED_CLAIM,
+                        locked=True,
+                        required=True,
                     )
                 )
             continue
@@ -332,18 +385,24 @@ def _build_approved_blocks(
             continue
         seen.add(key)
         blocks.append(
-            ContentBlock(
-                block_id=f"block-{len(blocks) + 1}",
-                kind=block_kind,
-                text=claim.text,
-                claim_id=claim_id,
-                evidence_ids=matching_ids,
-                verification_status=(
-                    VerificationStatus.OPINION
-                    if kind == ClaimKind.OPINION.value and role is OperatorRole.INDUSTRY
-                    else VerificationStatus.VERIFIED
+            _stamp_block(
+                ContentBlock(
+                    block_id=f"block-{len(blocks) + 1}",
+                    kind=block_kind,
+                    text=claim.text,
+                    claim_id=claim_id,
+                    evidence_ids=matching_ids,
+                    verification_status=(
+                        VerificationStatus.OPINION
+                        if kind == ClaimKind.OPINION.value
+                        and role is OperatorRole.INDUSTRY
+                        else VerificationStatus.VERIFIED
+                    ),
+                    source_exact=True,
                 ),
-                source_exact=True,
+                origin=ContentBlockOrigin.APPROVED_CLAIM,
+                locked=True,
+                required=True,
             )
         )
 
@@ -464,56 +523,99 @@ def _personal_gate(
     return False, "approved_personal_card_required"
 
 
-def _safe_freeform(role: OperatorRole, kind: str, text: str) -> bool:
-    if kind not in {
-        ContentBlockKind.OPINION.value,
-        ContentBlockKind.TRANSITION.value,
-        ContentBlockKind.CTA.value,
-    }:
-        return False
-    if not text or len(text) > 2_000 or _HTML_RE.search(text) or _NUMBER_RE.search(text):
-        return False
-    if role is OperatorRole.COMMERCIAL:
-        if _PRICE_VALUE_RE.search(text) or _PROMISE_RE.search(text) or _COMMERCIAL_ASSERTION_RE.search(text):
-            return False
-    if role is OperatorRole.PERSONAL_IP:
-        if kind == ContentBlockKind.OPINION.value or _PERSONAL_ATTRIBUTION_RE.search(text):
-            return False
-    return True
-
-
 def _fallback_freeform(role: OperatorRole, request: OperatorComposeRequest) -> List[ContentBlock]:
     blocks: List[ContentBlock] = []
     if role is OperatorRole.COMMERCIAL:
         blocks.append(
-            ContentBlock(
-                block_id="transition-commercial",
-                kind=ContentBlockKind.TRANSITION,
-                text="沟通建议：结合具体业务场景判断适用性，并由人工确认下一步。",
-                evidence_ids=[],
-                verification_status=VerificationStatus.OPINION,
-                source_exact=False,
+            _stamp_block(
+                ContentBlock(
+                    block_id="transition-commercial",
+                    kind=ContentBlockKind.TRANSITION,
+                    text="沟通建议：结合具体业务场景判断适用性，并由人工确认下一步。",
+                    evidence_ids=[],
+                    verification_status=VerificationStatus.OPINION,
+                    source_exact=False,
+                ),
+                origin=ContentBlockOrigin.SERVER_TEMPLATE,
+                locked=True,
+                required=False,
             )
         )
         blocks.append(
-            ContentBlock(
-                block_id="cta-commercial",
-                kind=ContentBlockKind.CTA,
-                text="如需判断适用性，请提交具体业务场景，由人工商务沟通。",
-                evidence_ids=[],
-                verification_status=VerificationStatus.OPINION,
-                source_exact=False,
+            _stamp_block(
+                ContentBlock(
+                    block_id="cta-commercial",
+                    kind=ContentBlockKind.CTA,
+                    text="如需判断适用性，请提交具体业务场景，由人工商务沟通。",
+                    evidence_ids=[],
+                    verification_status=VerificationStatus.OPINION,
+                    source_exact=False,
+                ),
+                origin=ContentBlockOrigin.SERVER_TEMPLATE,
+                locked=True,
+                required=False,
             )
         )
     elif role is OperatorRole.INDUSTRY:
         blocks.append(
-            ContentBlock(
-                block_id="transition-industry",
-                kind=ContentBlockKind.TRANSITION,
-                text="编辑说明：以下分析严格区分来源事实与编辑观点。",
-                evidence_ids=[],
-                verification_status=VerificationStatus.OPINION,
-                source_exact=False,
+            _stamp_block(
+                ContentBlock(
+                    block_id="transition-industry",
+                    kind=ContentBlockKind.TRANSITION,
+                    text="编辑说明：以下分析严格区分来源事实与编辑观点。",
+                    evidence_ids=[],
+                    verification_status=VerificationStatus.OPINION,
+                    source_exact=False,
+                ),
+                origin=ContentBlockOrigin.SERVER_TEMPLATE,
+                locked=True,
+                required=False,
+            )
+        )
+        blocks.append(
+            _stamp_block(
+                ContentBlock(
+                    block_id="cta-industry",
+                    kind=ContentBlockKind.CTA,
+                    text="欢迎围绕公开证据分享不同观察。",
+                    evidence_ids=[],
+                    verification_status=VerificationStatus.OPINION,
+                    source_exact=False,
+                ),
+                origin=ContentBlockOrigin.SERVER_TEMPLATE,
+                locked=True,
+                required=False,
+            )
+        )
+    elif role is OperatorRole.PERSONAL_IP:
+        blocks.append(
+            _stamp_block(
+                ContentBlock(
+                    block_id="transition-personal-ip",
+                    kind=ContentBlockKind.TRANSITION,
+                    text="先看已确认的经历与观点，再讨论其中的启发。",
+                    evidence_ids=[],
+                    verification_status=VerificationStatus.OPINION,
+                    source_exact=False,
+                ),
+                origin=ContentBlockOrigin.SERVER_TEMPLATE,
+                locked=True,
+                required=False,
+            )
+        )
+        blocks.append(
+            _stamp_block(
+                ContentBlock(
+                    block_id="cta-personal-ip",
+                    kind=ContentBlockKind.CTA,
+                    text="欢迎分享你的观察与不同视角。",
+                    evidence_ids=[],
+                    verification_status=VerificationStatus.OPINION,
+                    source_exact=False,
+                ),
+                origin=ContentBlockOrigin.SERVER_TEMPLATE,
+                locked=True,
+                required=False,
             )
         )
     return blocks
@@ -529,6 +631,8 @@ def _reindex(blocks: Sequence[ContentBlock], prefix: str = "block") -> List[Cont
         seen.add(key)
         data = _dump(block)
         data["block_id"] = f"{prefix}-{len(result) + 1}"
+        if not data.get("binding_hash"):
+            data["binding_hash"] = _binding_hash(data)
         result.append(ContentBlock(**data))
     return result
 
@@ -701,58 +805,122 @@ def _safe_candidate_blocks(
     *,
     prefix: str,
     template_blocks: Sequence[ContentBlock] = (),
+    allow_legacy_canonical: bool = False,
 ) -> tuple[List[ContentBlock], List[str], List[str]]:
-    additions: List[ContentBlock] = []
+    selected: List[ContentBlock] = []
     errors: List[str] = []
     warnings: List[str] = []
-    approved = {
-        (_value(block.kind), block.text, tuple(block.evidence_ids))
-        for block in approved_blocks
-        if block.source_exact
+
+    canonical_blocks = _reindex(
+        [*approved_blocks, *template_blocks],
+        prefix="canonical",
+    )
+    canonical_by_ref = {
+        block.binding_hash: block
+        for block in canonical_blocks
+        if block.binding_hash
     }
-    approved_editorial = {
-        (_value(block.kind), block.text, tuple(block.evidence_ids))
-        for block in approved_blocks
-        if not block.source_exact
+    canonical_by_legacy_key = {
+        (_value(block.kind), block.text, tuple(block.evidence_ids)): block
+        for block in canonical_blocks
     }
-    deterministic_templates = {
-        (_value(block.kind), block.text, tuple(block.evidence_ids))
-        for block in template_blocks
-    }
+    required_blocks = [block for block in approved_blocks if block.required]
+
     if raw_blocks is None:
-        return additions, errors, warnings
+        return selected, errors, warnings
     if not isinstance(raw_blocks, list):
-        return additions, [f"invalid_model_blocks:{prefix}"], warnings
+        return selected, [f"invalid_model_blocks:{prefix}"], warnings
+    if len(raw_blocks) > 80:
+        errors.append(f"too_many_model_blocks:{prefix}")
+
+    def echo_is_tampered(raw: Dict[str, Any], canonical: ContentBlock) -> bool:
+        expected = _dump(canonical)
+        scalar_fields = (
+            "kind",
+            "text",
+            "claim_id",
+            "verification_status",
+            "source_exact",
+            "origin",
+            "locked",
+            "required",
+            "binding_hash",
+        )
+        for field in scalar_fields:
+            if field not in raw:
+                continue
+            actual = raw.get(field)
+            wanted = expected.get(field)
+            if field in {"kind", "verification_status", "origin"}:
+                actual = _value(actual)
+                wanted = _value(wanted)
+            if actual != wanted:
+                return True
+        if "evidence_ids" in raw:
+            raw_evidence = raw.get("evidence_ids")
+            if not isinstance(raw_evidence, list):
+                return True
+            if [str(value) for value in raw_evidence] != canonical.evidence_ids:
+                return True
+        return False
+
     for index, raw in enumerate(raw_blocks[:80], start=1):
         if not isinstance(raw, dict):
             errors.append(f"invalid_model_block:{prefix}-{index}")
             continue
+
+        block_ref = str(raw.get("block_ref") or "").strip()
+        if block_ref:
+            canonical = canonical_by_ref.get(block_ref)
+            if canonical is None:
+                errors.append(f"unknown_model_block_ref:{prefix}-{index}")
+                continue
+            if echo_is_tampered(raw, canonical):
+                errors.append(f"tampered_model_block_ref:{prefix}-{index}")
+                continue
+            selected.append(canonical)
+            continue
+
         kind = str(raw.get("kind") or "").strip().lower()
         text = str(raw.get("text") or "").strip()
-        evidence_ids = [str(value) for value in raw.get("evidence_ids") or []]
-        if kind in {
-            ContentBlockKind.FACT.value,
-            ContentBlockKind.IDENTITY.value,
-            ContentBlockKind.EXPERIENCE.value,
-        } or (kind == ContentBlockKind.OPINION.value and evidence_ids):
-            if (kind, text, tuple(evidence_ids)) not in approved:
-                errors.append(f"unsupported_model_claim:{prefix}-{index}")
+        raw_evidence_ids = raw.get("evidence_ids") or []
+        if not isinstance(raw_evidence_ids, list):
+            errors.append(f"invalid_model_evidence_ids:{prefix}-{index}")
             continue
-        if (kind, text, tuple(evidence_ids)) in approved_editorial:
-            # The approved proposal may already contain a separately labelled
-            # industry opinion.  It is part of the frozen direction, not a new
-            # model suggestion, and is already present in the base blocks.
+        evidence_ids = [str(value) for value in raw_evidence_ids]
+        canonical = canonical_by_legacy_key.get(
+            (kind, text, tuple(evidence_ids))
+        )
+        if canonical is not None:
+            if not allow_legacy_canonical:
+                errors.append(f"model_block_ref_required:{prefix}-{index}")
+                continue
+            if echo_is_tampered(raw, canonical):
+                errors.append(f"tampered_model_block_ref:{prefix}-{index}")
+                continue
+            selected.append(canonical)
             continue
-        if (kind, text, tuple(evidence_ids)) in deterministic_templates:
-            continue
-        if not _safe_freeform(role, kind, text):
-            errors.append(f"unsafe_model_freeform:{prefix}-{index}")
-            continue
-        # A model-selected label is not proof that prose is non-factual.  Only
-        # frozen, human-approved editorial claims and deterministic templates
-        # may enter the rendered draft; all new free-form prose is discarded.
-        warnings.append(f"discarded_unapproved_model_freeform:{prefix}-{index}")
-    return additions[:8], errors, warnings
+
+        # Model-authored prose is intentionally fail-closed.  Labels such as
+        # "transition" or "cta" are model-controlled and therefore cannot
+        # prove that a sentence is non-factual.  The model may only select
+        # server-owned canonical blocks by their opaque block_ref.
+        errors.append(f"model_block_ref_required:{prefix}-{index}")
+
+    selected_refs = {
+        block.binding_hash for block in selected if block.binding_hash
+    }
+    missing = [
+        block.claim_id or block.binding_hash[:12]
+        for block in required_blocks
+        if block.binding_hash not in selected_refs
+    ]
+    if missing:
+        labels = ",".join(missing[:8])
+        if len(missing) > 8:
+            labels = f"{labels},+{len(missing) - 8}"
+        errors.append(f"required_model_blocks_missing:{prefix}:{labels}")
+    return selected, errors, warnings
 
 
 def _blocked_status(role: OperatorRole, errors: Sequence[str]) -> ContentStatus:
@@ -831,18 +999,25 @@ def normalize_content_output(
     fallback_errors = [str(value) for value in fallback.get("_fallback_errors") or []]
     errors = list(dict.fromkeys([*fallback_errors, *claim_errors]))
     warnings: List[str] = []
+    allow_legacy_canonical = (
+        str(candidate.get("_model") or "").strip().lower() == "fallback"
+    )
 
     base_blocks = [ContentBlock(**raw) for raw in fallback.get("blocks") or []]
-    master_additions, master_errors, master_warnings = _safe_candidate_blocks(
+    raw_master_blocks = candidate.get("blocks")
+    master_selection, master_errors, master_warnings = _safe_candidate_blocks(
         role,
-        candidate.get("blocks"),
+        raw_master_blocks,
         approved_blocks,
         prefix="master",
         template_blocks=base_blocks,
+        allow_legacy_canonical=allow_legacy_canonical,
     )
     errors.extend(master_errors)
     warnings.extend(master_warnings)
-    blocks = _reindex([*base_blocks, *master_additions])
+    blocks = _reindex(
+        base_blocks if raw_master_blocks is None else master_selection
+    )
 
     channels, channel_errors = _channel_plan(request.channels)
     errors.extend(channel_errors)
@@ -876,17 +1051,23 @@ def normalize_content_output(
         ]
         if not base_variant_blocks:
             base_variant_blocks = _platform_blocks(platform, base_blocks)
-        additions, variant_errors, variant_warnings = _safe_candidate_blocks(
+        raw_variant_blocks = raw.get("blocks")
+        variant_selection, variant_errors, variant_warnings = _safe_candidate_blocks(
             role,
-            raw.get("blocks"),
+            raw_variant_blocks,
             approved_blocks,
             prefix=f"variant-{platform}",
             template_blocks=base_variant_blocks,
+            allow_legacy_canonical=allow_legacy_canonical,
         )
         errors.extend(variant_errors)
         warnings.extend(variant_warnings)
         variant_blocks = _reindex(
-            [*base_variant_blocks, *additions],
+            (
+                base_variant_blocks
+                if raw_variant_blocks is None
+                else variant_selection
+            ),
             prefix=f"{platform}-block",
         )
         body = _render(variant_blocks)
@@ -1012,6 +1193,10 @@ def content_request_payload(
         )
     ]
     approved_blocks, _ = _build_approved_blocks(role, request, contexts)
+    canonical_blocks = _reindex(
+        [*approved_blocks, *_fallback_freeform(role, request)],
+        prefix="canonical",
+    )
     public_title = _safe_master_title(request, approved_blocks) if approved_blocks else ""
     public_key_points = [
         str(claim["text"])
@@ -1044,6 +1229,22 @@ def content_request_payload(
         },
         "claims": public_claims,
         "authorized_context": [_sanitized_context(context) for context in visible],
+        "canonical_block_registry": [
+            {
+                "block_ref": block.binding_hash,
+                "kind": _value(block.kind),
+                "text": block.text,
+                "claim_id": block.claim_id,
+                "evidence_ids": list(block.evidence_ids),
+                "verification_status": _value(block.verification_status),
+                "source_exact": block.source_exact,
+                "origin": _value(block.origin),
+                "locked": block.locked,
+                "required": block.required,
+                "binding_hash": block.binding_hash,
+            }
+            for block in canonical_blocks
+        ],
     }
 
     forbidden_texts = [
@@ -1071,10 +1272,8 @@ def content_request_payload(
         "master_title": "string",
         "blocks": [
             {
-                "kind": "fact|identity|experience|opinion|transition|cta",
-                "text": "string",
-                "evidence_ids": ["approved authorized record_id"],
-            }
+                "block_ref": "one exact block_ref from canonical_block_registry",
+            },
         ],
         "platform_variants": [
             {
@@ -1086,8 +1285,9 @@ def content_request_payload(
         ],
         "safety": [
             "Do not write master_content or variant body directly; the server renders normalized blocks.",
-            "Facts, identity, and experience must copy an approved claim verbatim with its evidence_ids.",
-            "New prose may only be an explicitly non-factual transition, CTA, or labelled editorial opinion.",
+            "Every block must be selected by block_ref from canonical_block_registry; never author or echo block text or evidence.",
+            "Every platform variant must include every registry block marked required, but may choose its own safe order.",
+            "Model-authored prose is never accepted, including prose labelled transition or CTA.",
         ],
     }
     return payload
