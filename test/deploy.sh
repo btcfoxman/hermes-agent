@@ -45,6 +45,15 @@ compose() {
     "$@"
 }
 
+probe_service_health() {
+  compose exec -T hermes-agent python -c '
+import urllib.request
+
+with urllib.request.urlopen("http://127.0.0.1:8095/health", timeout=10) as response:
+    assert response.status == 200
+'
+}
+
 probe_operator_endpoints() {
   compose exec -T hermes-agent python -c '
 import json
@@ -238,7 +247,7 @@ compose up -d --remove-orphans hermes-agent
 
 log "Waiting for canonical service and operator contracts"
 for i in $(seq 1 30); do
-  if curl -fsS "http://127.0.0.1:${HERMES_HOST_PORT}/health" >/dev/null \
+  if probe_service_health \
     && probe_operator_endpoints \
     && probe_compose_contracts; then
     if retry 3 10 probe_industry_claim_contract; then

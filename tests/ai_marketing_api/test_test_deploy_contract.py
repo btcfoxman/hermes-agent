@@ -43,12 +43,14 @@ def test_deploy_script_preserves_server_credentials_and_updates_only_canonical_h
     assert "probe_operator_endpoints" in deploy_script
     assert "probe_compose_contracts" in deploy_script
     assert "probe_industry_claim_contract" in deploy_script
+    assert "probe_service_health" in deploy_script
     assert 'result["model"]' not in deploy_script
     assert 'str(result.get("model") or "").lower() != "fallback"' in deploy_script
     assert '[(source_text, "fact", ["canonical-official-probe"])]' in deploy_script
     assert "retry 3 10 probe_industry_claim_contract" in deploy_script
     assert 'docker compose \\\n    --project-name "${COMPOSE_PROJECT_NAME}"' in deploy_script
-    assert 'http://127.0.0.1:${HERMES_HOST_PORT}/health' in deploy_script
+    assert '"http://127.0.0.1:8095/health"' in deploy_script
+    assert 'http://127.0.0.1:${HERMES_HOST_PORT}/health' not in deploy_script
     assert "compose pull hermes-agent" in deploy_script
     assert "compose up -d --remove-orphans hermes-agent" in deploy_script
     assert "compose exec -T hermes-agent" in deploy_script
