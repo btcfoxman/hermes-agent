@@ -22,6 +22,8 @@ def test_test_workflow_targets_the_canonical_lan_service_with_an_immutable_tag()
     assert "hermes-agent-test" not in workflow
     assert "HERMES_API_KEY: ${{ secrets.HERMES_API_KEY }}" not in workflow
     assert "HERMES_OPENAI_API_KEY:" not in workflow
+    assert "python -m venv .venv" in workflow
+    assert ".venv/bin/python -m pip install" in workflow
     assert "bash scripts/run_tests.sh tests/ai_marketing_api" in workflow
     assert "python -m pytest" not in workflow
 
