@@ -2,13 +2,11 @@
 set -euo pipefail
 umask 077
 
-APP_DIR="${APP_DIR:-/home/btcfoxman/docker/hermes-agent-test}"
-APP_USER="${APP_USER:-btcfoxman}"
+APP_DIR="${APP_DIR:-/home/btcfoxman/docker/hermes-agent}"
+COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-hermes-agent}"
+HERMES_HOST_PORT="${HERMES_HOST_PORT:-8095}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_FILE="${APP_DIR}/docker-compose.yml"
-COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-hermes-agent-test}"
-HERMES_HOST_PORT="${HERMES_HOST_PORT:-18095}"
-TEMP_ENV_FILE=""
 TEMP_DOCKER_CONFIG=""
 
 log() {
@@ -33,9 +31,6 @@ retry() {
 }
 
 cleanup() {
-  if [ -n "${TEMP_ENV_FILE}" ] && [ -f "${TEMP_ENV_FILE}" ]; then
-    rm -f "${TEMP_ENV_FILE}"
-  fi
   if [ -n "${TEMP_DOCKER_CONFIG}" ] && [ -d "${TEMP_DOCKER_CONFIG}" ]; then
     rm -rf -- "${TEMP_DOCKER_CONFIG}"
   fi
@@ -43,47 +38,38 @@ cleanup() {
 
 trap cleanup EXIT
 
-upsert_env_value() {
-  local env_file="$1"
-  local key="$2"
-  local value="$3"
-  local escaped_value line
-
-  if [[ "${value}" == *$'\n'* || "${value}" == *$'\r'* ]]; then
-    log "${key} must be a single-line value"
-    return 1
-  fi
-
-  TEMP_ENV_FILE="$(mktemp "${env_file}.tmp.XXXXXX")"
-  if [ -f "${env_file}" ]; then
-    while IFS= read -r line || [ -n "${line}" ]; do
-      case "${line}" in
-        "${key}="*|"export ${key}="*) continue ;;
-      esac
-      printf '%s\n' "${line}" >> "${TEMP_ENV_FILE}"
-    done < "${env_file}"
-  fi
-
-  # Compose treats single-quoted dotenv values literally. Escape only the
-  # characters that can terminate or alter that representation; values such
-  # as base64 tokens containing '=' remain byte-for-byte intact.
-  escaped_value="${value//\\/\\\\}"
-  escaped_value="${escaped_value//\'/\\\'}"
-  printf "%s='%s'\n" "${key}" "${escaped_value}" >> "${TEMP_ENV_FILE}"
-  chmod 600 "${TEMP_ENV_FILE}"
-  mv -f "${TEMP_ENV_FILE}" "${env_file}"
-  TEMP_ENV_FILE=""
+compose() {
+  docker compose \
+    --project-name "${COMPOSE_PROJECT_NAME}" \
+    --file "${COMPOSE_FILE}" \
+    "$@"
 }
 
-authenticated_get() {
-  local url="$1"
-  curl --fail --silent --show-error \
-    --header "Authorization: Bearer ${HERMES_API_KEY}" \
-    "${url}" >/dev/null
+probe_operator_endpoints() {
+  compose exec -T hermes-agent python -c '
+import json
+import os
+import urllib.request
+
+token = os.environ["HERMES_API_KEY"]
+for path in (
+    "/api/v1/operators/health",
+    "/api/v1/operators/commercial/probe",
+    "/api/v1/operators/industry/probe",
+    "/api/v1/operators/personal_ip/probe",
+):
+    request = urllib.request.Request(
+        "http://127.0.0.1:8095" + path,
+        headers={"Authorization": "Bearer " + token},
+    )
+    with urllib.request.urlopen(request, timeout=20) as response:
+        assert response.status == 200
+        json.load(response)
+'
 }
 
 probe_compose_contracts() {
-  compose exec -T hermes-agent-test python -c '
+  compose exec -T hermes-agent python -c '
 import json
 import os
 import urllib.request
@@ -119,12 +105,12 @@ for role, status in expected_status.items():
         f"http://127.0.0.1:8095/api/v1/operators/{role}/compose",
         data=body,
         headers={
-            "Authorization": f"Bearer {token}",
+            "Authorization": "Bearer " + token,
             "Content-Type": "application/json",
         },
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=15) as response:
+    with urllib.request.urlopen(request, timeout=30) as response:
         result = json.load(response)
     assert result["schema_version"] == "operator.content.v1", result
     assert result["role_id"] == role, result
@@ -137,60 +123,96 @@ for role, status in expected_status.items():
 '
 }
 
-if [ -z "${HERMES_API_KEY:-}" ]; then
-  log "HERMES_API_KEY is required from the GitHub test Environment"
-  exit 1
-fi
+probe_industry_claim_contract() {
+  compose exec -T hermes-agent python -c '
+import json
+import os
+import urllib.request
+
+source_text = "监管机构发布了可逐字核验的官方事实。"
+payload = {
+    "objective": "验证行业操盘手证据边界",
+    "topic": "官方事实验收",
+    "audience": "AI product teams",
+    "channels": ["wechat_mp"],
+    "constraints": ["Only use facts present in authorized_context."],
+    "authorized_context": [{
+        "record_id": "canonical-official-probe",
+        "space": "industry",
+        "record_type": "source_item",
+        "title": "Canonical official probe",
+        "content": source_text,
+        "structured_data": {},
+        "status": "approved",
+        "authorized_roles": ["industry"],
+        "source_uri": "https://example.com/canonical-official-probe",
+        "source_tier": "official",
+    }],
+    "as_of": "2026-07-27T00:00:00Z",
+}
+request = urllib.request.Request(
+    "http://127.0.0.1:8095/api/v1/operators/industry/propose",
+    data=json.dumps(payload).encode("utf-8"),
+    headers={
+        "Authorization": "Bearer " + os.environ["HERMES_API_KEY"],
+        "Content-Type": "application/json",
+    },
+    method="POST",
+)
+with urllib.request.urlopen(request, timeout=240) as response:
+    result = json.load(response)
+assert result["schema_version"] == "operator.proposal.v1", result
+assert str(result.get("model") or "").lower() != "fallback", result
+assert result["status"] == "proposal", result
+assert [
+    (claim["text"], claim["kind"], claim["evidence_ids"])
+    for claim in result["claims"]
+] == [(source_text, "fact", ["canonical-official-probe"])], result
+assert not any(
+    risk.get("code") == "unsupported_fact"
+    for risk in result.get("risk_flags") or []
+), result
+'
+}
 
 resolved_app_dir="$(realpath -m "${APP_DIR}")"
-if [[ "${resolved_app_dir,,}" != *test* ]]; then
-  log "Refusing non-test APP_DIR: ${resolved_app_dir}"
+[ "${resolved_app_dir}" = "/home/btcfoxman/docker/hermes-agent" ] || {
+  log "Refusing unexpected APP_DIR: ${resolved_app_dir}"
   exit 1
-fi
-if [[ "${COMPOSE_PROJECT_NAME,,}" != *test* ]]; then
-  log "Refusing non-test COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME}"
+}
+[ "${COMPOSE_PROJECT_NAME}" = "hermes-agent" ] || {
+  log "Refusing unexpected COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME}"
   exit 1
-fi
-if [[ ! "${HERMES_HOST_PORT}" =~ ^[0-9]+$ ]] \
-  || [ "${HERMES_HOST_PORT}" -lt 1024 ] \
-  || [ "${HERMES_HOST_PORT}" -gt 65535 ] \
-  || [ "${HERMES_HOST_PORT}" = "8095" ]; then
-  log "Refusing invalid or production HERMES_HOST_PORT: ${HERMES_HOST_PORT}"
+}
+[ "${HERMES_HOST_PORT}" = "8095" ] || {
+  log "Refusing unexpected HERMES_HOST_PORT: ${HERMES_HOST_PORT}"
   exit 1
-fi
+}
 
 APP_DIR="${resolved_app_dir}"
 COMPOSE_FILE="${APP_DIR}/docker-compose.yml"
 mkdir -p "${APP_DIR}/logs/hermes-agent"
 
-log "Syncing deployment compose to ${COMPOSE_FILE}"
-cp -f "${SCRIPT_DIR}/docker-compose.yml" "${COMPOSE_FILE}"
-
 if [ ! -f "${APP_DIR}/.env" ]; then
-  cp -f "${SCRIPT_DIR}/.env.example" "${APP_DIR}/.env"
-  log "Created ${APP_DIR}/.env from example"
+  log "Canonical ${APP_DIR}/.env is required; deployment does not create or replace model credentials"
+  exit 1
 fi
 
-upsert_env_value "${APP_DIR}/.env" "COMPOSE_PROJECT_NAME" "${COMPOSE_PROJECT_NAME}"
-upsert_env_value "${APP_DIR}/.env" "HERMES_HOST_PORT" "${HERMES_HOST_PORT}"
-upsert_env_value "${APP_DIR}/.env" "HERMES_API_KEY" "${HERMES_API_KEY}"
-upsert_env_value "${APP_DIR}/.env" "HERMES_OPENAI_BASE_URL" "${HERMES_OPENAI_BASE_URL:-}"
-upsert_env_value "${APP_DIR}/.env" "HERMES_OPENAI_API_KEY" "${HERMES_OPENAI_API_KEY:-}"
-upsert_env_value "${APP_DIR}/.env" "HERMES_MODEL" "${HERMES_MODEL:-gpt-4.1-mini}"
+log "Syncing canonical deployment compose while preserving the existing .env"
+cp -f "${SCRIPT_DIR}/docker-compose.yml" "${COMPOSE_FILE}"
+chmod 644 "${COMPOSE_FILE}"
 chmod 600 "${APP_DIR}/.env"
-log "Updated service authentication configuration"
-
-if id "${APP_USER}" >/dev/null 2>&1; then
-  chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}" || true
-fi
 
 if [ -n "${GHCR_TOKEN:-}" ]; then
-  TEMP_DOCKER_CONFIG="$(mktemp -d "${TMPDIR:-/tmp}/hermes-agent-test-docker.XXXXXX")"
+  TEMP_DOCKER_CONFIG="$(mktemp -d "${TMPDIR:-/tmp}/hermes-agent-docker.XXXXXX")"
   chmod 700 "${TEMP_DOCKER_CONFIG}"
   export DOCKER_CONFIG="${TEMP_DOCKER_CONFIG}"
   log "Logging in to GHCR with an ephemeral Docker config"
   docker_login_ghcr() {
-    printf '%s' "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME:-${GITHUB_ACTOR:-btcfoxman}}" --password-stdin >/dev/null
+    printf '%s' "${GHCR_TOKEN}" |
+      docker login ghcr.io \
+        -u "${GHCR_USERNAME:-${GITHUB_ACTOR:-btcfoxman}}" \
+        --password-stdin >/dev/null
   }
   retry 5 10 docker_login_ghcr
 fi
@@ -205,40 +227,32 @@ if [[ ! "${IMAGE_TAG:-}" =~ ^test-[0-9a-f]{40}$ ]]; then
 fi
 export IMAGE_TAG
 
-compose() {
-  docker compose --project-name "${COMPOSE_PROJECT_NAME}" --file "${COMPOSE_FILE}" "$@"
-}
-
 log "Validating compose config"
 compose config >/dev/null
 
-log "Pulling image"
-retry 5 10 compose pull hermes-agent-test
+log "Pulling immutable image ${IMAGE_TAG}"
+retry 5 10 compose pull hermes-agent
 
-log "Starting service"
-compose up -d --remove-orphans hermes-agent-test
+log "Starting canonical shared Hermes service"
+compose up -d --remove-orphans hermes-agent
 
-log "Waiting for service health"
+log "Waiting for canonical service and operator contracts"
 for i in $(seq 1 30); do
   if curl -fsS "http://127.0.0.1:${HERMES_HOST_PORT}/health" >/dev/null \
-    && authenticated_get "http://127.0.0.1:${HERMES_HOST_PORT}/api/v1/operators/health"; then
-    probes_ok=true
-    for role in commercial industry personal_ip; do
-      if ! authenticated_get "http://127.0.0.1:${HERMES_HOST_PORT}/api/v1/operators/${role}/probe"; then
-        probes_ok=false
-        break
-      fi
-    done
-    if [ "${probes_ok}" = true ] && probe_compose_contracts; then
+    && probe_operator_endpoints \
+    && probe_compose_contracts; then
+    if retry 3 10 probe_industry_claim_contract; then
       compose ps
-      log "Deployment complete; all operator profiles and compose contracts are ready"
+      log "Deployment complete; canonical Hermes and all operator contracts are ready"
       exit 0
     fi
+    log "Canonical industry model contract remained unavailable after retries"
+    break
   fi
   sleep 5
 done
 
-log "Health check failed"
+log "Health or contract verification failed"
 compose ps || true
-compose logs --tail=200 hermes-agent-test || true
+compose logs --tail=200 hermes-agent || true
 exit 1

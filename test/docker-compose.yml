@@ -1,30 +1,24 @@
-name: ${COMPOSE_PROJECT_NAME:-hermes-agent-test}
+name: hermes-agent
 
 services:
-  hermes-agent-test:
+  hermes-agent:
     image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-btcfoxman}/${IMAGE_NAME:-hermes-agent}:${IMAGE_TAG:?IMAGE_TAG must be an immutable test git SHA tag}
-    container_name: hermes-agent-test
+    container_name: hermes-agent
     restart: unless-stopped
     networks:
       - my-shared-net
     env_file:
       - ./.env
-    environment:
-      HERMES_OPENAI_BASE_URL: ${HERMES_OPENAI_BASE_URL:-}
-      HERMES_OPENAI_API_KEY: ${HERMES_OPENAI_API_KEY:-}
-      HERMES_MODEL: ${HERMES_MODEL:-gpt-4.1-mini}
-      HERMES_API_KEY: ${HERMES_API_KEY:-}
-      HERMES_LLM_TIMEOUT_SECONDS: ${HERMES_LLM_TIMEOUT_SECONDS:-180}
     ports:
-      - "${HERMES_HOST_PORT:-18095}:8095"
+      - "192.168.3.6:8095:8095"
     volumes:
       - ./logs/hermes-agent:/app/logs
     healthcheck:
       test: ["CMD", "python", "-c", "import json, os, urllib.request; req=urllib.request.Request('http://127.0.0.1:8095/api/v1/operators/health', headers={'Authorization': 'Bearer ' + os.environ['HERMES_API_KEY']}); data=json.load(urllib.request.urlopen(req, timeout=5)); assert data['status']=='ok' and all(item['ready'] for item in data['roles'].values())"]
       interval: 15s
       timeout: 5s
-      retries: 8
-      start_period: 20s
+      retries: 12
+      start_period: 30s
 
 networks:
   my-shared-net:

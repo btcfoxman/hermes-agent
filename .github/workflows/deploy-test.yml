@@ -7,8 +7,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: hermes-agent-test-deploy
-  cancel-in-progress: false
+  group: hermes-agent-canonical-test-deploy
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -43,7 +43,7 @@ jobs:
           python -m pip install pytest -r ai_marketing_api/requirements.txt
 
       - name: Run operator contract and isolation tests
-        run: python -m pytest tests/ai_marketing_api -q
+        run: bash scripts/run_tests.sh tests/ai_marketing_api
 
   build:
     name: Build image
@@ -97,18 +97,15 @@ jobs:
       - linux
       - aitoearn-test
     env:
-      APP_DIR: /home/btcfoxman/docker/hermes-agent-test
-      COMPOSE_PROJECT_NAME: hermes-agent-test
-      HERMES_HOST_PORT: '18095'
+      APP_DIR: /home/btcfoxman/docker/hermes-agent
+      COMPOSE_PROJECT_NAME: hermes-agent
+      HERMES_HOST_PORT: '8095'
       IMAGE_REGISTRY: ghcr.io
       IMAGE_NAMESPACE: ${{ github.repository_owner }}
       IMAGE_NAME: hermes-agent
       IMAGE_TAG: test-${{ github.sha }}
       GHCR_USERNAME: ${{ secrets.GHCR_USERNAME || github.actor }}
       GHCR_TOKEN: ${{ secrets.GHCR_TOKEN || github.token }}
-      HERMES_API_KEY: ${{ secrets.HERMES_API_KEY }}
-      HERMES_OPENAI_BASE_URL: ${{ vars.HERMES_OPENAI_BASE_URL || 'https://api.openai.com/v1' }}
-      HERMES_MODEL: ${{ vars.HERMES_MODEL || 'gpt-4.1-mini' }}
     steps:
       - name: Fetch deployment files
         env:
