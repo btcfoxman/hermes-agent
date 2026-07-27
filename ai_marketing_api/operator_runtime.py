@@ -789,9 +789,8 @@ def _normalize_model_claims(
         if not evidence_ids or not exact_source_text:
             risks.append(
                 _risk(
-                    "unsupported_fact",
-                    "A model-proposed industry fact was not an exact authorized source statement and was discarded.",
-                    blocking=True,
+                    "discarded_unsupported_fact",
+                    "A model-proposed industry fact was not an exact authorized source statement and was discarded before approval.",
                 )
             )
     if not any(claim.kind == ClaimKind.OPINION.value for claim in claims):

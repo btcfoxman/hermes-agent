@@ -446,7 +446,14 @@ def test_industry_model_fact_with_unknown_evidence_is_flagged():
     assert fact.evidence_ids == ["source-1"]
     assert fact.verification_status == VerificationStatus.VERIFIED.value
     assert all(claim.text != "Unsupported market-size claim." for claim in output.claims)
-    assert "unsupported_fact" in {risk.code for risk in output.risk_flags}
+    assert output.status == OutputStatus.PROPOSAL.value
+    discarded = next(
+        risk
+        for risk in output.risk_flags
+        if risk.code == "discarded_unsupported_fact"
+    )
+    assert discarded.blocking is False
+    assert "unsupported_fact" not in {risk.code for risk in output.risk_flags}
 
 
 def test_industry_model_cannot_smuggle_a_fact_as_an_opinion():
