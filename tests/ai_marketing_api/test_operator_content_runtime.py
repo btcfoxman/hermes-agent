@@ -145,6 +145,7 @@ def test_three_roles_compose_safe_fallback_with_exact_evidence_and_all_channels(
         },
         OperatorRole.INDUSTRY: {
             "真正值得关注的，不只是事件本身，而是它对行业规则、参与者关系与后续执行的影响。",
+            "从行业视角看，公开信息只是起点；后续执行是否透明、影响是否可验证，才决定这件事会留下怎样的长期影响。",
             "接下来可以继续观察：后续措施如何落地，相关规则是否变得更透明、更可预期。",
         },
         OperatorRole.PERSONAL_IP: {
@@ -231,6 +232,38 @@ def test_claim_text_drift_blocks_every_publishable_field():
     assert output.blocks == []
     assert output.platform_variants == []
     assert "claim_not_verbatim:claim-1" in output.critic.errors
+
+
+def test_long_industry_claim_uses_a_concise_verbatim_title_excerpt():
+    source_text = (
+        "中国国家市场监督管理总局通报相关决定，"
+        "对携程集团有限公司滥用市场支配地位实施垄断行为作出行政处罚，"
+        "没收违法所得16.58亿元，并处以罚款35.21亿元，"
+        "罚没款合计51.79亿元，同时要求企业全面整改并公开整改措施。"
+    )
+    source = _context(
+        "source-long-title",
+        "industry",
+        "industry",
+        "source_item",
+        content=source_text,
+        source_uri="https://official.example/decision",
+        source_tier="official",
+    )
+    output = _run(
+        OperatorRole.INDUSTRY,
+        _request(
+            [source],
+            [_claim(source_text, "fact", [source.record_id])],
+        ),
+    )
+
+    assert output.status == ContentStatus.CONTENT_READY.value
+    assert output.master_title
+    assert output.master_title in source_text
+    assert "携程集团有限公司" in output.master_title
+    assert len(output.master_title) <= 96
+    assert output.master_title != source_text
 
 
 def test_only_claim_references_are_disclosed_to_the_model():

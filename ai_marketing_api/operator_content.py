@@ -200,6 +200,15 @@ _UNSUPPORTED_EDITORIAL_ASSERTION_RE = re.compile(
     re.IGNORECASE,
 )
 _URL_RE = re.compile(r"(?:https?://|www\.)", re.IGNORECASE)
+_TITLE_ENTITY_RE = re.compile(
+    r"(?:[\u4e00-\u9fffA-Za-z0-9·.\-]{2,28}"
+    r"(?:集团|公司|平台|总局|委员会|银行|大学|研究院|实验室))"
+)
+_TITLE_ACTION_RE = re.compile(
+    r"(?:处罚|整改|发布|推出|升级|收购|融资|签约|调查|通报|上线|"
+    r"penalty|launch|release|acquisition|funding|investigation)",
+    re.IGNORECASE,
+)
 
 
 def _value(value: Any) -> str:
@@ -633,6 +642,21 @@ def _fallback_freeform(role: OperatorRole, request: OperatorComposeRequest) -> L
         blocks.append(
             _stamp_block(
                 ContentBlock(
+                    block_id="opinion-industry",
+                    kind=ContentBlockKind.OPINION,
+                    text="从行业视角看，公开信息只是起点；后续执行是否透明、影响是否可验证，才决定这件事会留下怎样的长期影响。",
+                    evidence_ids=[],
+                    verification_status=VerificationStatus.OPINION,
+                    source_exact=False,
+                ),
+                origin=ContentBlockOrigin.SERVER_TEMPLATE,
+                locked=True,
+                required=False,
+            )
+        )
+        blocks.append(
+            _stamp_block(
+                ContentBlock(
                     block_id="cta-industry",
                     kind=ContentBlockKind.CTA,
                     text="接下来可以继续观察：后续措施如何落地，相关规则是否变得更透明、更可预期。",
@@ -708,9 +732,45 @@ def _safe_master_title(
     if requested and any(requested in text for text in exact_texts):
         return requested[:300]
     # A proposal title is an editorial direction, not evidence.  When it is
-    # not itself a verbatim approved excerpt, use the first verified excerpt
-    # instead of allowing an unreviewed factual headline to bypass blocks.
-    return (exact_texts[0] if exact_texts else requested)[:300]
+    # not itself a verbatim approved excerpt, extract a concise contiguous
+    # span from the first verified claim instead of turning a whole source
+    # paragraph into the headline.
+    if not exact_texts:
+        return requested[:300]
+    source = exact_texts[0].strip()
+    if len(source) <= 80:
+        return source[:300]
+    spans = [
+        match.span()
+        for match in re.finditer(r"[^，；。！？!?]+[，；。！？!?]?", source)
+        if match.group(0).strip(" \t\r\n，；。！？!?")
+    ]
+    candidates: List[str] = []
+    for start_index in range(len(spans)):
+        for end_index in range(start_index, min(len(spans), start_index + 4)):
+            start = spans[start_index][0]
+            end = spans[end_index][1]
+            candidate = source[start:end].strip(" \t\r\n，；。！？!?")
+            candidate = re.sub(r"^(?:同时|此外|并且|并|依据|根据|对)", "", candidate).strip()
+            if 12 <= len(candidate) <= 96 and candidate in source:
+                candidates.append(candidate)
+    if not candidates:
+        return source[:80]
+
+    def title_score(candidate: str) -> tuple[int, int, int, int, int]:
+        has_entity = int(bool(_TITLE_ENTITY_RE.search(candidate)))
+        has_number = int(bool(_EDITORIAL_NUMBER_RE.search(candidate)))
+        action = int(bool(_TITLE_ACTION_RE.search(candidate)))
+        number_count = len(_EDITORIAL_NUMBER_RE.findall(candidate))
+        return (
+            has_entity and has_number,
+            has_entity,
+            action,
+            min(number_count, 3),
+            -abs(len(candidate) - 48),
+        )
+
+    return max(candidates, key=title_score)[:300]
 
 
 def _platform_blocks(
@@ -1115,6 +1175,36 @@ def _safe_candidate_blocks(
             warnings.append(
                 f"model_required_blocks_restored:{prefix}:{labels}"
             )
+    if role is OperatorRole.INDUSTRY and not errors:
+        present_kinds = {
+            _value(block.kind)
+            for block in selected
+            if not block.source_exact
+        }
+        restored_kinds: List[str] = []
+        for kind in (
+            ContentBlockKind.TRANSITION.value,
+            ContentBlockKind.OPINION.value,
+            ContentBlockKind.CTA.value,
+        ):
+            if kind in present_kinds:
+                continue
+            template = next(
+                (
+                    block
+                    for block in template_blocks
+                    if _value(block.kind) == kind
+                ),
+                None,
+            )
+            if template is not None:
+                selected.append(template)
+                restored_kinds.append(kind)
+        if restored_kinds:
+            warnings.append(
+                f"model_editorial_templates_restored:{prefix}:"
+                f"{','.join(restored_kinds)}"
+            )
     return selected, errors, warnings
 
 
@@ -1213,6 +1303,12 @@ def normalize_content_output(
     blocks = _reindex(
         base_blocks if raw_master_blocks is None else master_selection
     )
+    if role is OperatorRole.INDUSTRY:
+        blocks = _platform_blocks(
+            "master",
+            blocks,
+            lead_with_transition=True,
+        )
 
     channels, channel_errors = _channel_plan(request.channels)
     errors.extend(channel_errors)
@@ -1265,6 +1361,12 @@ def normalize_content_output(
             ),
             prefix=f"{platform}-block",
         )
+        if role is OperatorRole.INDUSTRY:
+            variant_blocks = _platform_blocks(
+                platform,
+                variant_blocks,
+                lead_with_transition=True,
+            )
         body = _render(variant_blocks)
         if body:
             variants.append(
