@@ -216,12 +216,19 @@ _EDITORIAL_KIND_ALIASES = {
     "opening": ContentBlockKind.TRANSITION.value,
     "framing": ContentBlockKind.TRANSITION.value,
     "analysis": ContentBlockKind.OPINION.value,
+    "editorial": ContentBlockKind.OPINION.value,
+    "editorial_analysis": ContentBlockKind.OPINION.value,
+    "impact": ContentBlockKind.OPINION.value,
     "implication": ContentBlockKind.OPINION.value,
     "takeaway": ContentBlockKind.OPINION.value,
+    "reader_takeaway": ContentBlockKind.OPINION.value,
     "perspective": ContentBlockKind.OPINION.value,
     "reader_value": ContentBlockKind.OPINION.value,
     "significance": ContentBlockKind.OPINION.value,
+    "why_it_matters": ContentBlockKind.OPINION.value,
     "call_to_action": ContentBlockKind.CTA.value,
+    "closing": ContentBlockKind.CTA.value,
+    "question": ContentBlockKind.CTA.value,
     "reader_question": ContentBlockKind.CTA.value,
     "prompt": ContentBlockKind.CTA.value,
 }
@@ -1164,7 +1171,10 @@ def _safe_candidate_blocks(
                 f"discarded_unsafe_model_editorial:{prefix}-{index}:{reason}"
             )
             continue
-        errors.append(f"model_block_ref_required:{prefix}-{index}")
+        errors.append(
+            f"model_block_ref_required:{prefix}-{index}:"
+            f"{raw_kind or 'missing_kind'}"
+        )
 
     selected_refs = {
         block.binding_hash for block in selected if block.binding_hash
