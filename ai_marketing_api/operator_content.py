@@ -157,6 +157,49 @@ _PERSONAL_ATTRIBUTION_RE = re.compile(
     r"\b(?:i|i['’]m|i['’]ve|me|my|mine|myself|we|us|our|ours|ourselves)\b)",
     re.IGNORECASE,
 )
+_HTML_RE = re.compile(r"<\s*/?\s*[a-z][^>]*>", re.IGNORECASE)
+_EDITORIAL_NUMBER_RE = re.compile(r"\d")
+_EDITORIAL_TRANSITION_RE = re.compile(
+    r"(?:"
+    r"先看|再看|接下来|下面|以下|回到|从.+(?:看|出发)|基于|围绕|"
+    r"真正值得关注|值得关注|不只是|更重要|"
+    r"事实|证据|背景|重点|问题|分析|影响|观察|讨论|视角|"
+    r"\b(?:first|next|then|below|context|evidence|fact|analysis|"
+    r"impact|question|perspective|worth watching)\b"
+    r")",
+    re.IGNORECASE,
+)
+_EDITORIAL_OPINION_RE = re.compile(
+    r"(?:"
+    r"编辑观点|编辑判断|值得关注|值得思考|需要思考|可以追问|"
+    r"更重要|关键在于|这意味着|启示|影响|观察|判断|"
+    r"对.+而言|不只是|而是|如何|为什么|"
+    r"\b(?:editorial|opinion|worth watching|worth asking|"
+    r"what matters|why it matters|implication|perspective)\b"
+    r")",
+    re.IGNORECASE,
+)
+_EDITORIAL_CTA_RE = re.compile(
+    r"(?:"
+    r"欢迎|请|可以|不妨|留言|评论|交流|讨论|分享|关注|咨询|"
+    r"提供|告诉|联系|查看|阅读|你更|你会|你怎么看|"
+    r"\b(?:please|welcome|share|comment|discuss|contact|tell|"
+    r"read|follow|learn more|what do you think)\b|[？?]"
+    r")",
+    re.IGNORECASE,
+)
+_UNSUPPORTED_EDITORIAL_ASSERTION_RE = re.compile(
+    r"(?:"
+    r"已经|宣布|发布|推出|收购|融资|签约|达成|增长|下降|"
+    r"上涨|下跌|达到|获得|发生|证实|曝光|秘密|据悉|消息称|"
+    r"全球最|行业最|最领先|排名第一|唯一一家|"
+    r"\b(?:announced|launched|acquired|raised|signed|reached|"
+    r"grew|declined|increased|decreased|confirmed|reportedly|"
+    r"secretly|world['’]s largest|market leader)\b"
+    r")",
+    re.IGNORECASE,
+)
+_URL_RE = re.compile(r"(?:https?://|www\.)", re.IGNORECASE)
 
 
 def _value(value: Any) -> str:
@@ -577,7 +620,7 @@ def _fallback_freeform(role: OperatorRole, request: OperatorComposeRequest) -> L
                 ContentBlock(
                     block_id="transition-industry",
                     kind=ContentBlockKind.TRANSITION,
-                    text="编辑说明：以下分析严格区分来源事实与编辑观点。",
+                    text="真正值得关注的，不只是事件本身，而是它对行业规则、参与者关系与后续执行的影响。",
                     evidence_ids=[],
                     verification_status=VerificationStatus.OPINION,
                     source_exact=False,
@@ -592,7 +635,7 @@ def _fallback_freeform(role: OperatorRole, request: OperatorComposeRequest) -> L
                 ContentBlock(
                     block_id="cta-industry",
                     kind=ContentBlockKind.CTA,
-                    text="欢迎围绕公开证据分享不同观察。",
+                    text="接下来可以继续观察：后续措施如何落地，相关规则是否变得更透明、更可预期。",
                     evidence_ids=[],
                     verification_status=VerificationStatus.OPINION,
                     source_exact=False,
@@ -670,7 +713,12 @@ def _safe_master_title(
     return (exact_texts[0] if exact_texts else requested)[:300]
 
 
-def _platform_blocks(platform: str, blocks: Sequence[ContentBlock]) -> List[ContentBlock]:
+def _platform_blocks(
+    platform: str,
+    blocks: Sequence[ContentBlock],
+    *,
+    lead_with_transition: bool = False,
+) -> List[ContentBlock]:
     exact = [block for block in blocks if block.source_exact]
     opinions = [
         block
@@ -683,7 +731,7 @@ def _platform_blocks(platform: str, blocks: Sequence[ContentBlock]) -> List[Cont
         if _value(block.kind) == ContentBlockKind.TRANSITION.value
     ]
     ctas = [block for block in blocks if _value(block.kind) == ContentBlockKind.CTA.value]
-    if platform in {
+    if lead_with_transition or platform in {
         "wechat_moments",
         "wechat_channels",
         "douyin",
@@ -759,7 +807,11 @@ def build_content_fallback(
     profile = registry.get(role)
     channels, channel_errors = _channel_plan(request.channels)
     approved_blocks, claim_errors = _build_approved_blocks(role, request, contexts)
-    blocks = _reindex([*approved_blocks, *_fallback_freeform(role, request)])
+    blocks = _platform_blocks(
+        "master",
+        _reindex([*approved_blocks, *_fallback_freeform(role, request)]),
+        lead_with_transition=role is OperatorRole.INDUSTRY,
+    )
     role_gate_ok = True
     role_gate_message = "role gate passed"
     if role is OperatorRole.COMMERCIAL:
@@ -799,7 +851,14 @@ def build_content_fallback(
             "platform": channel,
             "format": SUPPORTED_CHANNEL_FORMATS[channel],
             "title": title,
-            "blocks": [_dump(block) for block in _platform_blocks(channel, blocks)],
+            "blocks": [
+                _dump(block)
+                for block in _platform_blocks(
+                    channel,
+                    blocks,
+                    lead_with_transition=role is OperatorRole.INDUSTRY,
+                )
+            ],
         }
         for channel in channels
     ]
@@ -847,6 +906,81 @@ def _safe_candidate_blocks(
         return selected, [f"invalid_model_blocks:{prefix}"], warnings
     if len(raw_blocks) > 80:
         errors.append(f"too_many_model_blocks:{prefix}")
+
+    approved_fact_texts = [
+        block.text
+        for block in approved_blocks
+        if block.source_exact
+    ]
+
+    def safe_editorial(
+        raw: Dict[str, Any],
+        *,
+        index: int,
+        kind: str,
+        text: str,
+        evidence_ids: List[str],
+    ) -> tuple[ContentBlock | None, str | None]:
+        if kind not in {
+            ContentBlockKind.OPINION.value,
+            ContentBlockKind.TRANSITION.value,
+            ContentBlockKind.CTA.value,
+        }:
+            return None, "kind_forbidden"
+        if not text or len(text) > (160 if kind == ContentBlockKind.CTA.value else 320):
+            return None, "length_invalid"
+        if evidence_ids or str(raw.get("claim_id") or "").strip():
+            return None, "evidence_forbidden"
+        if _HTML_RE.search(text) or _URL_RE.search(text):
+            return None, "markup_or_url_forbidden"
+        # All factual numbers remain exclusively inside exact source blocks.
+        # This prevents a model from recombining a grounded number into a new
+        # unsupported conclusion.
+        if _EDITORIAL_NUMBER_RE.search(text):
+            return None, "number_forbidden"
+        if (
+            _PRICE_VALUE_RE.search(text)
+            or _PROMISE_RE.search(text)
+            or _UNSUPPORTED_EDITORIAL_ASSERTION_RE.search(text)
+        ):
+            return None, "assertion_forbidden"
+        if _contains_personal_attribution(text):
+            return None, "first_person_forbidden"
+        if role is OperatorRole.COMMERCIAL and _COMMERCIAL_ASSERTION_RE.search(text):
+            return None, "commercial_assertion_forbidden"
+        intent_patterns = {
+            ContentBlockKind.TRANSITION.value: _EDITORIAL_TRANSITION_RE,
+            ContentBlockKind.OPINION.value: _EDITORIAL_OPINION_RE,
+            ContentBlockKind.CTA.value: _EDITORIAL_CTA_RE,
+        }
+        if not intent_patterns[kind].search(text):
+            return None, "editorial_intent_required"
+        # Do not let an editorial block simply echo an exact fact while
+        # dropping its evidence binding.
+        if text in approved_fact_texts:
+            return None, "exact_fact_must_use_ref"
+        supplied_origin = str(raw.get("origin") or "").strip().lower()
+        if supplied_origin and supplied_origin != ContentBlockOrigin.MODEL_EDITORIAL.value:
+            return None, "origin_forbidden"
+        for field in ("source_exact", "locked", "required"):
+            if raw.get(field) not in (None, False):
+                return None, f"{field}_forbidden"
+        return (
+            _stamp_block(
+                ContentBlock(
+                    block_id=f"{prefix}-editorial-{index}",
+                    kind=ContentBlockKind(kind),
+                    text=text,
+                    evidence_ids=[],
+                    verification_status=VerificationStatus.OPINION,
+                    source_exact=False,
+                ),
+                origin=ContentBlockOrigin.MODEL_EDITORIAL,
+                locked=False,
+                required=False,
+            ),
+            None,
+        )
 
     def echo_is_tampered(raw: Dict[str, Any], canonical: ContentBlock) -> bool:
         expected = _dump(canonical)
@@ -932,10 +1066,27 @@ def _safe_candidate_blocks(
             selected.append(canonical)
             continue
 
-        # Model-authored prose is intentionally fail-closed.  Labels such as
-        # "transition" or "cta" are model-controlled and therefore cannot
-        # prove that a sentence is non-factual.  The model may only select
-        # server-owned canonical blocks by their opaque block_ref.
+        editorial, reason = safe_editorial(
+            raw,
+            index=index,
+            kind=kind,
+            text=text,
+            evidence_ids=evidence_ids,
+        )
+        if editorial is not None:
+            selected.append(editorial)
+            continue
+        if kind in {
+            ContentBlockKind.OPINION.value,
+            ContentBlockKind.TRANSITION.value,
+            ContentBlockKind.CTA.value,
+        }:
+            # Unsafe optional prose is dropped without sacrificing the exact
+            # evidence blocks. The warning remains visible to human review.
+            warnings.append(
+                f"discarded_unsafe_model_editorial:{prefix}-{index}:{reason}"
+            )
+            continue
         errors.append(f"model_block_ref_required:{prefix}-{index}")
 
     selected_refs = {
@@ -1253,6 +1404,20 @@ def content_request_payload(
     # paraphrase or short excerpt of company-internal/private context even
     # after the underlying evidence record has been removed.  The composer
     # needs only the public, currently authorized claims and channel plan.
+    approved_direction = request.approved_proposal
+    editorial_brief = (
+        {
+            "angle": approved_direction.angle,
+            "audience_value": approved_direction.audience_value,
+            "cta": approved_direction.cta,
+        }
+        if role is OperatorRole.INDUSTRY
+        else {
+            "angle": "Explain why the approved public facts matter to the intended reader.",
+            "audience_value": "Give the reader a clear implication or question to consider.",
+            "cta": None,
+        }
+    )
     payload: Dict[str, Any] = {
         "objective": "Compose platform drafts from the approved public claims only.",
         "topic": public_title,
@@ -1271,6 +1436,7 @@ def content_request_payload(
             "cta": None,
             "first_person": role is OperatorRole.PERSONAL_IP,
         },
+        "approved_editorial_brief": editorial_brief,
         "claims": public_claims,
         "authorized_context": [_sanitized_context(context) for context in visible],
         "canonical_block_registry": [
@@ -1316,7 +1482,14 @@ def content_request_payload(
         "master_title": "string",
         "blocks": [
             {
-                "block_ref": "one exact block_ref from canonical_block_registry",
+                "one_of": [
+                    {"block_ref": "one exact block_ref from canonical_block_registry"},
+                    {
+                        "kind": "opinion | transition | cta",
+                        "text": "original editorial framing with no new fact, number, quote, entity claim, price, promise, or first-person attribution",
+                        "evidence_ids": [],
+                    },
+                ],
             },
         ],
         "platform_variants": [
@@ -1329,9 +1502,11 @@ def content_request_payload(
         ],
         "safety": [
             "Do not write master_content or variant body directly; the server renders normalized blocks.",
-            "Every block must be selected by block_ref from canonical_block_registry; never author or echo block text or evidence.",
+            "Every factual, pricing, identity, or experience statement must use its exact block_ref from canonical_block_registry; never paraphrase it.",
             "Every platform variant must include every registry block marked required, but may choose its own safe order.",
-            "Model-authored prose is never accepted, including prose labelled transition or CTA.",
+            "Use two to four concise editorial blocks to add a hook, explain why the verified fact matters, give the reader a useful question or implication, and close naturally.",
+            "Editorial blocks may only be opinion, transition, or CTA. They must not add or repeat facts, numbers, dates, named-entity claims, quotations, prices, promises, or first-person attribution.",
+            "Make each requested platform variant meaningfully different in rhythm and reader action while preserving every required factual block verbatim.",
         ],
     }
     return payload

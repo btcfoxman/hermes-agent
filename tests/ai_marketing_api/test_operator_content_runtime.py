@@ -144,8 +144,8 @@ def test_three_roles_compose_safe_fallback_with_exact_evidence_and_all_channels(
             "如需判断适用性，请提交具体业务场景，由人工商务沟通。",
         },
         OperatorRole.INDUSTRY: {
-            "编辑说明：以下分析严格区分来源事实与编辑观点。",
-            "欢迎围绕公开证据分享不同观察。",
+            "真正值得关注的，不只是事件本身，而是它对行业规则、参与者关系与后续执行的影响。",
+            "接下来可以继续观察：后续措施如何落地，相关规则是否变得更透明、更可预期。",
         },
         OperatorRole.PERSONAL_IP: {
             "先看已确认的经历与观点，再讨论其中的启发。",
@@ -311,9 +311,11 @@ def test_content_request_exposes_server_owned_canonical_block_refs():
         ).encode("utf-8")
     ).hexdigest()
     assert required[0]["binding_hash"] == expected_hash
-    assert payload["response_contract"]["blocks"][0] == {
+    block_contract = payload["response_contract"]["blocks"][0]["one_of"]
+    assert block_contract[0] == {
         "block_ref": "one exact block_ref from canonical_block_registry"
     }
+    assert block_contract[1]["kind"] == "opinion | transition | cta"
 
 
 def test_commercial_internal_context_is_readable_but_never_publishable_or_model_visible():
@@ -544,7 +546,12 @@ def test_commercial_model_cannot_add_price_promise_or_capability(unsafe_text):
     registry = OperatorRegistry()
     authorized = registry.authorize(OperatorRole.COMMERCIAL, [capability], AS_OF)
     fallback = build_content_fallback(registry, OperatorRole.COMMERCIAL, request, authorized)
-    candidate = deepcopy(fallback)
+    payload = content_request_payload(
+        OperatorRole.COMMERCIAL,
+        request,
+        authorized,
+    )
+    candidate = _candidate_from_required_refs(payload, request.channels)
     candidate["_model"] = "unsafe-test-model"
     candidate["blocks"].append(
         {"kind": "transition", "text": unsafe_text, "evidence_ids": []}
@@ -559,10 +566,12 @@ def test_commercial_model_cannot_add_price_promise_or_capability(unsafe_text):
         candidate,
     )
 
-    assert output.status == ContentStatus.EVIDENCE_INSUFFICIENT.value
-    assert output.master_content is None
+    assert output.status == ContentStatus.CONTENT_READY.value
     assert unsafe_text not in output.model_dump_json()
-    assert any(error.startswith("model_block_ref_required") for error in output.critic.errors)
+    assert any(
+        warning.startswith("discarded_unsafe_model_editorial")
+        for warning in output.critic.warnings
+    )
 
 
 def test_approved_commercial_effect_guarantee_is_still_blocked():
@@ -744,12 +753,12 @@ def test_industry_two_independent_sources_allow_server_template_refs():
     transition = next(
         block
         for block in payload["canonical_block_registry"]
-        if block["text"] == "编辑说明：以下分析严格区分来源事实与编辑观点。"
+        if block["text"] == "真正值得关注的，不只是事件本身，而是它对行业规则、参与者关系与后续执行的影响。"
     )
     cta = next(
         block
         for block in payload["canonical_block_registry"]
-        if block["text"] == "欢迎围绕公开证据分享不同观察。"
+        if block["text"] == "接下来可以继续观察：后续措施如何落地，相关规则是否变得更透明、更可预期。"
     )
     candidate["blocks"].append({"block_ref": transition["block_ref"]})
     candidate["platform_variants"][0]["blocks"].append(
@@ -986,11 +995,11 @@ def test_model_cannot_smuggle_an_unsupported_fact_through_a_non_fact_label(kind)
         candidate,
     )
 
-    assert output.status == ContentStatus.EVIDENCE_INSUFFICIENT.value
+    assert output.status == ContentStatus.CONTENT_READY.value
     assert unsupported not in output.model_dump_json()
     assert any(
-        error.startswith("model_block_ref_required")
-        for error in output.critic.errors
+        warning.startswith("discarded_unsafe_model_editorial")
+        for warning in output.critic.warnings
     )
 
 
@@ -1036,12 +1045,11 @@ def test_plausible_transition_label_cannot_smuggle_a_model_authored_claim():
         candidate,
     )
 
-    assert output.status == ContentStatus.EVIDENCE_INSUFFICIENT.value
-    assert output.master_content is None
+    assert output.status == ContentStatus.CONTENT_READY.value
     assert attack not in output.model_dump_json()
     assert any(
-        error.startswith("model_block_ref_required:master")
-        for error in output.critic.errors
+        warning.startswith("discarded_unsafe_model_editorial:master")
+        for warning in output.critic.warnings
     )
 
 
@@ -1288,7 +1296,7 @@ def test_model_ref_order_and_server_templates_create_distinct_channel_drafts():
     assert approved_claim.binding_hash == required_ref
 
 
-def test_each_model_channel_plan_must_cover_every_required_claim():
+def test_server_restores_required_claim_when_model_only_returns_safe_editorial():
     source = _context(
         "cap-required",
         "commercial",
@@ -1331,17 +1339,18 @@ def test_each_model_channel_plan_must_cover_every_required_claim():
         candidate,
     )
 
-    assert output.status == ContentStatus.EVIDENCE_INSUFFICIENT.value
-    assert output.platform_variants == []
+    assert output.status == ContentStatus.CONTENT_READY.value
+    assert output.platform_variants
+    assert source.content in output.platform_variants[0].body
     assert any(
-        error.startswith(
-            "required_model_blocks_missing:variant-wechat_mp"
+        warning.startswith(
+            "model_required_blocks_restored:variant-wechat_mp"
         )
-        for error in output.critic.errors
+        for warning in output.critic.warnings
     )
 
 
-def test_new_industry_model_opinion_is_not_accepted():
+def test_safe_industry_model_opinion_is_accepted_as_editorial():
     source = _context(
         "official-opinion-gate",
         "industry",
@@ -1386,12 +1395,16 @@ def test_new_industry_model_opinion_is_not_accepted():
         candidate,
     )
 
-    assert output.status == ContentStatus.EVIDENCE_INSUFFICIENT.value
-    assert output.master_content is None
-    assert any(
-        error.startswith("model_block_ref_required")
-        for error in output.critic.errors
+    assert output.status == ContentStatus.CONTENT_READY.value
+    assert "编辑观点：这项变化值得持续观察。" in (output.master_content or "")
+    editorial = next(
+        block
+        for block in output.blocks
+        if block.text == "编辑观点：这项变化值得持续观察。"
     )
+    assert editorial.origin == "model_editorial"
+    assert editorial.evidence_ids == []
+    assert editorial.required is False
 
 
 def test_personal_background_fact_cannot_replace_an_approved_personal_card():
@@ -1591,7 +1604,12 @@ def test_personal_model_cannot_add_first_person_experience_or_stance():
     registry = OperatorRegistry()
     authorized = registry.authorize(OperatorRole.PERSONAL_IP, [card], AS_OF)
     fallback = build_content_fallback(registry, OperatorRole.PERSONAL_IP, request, authorized)
-    candidate = deepcopy(fallback)
+    payload = content_request_payload(
+        OperatorRole.PERSONAL_IP,
+        request,
+        authorized,
+    )
+    candidate = _candidate_from_required_refs(payload, request.channels)
     candidate["_model"] = "unsafe-test-model"
     candidate["blocks"].append(
         {"kind": "transition", "text": "我赚到了从未记录的收入。", "evidence_ids": []}
@@ -1606,9 +1624,12 @@ def test_personal_model_cannot_add_first_person_experience_or_stance():
         candidate,
     )
 
-    assert output.status == ContentStatus.EVIDENCE_INSUFFICIENT.value
-    assert output.master_content is None
+    assert output.status == ContentStatus.CONTENT_READY.value
     assert "从未记录的收入" not in output.model_dump_json()
+    assert any(
+        warning.startswith("discarded_unsafe_model_editorial")
+        for warning in output.critic.warnings
+    )
 
 
 def test_personal_boundary_card_is_never_disclosed_or_rendered():
