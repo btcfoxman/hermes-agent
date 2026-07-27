@@ -1629,8 +1629,67 @@ def test_long_verified_fact_is_rendered_as_readable_bullets_without_rewriting_bi
     assert exact.text == fact
     assert exact.evidence_ids == [source.record_id]
     assert "- 中国国家市场监督管理总局通报" in output.master_content
-    assert "\n- 没收违法所得16.58亿元" in output.master_content
-    assert "\n- 同时，责令其退还相关款项" in output.master_content
+    assert "依据相关规定" not in output.master_content
+    assert (
+        "\n- 没收违法所得16.58亿元；并处以罚款35.21亿元；"
+        "罚没款合计51.79亿元"
+    ) in output.master_content
+    assert "\n- 责令其退还相关款项" in output.master_content
+
+
+def test_industry_model_can_supply_grounded_social_titles_per_platform():
+    fact = (
+        "监管部门对某平台作出行政处罚，罚没款合计51.79亿元，"
+        "并要求企业全面整改。"
+    )
+    source = _context(
+        "official-social-title",
+        "industry",
+        "industry",
+        "source_item",
+        content=fact,
+        source_uri="https://official.example/release",
+        source_tier="official",
+    )
+    request = _request(
+        [source],
+        [_claim(fact, "fact", [source.record_id])],
+        channels=["wechat_mp", "xiaohongshu"],
+    )
+    registry = OperatorRegistry()
+    authorized = registry.authorize(OperatorRole.INDUSTRY, [source], AS_OF)
+    fallback = build_content_fallback(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    payload = content_request_payload(
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    candidate = _candidate_from_required_refs(payload, request.channels)
+    candidate["master_title"] = "51.79亿元之后，整改才是真正看点"
+    candidate["platform_variants"][0]["title"] = "51.79亿元之后，整改如何落地"
+    candidate["platform_variants"][1]["title"] = "51.79亿元罚没款，重点不只在金额"
+
+    output = normalize_content_output(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+        fallback,
+        candidate,
+    )
+
+    assert output.master_title == "51.79亿元之后，整改才是真正看点"
+    assert {
+        item.platform: item.title for item in output.platform_variants
+    } == {
+        "wechat_mp": "51.79亿元之后，整改如何落地",
+        "xiaohongshu": "51.79亿元罚没款，重点不只在金额",
+    }
 
 
 def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_new_numbers():

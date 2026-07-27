@@ -166,6 +166,7 @@ _EDITORIAL_TRANSITION_RE = re.compile(
     r"先看|再看|接下来|下面|以下|回到|从.+(?:看|出发)|基于|围绕|"
     r"真正值得关注|值得关注|不只是|更重要|"
     r"事实|证据|背景|重点|问题|分析|影响|观察|讨论|视角|"
+    r"可能|或许|未必|一旦|如果|信号|边界|规则|成本|选择|机制|合作|"
     r"\b(?:first|next|then|below|context|evidence|fact|analysis|"
     r"impact|question|perspective|worth watching)\b"
     r")",
@@ -176,6 +177,8 @@ _EDITORIAL_OPINION_RE = re.compile(
     r"编辑观点|编辑判断|值得关注|值得思考|需要思考|可以追问|"
     r"更重要|关键在于|这意味着|启示|影响|观察|判断|"
     r"对.+而言|不只是|而是|如何|为什么|"
+    r"可能|或许|未必|一旦|如果|信号|边界|规则|成本|选择|"
+    r"议价|机制|合作|信心|预期|风险|"
     r"\b(?:editorial|opinion|worth watching|worth asking|"
     r"what matters|why it matters|implication|perspective)\b"
     r")",
@@ -282,11 +285,13 @@ def _number_tokens(value: str) -> set[str]:
 
 
 def _fact_display_text(block: ContentBlock) -> str:
-    """Format a long immutable fact as readable bullets without rewriting it.
+    """Project a long immutable fact into source-exact, readable fact beats.
 
     The underlying block text and evidence binding remain byte-for-byte
-    unchanged. Only deterministic presentation whitespace and bullet markers
-    are added, so terminal review can reproduce the same public body.
+    unchanged.  The public projection may omit legal boilerplate and add only
+    punctuation/bullet markers; every displayed phrase remains a contiguous
+    excerpt of the approved source.  Terminal review reproduces this function
+    independently, so presentation never weakens evidence binding.
     """
 
     text = block.text.strip()
@@ -296,14 +301,29 @@ def _fact_display_text(block: ContentBlock) -> str:
         or len(text) < 96
     ):
         return text
-    segments = [
+    raw_segments = [
         part.strip()
-        for part in re.split(
-            r"(?<=[。！？!?])\s*|(?<=[，,])(?=(?:没收|同时|此外|其中|要求))",
-            text,
-        )
+        for part in re.split(r"[，,；;。！？!?]+", text)
         if part.strip()
     ]
+    segments: List[str] = []
+    for part in raw_segments:
+        part = re.sub(r"^(?:同时|此外|其中|并且)(?:还)?", "", part).strip()
+        if not part:
+            continue
+        if (
+            len(raw_segments) >= 3
+            and re.match(r"^(?:依据|根据).{0,100}(?:规定|法律|办法|条例)$", part)
+        ):
+            continue
+        if (
+            segments
+            and re.match(r"^(?:并处|罚没)", part)
+            and re.search(r"(?:没收|罚款|罚没)", segments[-1])
+        ):
+            segments[-1] = f"{segments[-1]}；{part}"
+            continue
+        segments.append(part)
     if len(segments) < 2:
         return text
     return "\n".join(f"- {segment}" for segment in segments)
@@ -782,11 +802,37 @@ def _render(blocks: Sequence[ContentBlock]) -> str:
 def _safe_master_title(
     request: OperatorComposeRequest,
     approved_blocks: Sequence[ContentBlock],
+    candidate_title: Any = None,
 ) -> str:
     requested = request.approved_proposal.title.strip()
     exact_texts = [block.text for block in approved_blocks if block.source_exact]
-    if requested and any(requested in text for text in exact_texts):
-        return requested[:300]
+    supplied = str(candidate_title or "").strip()
+    approved_numbers = {
+        token for text in exact_texts for token in _number_tokens(text)
+    }
+    supplied_numbers = _number_tokens(supplied)
+    supplied_entities = [
+        match.group(0) for match in _TITLE_ENTITY_RE.finditer(supplied)
+    ]
+    source_text = "\n".join(exact_texts)
+    if (
+        8 <= len(supplied) <= 72
+        and not _HTML_RE.search(supplied)
+        and not _URL_RE.search(supplied)
+        and not _PROMISE_RE.search(supplied)
+        and not _GENERIC_EDITORIAL_META_RE.search(supplied)
+        and supplied_numbers.issubset(approved_numbers)
+        and all(entity in source_text for entity in supplied_entities)
+        and bool(supplied_numbers or supplied_entities)
+        and not _UNSUPPORTED_EDITORIAL_ASSERTION_RE.search(supplied)
+    ):
+        return supplied
+    if (
+        requested
+        and len(requested) <= 72
+        and any(requested in text for text in exact_texts)
+    ):
+        return requested
     # A proposal title is an editorial direction, not evidence.  When it is
     # not itself a verbatim approved excerpt, extract a concise contiguous
     # span from the first verified claim instead of turning a whole source
@@ -808,7 +854,7 @@ def _safe_master_title(
             end = spans[end_index][1]
             candidate = source[start:end].strip(" \t\r\n，；。！？!?")
             candidate = re.sub(r"^(?:同时|此外|并且|并|依据|根据|对)", "", candidate).strip()
-            if 12 <= len(candidate) <= 96 and candidate in source:
+            if 12 <= len(candidate) <= 68 and candidate in source:
                 candidates.append(candidate)
     if not candidates:
         return source[:80]
@@ -823,7 +869,7 @@ def _safe_master_title(
             has_entity,
             action,
             min(number_count, 3),
-            -abs(len(candidate) - 48),
+            -abs(len(candidate) - 36),
         )
 
     return max(candidates, key=title_score)[:300]
@@ -1437,7 +1483,11 @@ def normalize_content_output(
         by_platform[platform] = raw
 
     variants: List[PlatformVariant] = []
-    title = _safe_master_title(request, approved_blocks)
+    title = _safe_master_title(
+        request,
+        approved_blocks,
+        candidate.get("master_title"),
+    )
     fallback_variants = {
         str(raw.get("platform") or "").strip().lower(): raw
         for raw in fallback.get("platform_variants") or []
@@ -1478,11 +1528,16 @@ def normalize_content_output(
             )
         body = _render(variant_blocks)
         if body:
+            variant_title = _safe_master_title(
+                request,
+                approved_blocks,
+                raw.get("title"),
+            )
             variants.append(
                 PlatformVariant(
                     platform=platform,
                     format=SUPPORTED_CHANNEL_FORMATS[platform],
-                    title=title,
+                    title=variant_title,
                     body=body,
                     blocks=variant_blocks,
                 )
@@ -1753,13 +1808,15 @@ def content_request_payload(
             "Do not write master_content or variant body directly; the server renders normalized blocks.",
             "Every factual, pricing, identity, or experience statement must use its exact block_ref from canonical_block_registry; never paraphrase it.",
             "Every platform variant must include every registry block marked required, but may choose its own safe order.",
+            "Write a native social master_title and a distinct title for each platform. Keep each title between 12 and 36 Chinese characters when possible; it may use grounded entity names and numbers from public claims plus a clearly editorial judgment, but no new event assertion.",
             "For master and long-form variants, use three to six concise editorial blocks: a concrete hook, at least two distinct analytical steps, and an optional natural close. Short-feed variants may use two to four.",
             "Editorial blocks may only be opinion, transition, or CTA. They must not add unsupported facts, named-entity claims, quotations, prices, promises, or first-person attribution.",
             "A verified number or date may appear in editorial framing only when copied exactly from the supplied public claims; never calculate, round, compare, or combine numbers.",
             "Do not use audit/meta copy such as '先把事实和判断分开', '以下分析', '编辑说明', '公开信息只是起点', or '接下来可以继续观察'. The draft must read as publishable copy, not an internal review note.",
             "Avoid interchangeable filler. Every analytical block must advance a concrete thesis tied to this event: who is affected, what rule or incentive changes, or what observable result should be checked next.",
             "Do not force a question, invitation, disclaimer, or CTA when a firm closing judgment is more natural.",
-            "Make each requested platform variant meaningfully different in rhythm and reader action while preserving every required factual block verbatim.",
+            "The server keeps required factual blocks verbatim for audit and renders long ones as concise source-exact fact beats. Do not repeat the full announcement in editorial prose.",
+            "Make each requested platform variant meaningfully different in title, rhythm, depth, and reader action while preserving every required factual block reference.",
         ],
     }
     return payload
