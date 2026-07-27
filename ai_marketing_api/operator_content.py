@@ -1115,7 +1115,20 @@ def _safe_candidate_blocks(
             errors.append(f"invalid_model_block:{prefix}-{index}")
             continue
 
-        block_ref = str(raw.get("block_ref") or "").strip()
+        # JSON-only models do not always reproduce the response-contract field
+        # names literally. Normalize harmless structural aliases before the
+        # same fail-closed validation below. Some models also copy the
+        # ``one_of`` example wrapper from the schema instead of its contents;
+        # unwrap it only when it contains one concrete object.
+        nested = raw.get("one_of")
+        if isinstance(nested, dict):
+            raw = nested
+        block_ref = str(
+            raw.get("block_ref")
+            or raw.get("canonical_block_ref")
+            or raw.get("ref")
+            or ""
+        ).strip()
         if block_ref:
             canonical = canonical_by_ref.get(block_ref)
             if canonical is None:
@@ -1129,10 +1142,27 @@ def _safe_candidate_blocks(
             selected.append(canonical)
             continue
 
-        raw_kind = str(raw.get("kind") or "").strip().lower()
+        raw_kind = str(
+            raw.get("kind")
+            or raw.get("type")
+            or raw.get("block_type")
+            or raw.get("category")
+            or ""
+        ).strip().lower()
         kind = _EDITORIAL_KIND_ALIASES.get(raw_kind, raw_kind)
-        text = str(raw.get("text") or "").strip()
-        raw_evidence_ids = raw.get("evidence_ids") or []
+        text = str(
+            raw.get("text")
+            or raw.get("content")
+            or raw.get("body")
+            or raw.get("value")
+            or ""
+        ).strip()
+        raw_evidence_ids = (
+            raw.get("evidence_ids")
+            or raw.get("evidence_refs")
+            or raw.get("references")
+            or []
+        )
         if not isinstance(raw_evidence_ids, list):
             errors.append(f"invalid_model_evidence_ids:{prefix}-{index}")
             continue
@@ -1141,12 +1171,17 @@ def _safe_candidate_blocks(
             (kind, text, tuple(evidence_ids))
         )
         if canonical is not None:
-            if not allow_legacy_canonical:
-                errors.append(f"model_block_ref_required:{prefix}-{index}")
-                continue
             if echo_is_tampered(raw, canonical):
                 errors.append(f"tampered_model_block_ref:{prefix}-{index}")
                 continue
+            # An exact echo is as safe as its binding hash: replace it with the
+            # server-owned canonical object before rendering. This keeps model
+            # formatting drift from blocking an otherwise valid draft without
+            # trusting any model-authored factual prose.
+            if not allow_legacy_canonical:
+                warnings.append(
+                    f"model_canonical_echo_normalized:{prefix}-{index}"
+                )
             selected.append(canonical)
             continue
 
@@ -1170,6 +1205,12 @@ def _safe_candidate_blocks(
             warnings.append(
                 f"discarded_unsafe_model_editorial:{prefix}-{index}:{reason}"
             )
+            continue
+        if not raw_kind:
+            # A copied response-schema placeholder or untyped optional block is
+            # never rendered. Required facts and editorial structure are
+            # restored below from immutable server-owned blocks.
+            warnings.append(f"discarded_untyped_model_block:{prefix}-{index}")
             continue
         errors.append(
             f"model_block_ref_required:{prefix}-{index}:"
@@ -1609,24 +1650,20 @@ def content_request_payload(
     payload["response_contract"] = {
         "schema_version": CONTENT_SCHEMA_VERSION,
         "master_title": "string",
-        "blocks": [
-            {
-                "one_of": [
-                    {"block_ref": "one exact block_ref from canonical_block_registry"},
-                    {
-                        "kind": "opinion | transition | cta",
-                        "text": "original editorial framing with no new fact, number, quote, entity claim, price, promise, or first-person attribution",
-                        "evidence_ids": [],
-                    },
-                ],
-            },
-        ],
+        "blocks": (
+            "array of actual block objects; each object must be either "
+            '{"block_ref":"<one exact block_ref from canonical_block_registry>"} '
+            "or "
+            '{"kind":"opinion|transition|cta","text":"<original editorial '
+            'framing>","evidence_ids":[]}; do not copy this description or '
+            "return a one_of/schema wrapper"
+        ),
         "platform_variants": [
             {
                 "platform": "one requested channel",
                 "format": "server-normalized; model value is advisory only",
                 "title": "string",
-                "blocks": ["same block contract"],
+                "blocks": "array of actual block objects using the same blocks contract",
             }
         ],
         "safety": [

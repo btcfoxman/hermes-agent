@@ -344,11 +344,10 @@ def test_content_request_exposes_server_owned_canonical_block_refs():
         ).encode("utf-8")
     ).hexdigest()
     assert required[0]["binding_hash"] == expected_hash
-    block_contract = payload["response_contract"]["blocks"][0]["one_of"]
-    assert block_contract[0] == {
-        "block_ref": "one exact block_ref from canonical_block_registry"
-    }
-    assert block_contract[1]["kind"] == "opinion | transition | cta"
+    block_contract = payload["response_contract"]["blocks"]
+    assert "one exact block_ref from canonical_block_registry" in block_contract
+    assert "opinion|transition|cta" in block_contract
+    assert "do not copy this description" in block_contract
 
 
 def test_commercial_internal_context_is_readable_but_never_publishable_or_model_visible():
@@ -1496,6 +1495,112 @@ def test_common_model_editorial_kind_aliases_are_safely_normalized(
     assert output.status == ContentStatus.CONTENT_READY.value
     block = next(block for block in output.blocks if block.text == text)
     assert block.kind == expected_kind
+    assert block.origin == "model_editorial"
+
+
+def test_exact_canonical_echoes_and_schema_placeholders_are_safely_normalized():
+    source = _context(
+        "official-canonical-echo",
+        "industry",
+        "industry",
+        "source_item",
+        content="Official exact statement.",
+        source_uri="https://official.example/release",
+        source_tier="official",
+    )
+    request = _request(
+        [source],
+        [_claim(source.content, "fact", [source.record_id])],
+        channels=["wechat_mp"],
+    )
+    registry = OperatorRegistry()
+    authorized = registry.authorize(OperatorRole.INDUSTRY, [source], AS_OF)
+    fallback = build_content_fallback(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    candidate = deepcopy(fallback)
+    candidate["_model"] = "canonical-echo-test-model"
+    placeholder = {
+        "one_of": [
+            {"block_ref": "one exact block_ref from canonical_block_registry"},
+            {"kind": "opinion | transition | cta", "text": "editorial"},
+        ]
+    }
+    candidate["blocks"].insert(0, placeholder)
+    candidate["platform_variants"][0]["blocks"].insert(0, deepcopy(placeholder))
+
+    output = normalize_content_output(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+        fallback,
+        candidate,
+    )
+
+    assert output.status == ContentStatus.CONTENT_READY.value
+    assert output.critic.passed is True
+    assert source.content in output.master_content
+    assert any(
+        warning.startswith("discarded_untyped_model_block:master-1")
+        for warning in output.critic.warnings
+    )
+    assert any(
+        warning.startswith("model_canonical_echo_normalized:master-")
+        for warning in output.critic.warnings
+    )
+
+
+def test_editorial_type_and_content_field_aliases_are_safely_normalized():
+    source = _context(
+        "official-editorial-fields",
+        "industry",
+        "industry",
+        "source_item",
+        content="Official exact statement.",
+        source_uri="https://official.example/release",
+        source_tier="official",
+    )
+    request = _request(
+        [source],
+        [_claim(source.content, "fact", [source.record_id])],
+    )
+    registry = OperatorRegistry()
+    authorized = registry.authorize(OperatorRole.INDUSTRY, [source], AS_OF)
+    fallback = build_content_fallback(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    payload = content_request_payload(
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    candidate = _candidate_from_required_refs(payload, request.channels)
+    editorial = (
+        "从行业视角看，公开信息只是起点，后续执行是否透明仍值得持续观察。"
+    )
+    candidate["blocks"].append(
+        {"type": "analysis", "content": editorial, "evidence_ids": []}
+    )
+
+    output = normalize_content_output(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+        fallback,
+        candidate,
+    )
+
+    assert output.status == ContentStatus.CONTENT_READY.value
+    block = next(block for block in output.blocks if block.text == editorial)
+    assert block.kind == ContentBlockKind.OPINION.value
     assert block.origin == "model_editorial"
 
 
