@@ -144,9 +144,8 @@ def test_three_roles_compose_safe_fallback_with_exact_evidence_and_all_channels(
             "如需判断适用性，请提交具体业务场景，由人工商务沟通。",
         },
         OperatorRole.INDUSTRY: {
-            "真正值得关注的，不只是事件本身，而是它对行业规则、参与者关系与后续执行的影响。",
-            "从行业视角看，公开信息只是起点；后续执行是否透明、影响是否可验证，才决定这件事会留下怎样的长期影响。",
-            "接下来可以继续观察：后续措施如何落地，相关规则是否变得更透明、更可预期。",
+            "一个事件是否重要，不能只看热度，还要看它改变了谁的规则、成本与选择。",
+            "行业判断不能停在结论上：规则是否改变、执行是否持续、相关参与者是否真实感受到变化，才是后续验证重点。",
         },
         OperatorRole.PERSONAL_IP: {
             "先看已确认的经历与观点，再讨论其中的启发。",
@@ -785,16 +784,16 @@ def test_industry_two_independent_sources_allow_server_template_refs():
     transition = next(
         block
         for block in payload["canonical_block_registry"]
-        if block["text"] == "真正值得关注的，不只是事件本身，而是它对行业规则、参与者关系与后续执行的影响。"
+        if block["text"] == "一个事件是否重要，不能只看热度，还要看它改变了谁的规则、成本与选择。"
     )
-    cta = next(
+    opinion = next(
         block
         for block in payload["canonical_block_registry"]
-        if block["text"] == "接下来可以继续观察：后续措施如何落地，相关规则是否变得更透明、更可预期。"
+        if block["text"] == "行业判断不能停在结论上：规则是否改变、执行是否持续、相关参与者是否真实感受到变化，才是后续验证重点。"
     )
     candidate["blocks"].append({"block_ref": transition["block_ref"]})
     candidate["platform_variants"][0]["blocks"].append(
-        {"block_ref": cta["block_ref"]}
+        {"block_ref": opinion["block_ref"]}
     )
 
     output = normalize_content_output(
@@ -809,7 +808,7 @@ def test_industry_two_independent_sources_allow_server_template_refs():
     assert output.status == ContentStatus.CONTENT_READY.value
     assert output.critic.passed is True
     assert transition["text"] in (output.master_content or "")
-    assert cta["text"] in output.platform_variants[0].body
+    assert opinion["text"] in output.platform_variants[0].body
     selected_template = next(
         block for block in output.blocks if block.text == transition["text"]
     )
@@ -1583,7 +1582,7 @@ def test_editorial_type_and_content_field_aliases_are_safely_normalized():
     )
     candidate = _candidate_from_required_refs(payload, request.channels)
     editorial = (
-        "从行业视角看，公开信息只是起点，后续执行是否透明仍值得持续观察。"
+        "从行业视角看，规则是否改变、执行是否持续、参与者是否真实感受到变化，才是判断影响的关键。"
     )
     candidate["blocks"].append(
         {"type": "analysis", "content": editorial, "evidence_ids": []}
@@ -1602,6 +1601,96 @@ def test_editorial_type_and_content_field_aliases_are_safely_normalized():
     block = next(block for block in output.blocks if block.text == editorial)
     assert block.kind == ContentBlockKind.OPINION.value
     assert block.origin == "model_editorial"
+
+
+def test_long_verified_fact_is_rendered_as_readable_bullets_without_rewriting_binding():
+    fact = (
+        "中国国家市场监督管理总局通报，依据相关规定，对某平台作出行政处罚，"
+        "没收违法所得16.58亿元，并处以罚款35.21亿元，罚没款合计51.79亿元。"
+        "同时，责令其退还相关款项，要求企业全面整改并公开整改措施。"
+    )
+    source = _context(
+        "official-long-fact",
+        "industry",
+        "industry",
+        "source_item",
+        content=fact,
+        source_uri="https://official.example/release",
+        source_tier="official",
+    )
+
+    output = _run(
+        OperatorRole.INDUSTRY,
+        _request([source], [_claim(fact, "fact", [source.record_id])]),
+    )
+
+    assert output.status == ContentStatus.CONTENT_READY.value
+    exact = next(block for block in output.blocks if block.source_exact)
+    assert exact.text == fact
+    assert exact.evidence_ids == [source.record_id]
+    assert "- 中国国家市场监督管理总局通报" in output.master_content
+    assert "\n- 没收违法所得16.58亿元" in output.master_content
+    assert "\n- 同时，责令其退还相关款项" in output.master_content
+
+
+def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_new_numbers():
+    fact = "监管部门作出行政处罚，罚没款合计51.79亿元，并要求企业全面整改。"
+    source = _context(
+        "official-grounded-number",
+        "industry",
+        "industry",
+        "source_item",
+        content=fact,
+        source_uri="https://official.example/release",
+        source_tier="official",
+    )
+    request = _request([source], [_claim(fact, "fact", [source.record_id])])
+    registry = OperatorRegistry()
+    authorized = registry.authorize(OperatorRole.INDUSTRY, [source], AS_OF)
+    fallback = build_content_fallback(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    payload = content_request_payload(
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    candidate = _candidate_from_required_refs(payload, request.channels)
+    grounded = "51.79亿元罚没款之后，更关键的问题是整改能否真正改变相关规则。"
+    meta = "先把这条消息里的事实和判断分开。"
+    invented = "52亿元罚没款之后，更关键的问题是整改能否真正改变相关规则。"
+    candidate["blocks"].extend(
+        [
+            {"kind": "transition", "text": grounded, "evidence_ids": []},
+            {"kind": "transition", "text": meta, "evidence_ids": []},
+            {"kind": "transition", "text": invented, "evidence_ids": []},
+        ]
+    )
+
+    output = normalize_content_output(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+        fallback,
+        candidate,
+    )
+
+    assert output.status == ContentStatus.CONTENT_READY.value
+    assert grounded in output.master_content
+    assert meta not in output.master_content
+    assert invented not in output.master_content
+    assert any(
+        warning.endswith(":generic_meta_copy_forbidden")
+        for warning in output.critic.warnings
+    )
+    assert any(
+        warning.endswith(":number_ungrounded")
+        for warning in output.critic.warnings
+    )
 
 
 def test_personal_background_fact_cannot_replace_an_approved_personal_card():

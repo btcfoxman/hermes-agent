@@ -158,7 +158,9 @@ _PERSONAL_ATTRIBUTION_RE = re.compile(
     re.IGNORECASE,
 )
 _HTML_RE = re.compile(r"<\s*/?\s*[a-z][^>]*>", re.IGNORECASE)
-_EDITORIAL_NUMBER_RE = re.compile(r"\d")
+_NUMBER_RE = re.compile(
+    r"(?<![A-Za-z0-9])\d+(?:\.\d+)?(?:%|年|月|日|天|小时|分钟|万|亿)?"
+)
 _EDITORIAL_TRANSITION_RE = re.compile(
     r"(?:"
     r"先看|再看|接下来|下面|以下|回到|从.+(?:看|出发)|基于|围绕|"
@@ -196,6 +198,16 @@ _UNSUPPORTED_EDITORIAL_ASSERTION_RE = re.compile(
     r"\b(?:announced|launched|acquired|raised|signed|reached|"
     r"grew|declined|increased|decreased|confirmed|reportedly|"
     r"secretly|world['’]s largest|market leader)\b"
+    r")",
+    re.IGNORECASE,
+)
+_GENERIC_EDITORIAL_META_RE = re.compile(
+    r"(?:"
+    r"先把.{0,16}事实.{0,16}(?:判断|观点).{0,8}分开|"
+    r"以下.{0,12}(?:分析|事实|观点)|编辑说明|"
+    r"公开信息只是起点|欢迎围绕公开证据|"
+    r"真正值得关注的[，,]?\s*不只是事件本身|"
+    r"接下来可以继续观察"
     r")",
     re.IGNORECASE,
 )
@@ -263,6 +275,38 @@ def _binding_hash(data: Dict[str, Any]) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _number_tokens(value: str) -> set[str]:
+    return {match.group(0) for match in _NUMBER_RE.finditer(value)}
+
+
+def _fact_display_text(block: ContentBlock) -> str:
+    """Format a long immutable fact as readable bullets without rewriting it.
+
+    The underlying block text and evidence binding remain byte-for-byte
+    unchanged. Only deterministic presentation whitespace and bullet markers
+    are added, so terminal review can reproduce the same public body.
+    """
+
+    text = block.text.strip()
+    if (
+        _value(block.kind) != ContentBlockKind.FACT.value
+        or not block.source_exact
+        or len(text) < 96
+    ):
+        return text
+    segments = [
+        part.strip()
+        for part in re.split(
+            r"(?<=[。！？!?])\s*|(?<=[，,])(?=(?:没收|同时|此外|其中|要求))",
+            text,
+        )
+        if part.strip()
+    ]
+    if len(segments) < 2:
+        return text
+    return "\n".join(f"- {segment}" for segment in segments)
 
 
 def _stamp_block(
@@ -652,7 +696,7 @@ def _fallback_freeform(role: OperatorRole, request: OperatorComposeRequest) -> L
                 ContentBlock(
                     block_id="transition-industry",
                     kind=ContentBlockKind.TRANSITION,
-                    text="真正值得关注的，不只是事件本身，而是它对行业规则、参与者关系与后续执行的影响。",
+                    text="一个事件是否重要，不能只看热度，还要看它改变了谁的规则、成本与选择。",
                     evidence_ids=[],
                     verification_status=VerificationStatus.OPINION,
                     source_exact=False,
@@ -667,22 +711,7 @@ def _fallback_freeform(role: OperatorRole, request: OperatorComposeRequest) -> L
                 ContentBlock(
                     block_id="opinion-industry",
                     kind=ContentBlockKind.OPINION,
-                    text="从行业视角看，公开信息只是起点；后续执行是否透明、影响是否可验证，才决定这件事会留下怎样的长期影响。",
-                    evidence_ids=[],
-                    verification_status=VerificationStatus.OPINION,
-                    source_exact=False,
-                ),
-                origin=ContentBlockOrigin.SERVER_TEMPLATE,
-                locked=True,
-                required=False,
-            )
-        )
-        blocks.append(
-            _stamp_block(
-                ContentBlock(
-                    block_id="cta-industry",
-                    kind=ContentBlockKind.CTA,
-                    text="接下来可以继续观察：后续措施如何落地，相关规则是否变得更透明、更可预期。",
+                    text="行业判断不能停在结论上：规则是否改变、执行是否持续、相关参与者是否真实感受到变化，才是后续验证重点。",
                     evidence_ids=[],
                     verification_status=VerificationStatus.OPINION,
                     source_exact=False,
@@ -743,7 +772,11 @@ def _reindex(blocks: Sequence[ContentBlock], prefix: str = "block") -> List[Cont
 
 
 def _render(blocks: Sequence[ContentBlock]) -> str:
-    return "\n\n".join(block.text for block in blocks if block.text.strip())
+    return "\n\n".join(
+        _fact_display_text(block) if block.source_exact else block.text.strip()
+        for block in blocks
+        if block.text.strip()
+    )
 
 
 def _safe_master_title(
@@ -782,9 +815,9 @@ def _safe_master_title(
 
     def title_score(candidate: str) -> tuple[int, int, int, int, int]:
         has_entity = int(bool(_TITLE_ENTITY_RE.search(candidate)))
-        has_number = int(bool(_EDITORIAL_NUMBER_RE.search(candidate)))
+        has_number = int(bool(_NUMBER_RE.search(candidate)))
         action = int(bool(_TITLE_ACTION_RE.search(candidate)))
-        number_count = len(_EDITORIAL_NUMBER_RE.findall(candidate))
+        number_count = len(_NUMBER_RE.findall(candidate))
         return (
             has_entity and has_number,
             has_entity,
@@ -995,6 +1028,11 @@ def _safe_candidate_blocks(
         for block in approved_blocks
         if block.source_exact
     ]
+    approved_number_tokens = {
+        token
+        for text in approved_fact_texts
+        for token in _number_tokens(text)
+    }
 
     def safe_editorial(
         raw: Dict[str, Any],
@@ -1016,17 +1054,21 @@ def _safe_candidate_blocks(
             return None, "evidence_forbidden"
         if _HTML_RE.search(text) or _URL_RE.search(text):
             return None, "markup_or_url_forbidden"
-        # All factual numbers remain exclusively inside exact source blocks.
-        # This prevents a model from recombining a grounded number into a new
-        # unsupported conclusion.
-        if _EDITORIAL_NUMBER_RE.search(text):
-            return None, "number_forbidden"
+        # A social hook may repeat a verified amount or date, but cannot invent
+        # or recombine a numeric token that is absent from approved evidence.
+        if not _number_tokens(text).issubset(approved_number_tokens):
+            return None, "number_ungrounded"
         if (
-            _PRICE_VALUE_RE.search(text)
+            (
+                role is not OperatorRole.INDUSTRY
+                and _PRICE_VALUE_RE.search(text)
+            )
             or _PROMISE_RE.search(text)
             or _UNSUPPORTED_EDITORIAL_ASSERTION_RE.search(text)
         ):
             return None, "assertion_forbidden"
+        if _GENERIC_EDITORIAL_META_RE.search(text):
+            return None, "generic_meta_copy_forbidden"
         if _contains_personal_attribution(text):
             return None, "first_person_forbidden"
         if role is OperatorRole.COMMERCIAL and _COMMERCIAL_ASSERTION_RE.search(text):
@@ -1253,7 +1295,6 @@ def _safe_candidate_blocks(
         for kind in (
             ContentBlockKind.TRANSITION.value,
             ContentBlockKind.OPINION.value,
-            ContentBlockKind.CTA.value,
         ):
             if kind in present_kinds:
                 continue
@@ -1588,6 +1629,43 @@ def content_request_payload(
             "cta": None,
         }
     )
+    platform_briefs = {
+        "wechat_moments": (
+            "A concise personal-feed post: lead with a concrete judgment, "
+            "surface the verified facts quickly, add one useful implication, "
+            "and do not force a CTA."
+        ),
+        "wechat_mp": (
+            "A readable analysis article: concrete headline logic, short "
+            "paragraphs, two or three distinct analytical steps, and a natural "
+            "ending rather than an audit disclaimer."
+        ),
+        "wechat_channels": (
+            "A spoken script with a sharp opening, short sentences, clear fact "
+            "beats, one concrete interpretation, and a memorable final line."
+        ),
+        "douyin": (
+            "A fast spoken script: state the tension in the first sentence, "
+            "use compact fact beats, explain why it matters, and avoid formal "
+            "announcement language."
+        ),
+        "kuaishou": (
+            "A plainspoken short-video script: direct opening, accessible fact "
+            "breakdown, practical industry implication, no bureaucratic tone."
+        ),
+        "xiaohongshu": (
+            "A scan-friendly note: specific hook, compact information-card "
+            "structure, clear takeaway, and no fake personal experience."
+        ),
+        "toutiao": (
+            "A fact-led analysis article: explain the event, separate two or "
+            "three implications, and end with concrete follow-up questions."
+        ),
+        "weitoutiao": (
+            "A compact news commentary: one strong judgment, the essential "
+            "verified facts, and one non-generic implication."
+        ),
+    }
     payload: Dict[str, Any] = {
         "objective": "Compose platform drafts from the approved public claims only.",
         "topic": public_title,
@@ -1607,6 +1685,11 @@ def content_request_payload(
             "first_person": role is OperatorRole.PERSONAL_IP,
         },
         "approved_editorial_brief": editorial_brief,
+        "platform_editorial_briefs": {
+            channel: platform_briefs[channel]
+            for channel in request.channels
+            if channel in platform_briefs
+        },
         "claims": public_claims,
         "authorized_context": [_sanitized_context(context) for context in visible],
         "canonical_block_registry": [
@@ -1670,8 +1753,12 @@ def content_request_payload(
             "Do not write master_content or variant body directly; the server renders normalized blocks.",
             "Every factual, pricing, identity, or experience statement must use its exact block_ref from canonical_block_registry; never paraphrase it.",
             "Every platform variant must include every registry block marked required, but may choose its own safe order.",
-            "Use two to four concise editorial blocks to add a hook, explain why the verified fact matters, give the reader a useful question or implication, and close naturally.",
-            "Editorial blocks may only be opinion, transition, or CTA. They must not add or repeat facts, numbers, dates, named-entity claims, quotations, prices, promises, or first-person attribution.",
+            "For master and long-form variants, use three to six concise editorial blocks: a concrete hook, at least two distinct analytical steps, and an optional natural close. Short-feed variants may use two to four.",
+            "Editorial blocks may only be opinion, transition, or CTA. They must not add unsupported facts, named-entity claims, quotations, prices, promises, or first-person attribution.",
+            "A verified number or date may appear in editorial framing only when copied exactly from the supplied public claims; never calculate, round, compare, or combine numbers.",
+            "Do not use audit/meta copy such as '先把事实和判断分开', '以下分析', '编辑说明', '公开信息只是起点', or '接下来可以继续观察'. The draft must read as publishable copy, not an internal review note.",
+            "Avoid interchangeable filler. Every analytical block must advance a concrete thesis tied to this event: who is affected, what rule or incentive changes, or what observable result should be checked next.",
+            "Do not force a question, invitation, disclaimer, or CTA when a firm closing judgment is more natural.",
             "Make each requested platform variant meaningfully different in rhythm and reader action while preserving every required factual block verbatim.",
         ],
     }
