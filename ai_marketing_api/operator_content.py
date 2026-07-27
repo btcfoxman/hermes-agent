@@ -880,6 +880,20 @@ def _safe_candidate_blocks(
         return False
 
     for index, raw in enumerate(raw_blocks[:80], start=1):
+        if isinstance(raw, str):
+            # Some JSON-only models serialize an opaque selection as the bare
+            # block_ref string instead of {"block_ref": "..."}. Accepting an
+            # exact server-issued hash is equivalent and cannot introduce
+            # model-authored prose; every unknown string still fails closed.
+            block_ref = raw.strip()
+            canonical = canonical_by_ref.get(block_ref)
+            if canonical is None:
+                warnings.append(
+                    f"discarded_unknown_model_block_ref:{prefix}-{index}"
+                )
+                continue
+            selected.append(canonical)
+            continue
         if not isinstance(raw, dict):
             errors.append(f"invalid_model_block:{prefix}-{index}")
             continue
@@ -926,15 +940,28 @@ def _safe_candidate_blocks(
         block.binding_hash for block in selected if block.binding_hash
     }
     missing = [
-        block.claim_id or block.binding_hash[:12]
+        block
         for block in required_blocks
         if block.binding_hash not in selected_refs
     ]
     if missing:
-        labels = ",".join(missing[:8])
+        labels = ",".join(
+            block.claim_id or block.binding_hash[:12]
+            for block in missing[:8]
+        )
         if len(missing) > 8:
             labels = f"{labels},+{len(missing) - 8}"
-        errors.append(f"required_model_blocks_missing:{prefix}:{labels}")
+        if errors:
+            errors.append(f"required_model_blocks_missing:{prefix}:{labels}")
+        else:
+            # Required evidence blocks are server-owned and immutable. A model
+            # may order or omit them, but cannot veto a required approved
+            # claim. Restore omissions deterministically after discarding any
+            # unknown bare refs.
+            selected.extend(missing)
+            warnings.append(
+                f"model_required_blocks_restored:{prefix}:{labels}"
+            )
     return selected, errors, warnings
 
 

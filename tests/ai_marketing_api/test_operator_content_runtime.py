@@ -780,6 +780,130 @@ def test_industry_two_independent_sources_allow_server_template_refs():
     assert {block.text for block in exact} == {source.content for source in sources}
 
 
+def test_model_may_select_canonical_blocks_with_bare_hash_refs():
+    source = _context(
+        "source-official",
+        "industry",
+        "industry",
+        "source_item",
+        content="The regulator published the official decision.",
+        source_uri="https://official.example/decision",
+        source_tier="official",
+    )
+    request = _request(
+        [source],
+        [_claim(source.content, "fact", [source.record_id])],
+    )
+    registry = OperatorRegistry()
+    authorized = registry.authorize(OperatorRole.INDUSTRY, [source], AS_OF)
+    fallback = build_content_fallback(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    payload = content_request_payload(
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    required_refs = [
+        block["block_ref"]
+        for block in payload["canonical_block_registry"]
+        if block["required"]
+    ]
+    candidate = {
+        "_model": "bare-ref-json-model",
+        "blocks": list(required_refs),
+        "platform_variants": [
+            {
+                "platform": channel,
+                "blocks": list(required_refs),
+            }
+            for channel in request.channels
+        ],
+    }
+
+    output = normalize_content_output(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+        fallback,
+        candidate,
+    )
+
+    assert output.status == ContentStatus.CONTENT_READY.value
+    assert output.critic.passed is True
+    assert source.content in (output.master_content or "")
+    assert all(
+        {
+            block.binding_hash
+            for block in variant.blocks
+            if block.required
+        }
+        == set(required_refs)
+        for variant in output.platform_variants
+    )
+
+
+def test_unknown_bare_block_ref_is_discarded_and_required_claim_is_restored():
+    source = _context(
+        "source-official",
+        "industry",
+        "industry",
+        "source_item",
+        content="The regulator published the official decision.",
+        source_uri="https://official.example/decision",
+        source_tier="official",
+    )
+    request = _request(
+        [source],
+        [_claim(source.content, "fact", [source.record_id])],
+    )
+    registry = OperatorRegistry()
+    authorized = registry.authorize(OperatorRole.INDUSTRY, [source], AS_OF)
+    fallback = build_content_fallback(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    candidate = {
+        "_model": "unsafe-bare-ref-model",
+        "blocks": ["invented prose must not render"],
+        "platform_variants": [
+            {
+                "platform": channel,
+                "blocks": ["invented prose must not render"],
+            }
+            for channel in request.channels
+        ],
+    }
+
+    output = normalize_content_output(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+        fallback,
+        candidate,
+    )
+
+    assert output.status == ContentStatus.CONTENT_READY.value
+    assert output.critic.passed is True
+    assert source.content in (output.master_content or "")
+    assert "invented prose must not render" not in output.model_dump_json()
+    assert any(
+        warning.startswith("discarded_unknown_model_block_ref")
+        for warning in output.critic.warnings
+    )
+    assert any(
+        warning.startswith("model_required_blocks_restored")
+        for warning in output.critic.warnings
+    )
+
+
 def test_industry_same_publisher_on_two_domains_is_not_independent():
     exact_fact = "The same publisher repeated one exact statement."
     sources = [
