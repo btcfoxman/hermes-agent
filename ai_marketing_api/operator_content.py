@@ -209,6 +209,22 @@ _TITLE_ACTION_RE = re.compile(
     r"penalty|launch|release|acquisition|funding|investigation)",
     re.IGNORECASE,
 )
+_EDITORIAL_KIND_ALIASES = {
+    "hook": ContentBlockKind.TRANSITION.value,
+    "lead": ContentBlockKind.TRANSITION.value,
+    "intro": ContentBlockKind.TRANSITION.value,
+    "opening": ContentBlockKind.TRANSITION.value,
+    "framing": ContentBlockKind.TRANSITION.value,
+    "analysis": ContentBlockKind.OPINION.value,
+    "implication": ContentBlockKind.OPINION.value,
+    "takeaway": ContentBlockKind.OPINION.value,
+    "perspective": ContentBlockKind.OPINION.value,
+    "reader_value": ContentBlockKind.OPINION.value,
+    "significance": ContentBlockKind.OPINION.value,
+    "call_to_action": ContentBlockKind.CTA.value,
+    "reader_question": ContentBlockKind.CTA.value,
+    "prompt": ContentBlockKind.CTA.value,
+}
 
 
 def _value(value: Any) -> str:
@@ -1106,7 +1122,8 @@ def _safe_candidate_blocks(
             selected.append(canonical)
             continue
 
-        kind = str(raw.get("kind") or "").strip().lower()
+        raw_kind = str(raw.get("kind") or "").strip().lower()
+        kind = _EDITORIAL_KIND_ALIASES.get(raw_kind, raw_kind)
         text = str(raw.get("text") or "").strip()
         raw_evidence_ids = raw.get("evidence_ids") or []
         if not isinstance(raw_evidence_ids, list):

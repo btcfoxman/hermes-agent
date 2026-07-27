@@ -1440,6 +1440,65 @@ def test_safe_industry_model_opinion_is_accepted_as_editorial():
     assert editorial.required is False
 
 
+@pytest.mark.parametrize(
+    ("alias", "text", "expected_kind"),
+    [
+        ("hook", "真正值得关注的，是后续执行如何影响行业预期。", "transition"),
+        ("analysis", "编辑观点：关键在于后续规则是否更透明。", "opinion"),
+        ("reader_question", "你更关注规则透明度，还是后续执行？", "cta"),
+    ],
+)
+def test_common_model_editorial_kind_aliases_are_safely_normalized(
+    alias,
+    text,
+    expected_kind,
+):
+    source = _context(
+        "official-editorial-alias",
+        "industry",
+        "industry",
+        "source_item",
+        content="Official exact statement.",
+        source_uri="https://official.example/release",
+        source_tier="official",
+    )
+    request = _request(
+        [source],
+        [_claim(source.content, "fact", [source.record_id])],
+    )
+    registry = OperatorRegistry()
+    authorized = registry.authorize(OperatorRole.INDUSTRY, [source], AS_OF)
+    fallback = build_content_fallback(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    payload = content_request_payload(
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    candidate = _candidate_from_required_refs(payload, request.channels)
+    candidate["blocks"].append(
+        {"kind": alias, "text": text, "evidence_ids": []}
+    )
+
+    output = normalize_content_output(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+        fallback,
+        candidate,
+    )
+
+    assert output.status == ContentStatus.CONTENT_READY.value
+    block = next(block for block in output.blocks if block.text == text)
+    assert block.kind == expected_kind
+    assert block.origin == "model_editorial"
+
+
 def test_personal_background_fact_cannot_replace_an_approved_personal_card():
     industry = _context(
         "industry-1",
