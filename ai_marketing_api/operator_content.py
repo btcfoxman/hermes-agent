@@ -902,7 +902,9 @@ def _safe_candidate_blocks(
         if block_ref:
             canonical = canonical_by_ref.get(block_ref)
             if canonical is None:
-                errors.append(f"unknown_model_block_ref:{prefix}-{index}")
+                warnings.append(
+                    f"discarded_unknown_model_block_ref:{prefix}-{index}"
+                )
                 continue
             if echo_is_tampered(raw, canonical):
                 errors.append(f"tampered_model_block_ref:{prefix}-{index}")

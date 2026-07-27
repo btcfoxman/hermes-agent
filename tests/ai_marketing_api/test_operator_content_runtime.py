@@ -847,7 +847,16 @@ def test_model_may_select_canonical_blocks_with_bare_hash_refs():
     )
 
 
-def test_unknown_bare_block_ref_is_discarded_and_required_claim_is_restored():
+@pytest.mark.parametrize(
+    "unknown_block",
+    [
+        "invented prose must not render",
+        {"block_ref": "invented prose must not render"},
+    ],
+)
+def test_unknown_block_ref_is_discarded_and_required_claim_is_restored(
+    unknown_block,
+):
     source = _context(
         "source-official",
         "industry",
@@ -871,11 +880,11 @@ def test_unknown_bare_block_ref_is_discarded_and_required_claim_is_restored():
     )
     candidate = {
         "_model": "unsafe-bare-ref-model",
-        "blocks": ["invented prose must not render"],
+        "blocks": [deepcopy(unknown_block)],
         "platform_variants": [
             {
                 "platform": channel,
-                "blocks": ["invented prose must not render"],
+                "blocks": [deepcopy(unknown_block)],
             }
             for channel in request.channels
         ],
@@ -1123,7 +1132,6 @@ def test_master_and_variant_bodies_are_deterministically_rendered_from_safe_bloc
 @pytest.mark.parametrize(
     ("tamper", "error_prefix"),
     [
-        ("ref", "unknown_model_block_ref"),
         ("text", "tampered_model_block_ref"),
         ("evidence", "tampered_model_block_ref"),
     ],
@@ -1156,9 +1164,7 @@ def test_canonical_block_ref_tampering_fails_closed(tamper, error_prefix):
         authorized,
     )
     candidate = _candidate_from_required_refs(payload, request.channels)
-    if tamper == "ref":
-        candidate["blocks"][0]["block_ref"] = "f" * 64
-    elif tamper == "text":
+    if tamper == "text":
         candidate["blocks"][0]["text"] = "Forged model text."
     else:
         candidate["blocks"][0]["evidence_ids"] = ["forged-evidence"]
