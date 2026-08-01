@@ -1781,6 +1781,24 @@ def enforce_social_publishability(
         return OperatorContentOutput(**data)
 
     data = _dump(output)
+    blocking_quality_risks = [
+        {
+            "code": error.split(":", 1)[0],
+            "message": error,
+            "blocking": True,
+        }
+        for error in errors
+    ]
+    # A model can emit one discarded optional block per surface, saturating
+    # the 50-item warning budget before this terminal quality gate runs.  The
+    # API must still return a valid fail-closed response instead of raising a
+    # Pydantic validation error and leaking an empty HTTP 500 body.  Keep the
+    # terminal blockers first, then retain as many earlier diagnostics as the
+    # public response contract permits.
+    capped_risks = [
+        *blocking_quality_risks,
+        *list(data.get("risk_flags", [])),
+    ][:50]
     data.update(
         {
             "status": ContentStatus.QUALITY_INSUFFICIENT.value,
@@ -1793,17 +1811,7 @@ def enforce_social_publishability(
                 _dump(question)
                 for question in _questions(output.role_id, errors)
             ],
-            "risk_flags": [
-                *data.get("risk_flags", []),
-                *[
-                    {
-                        "code": error.split(":", 1)[0],
-                        "message": error,
-                        "blocking": True,
-                    }
-                    for error in errors
-                ],
-            ],
+            "risk_flags": capped_risks,
             "critic": {
                 **data["critic"],
                 "passed": False,

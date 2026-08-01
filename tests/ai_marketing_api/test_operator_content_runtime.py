@@ -21,6 +21,7 @@ from ai_marketing_api.operator_runtime import (
     AuthorizedContext,
     OperatorClaim,
     OperatorRegistry,
+    OperatorRisk,
     OperatorRole,
     ProposalOutline,
 )
@@ -1760,6 +1761,48 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
         error.startswith("social_editorial_")
         for error in publishable.critic.errors
     )
+
+
+def test_terminal_social_gate_caps_saturated_diagnostics_and_keeps_blockers_first():
+    fact = "监管部门作出行政处罚，并要求企业全面整改。"
+    source = _context(
+        "official-risk-budget",
+        "industry",
+        "industry",
+        "source_item",
+        content=fact,
+        source_uri="https://official.example/risk-budget",
+        source_tier="official",
+    )
+    output = _run(
+        OperatorRole.INDUSTRY,
+        _request([source], [_claim(fact, "fact", [source.record_id])]),
+    )
+    saturated = output.model_copy(
+        update={
+            "risk_flags": [
+                OperatorRisk(
+                    code=f"warning_{index}",
+                    message=f"warning {index}",
+                    blocking=False,
+                )
+                for index in range(50)
+            ]
+        }
+    )
+
+    publishable = enforce_social_publishability(saturated)
+
+    assert publishable.status == ContentStatus.QUALITY_INSUFFICIENT.value
+    assert len(publishable.risk_flags) == 50
+    assert publishable.risk_flags[0].blocking is True
+    assert publishable.risk_flags[0].code in {
+        "model_generation_required",
+        "social_editorial_template_forbidden",
+        "social_editorial_depth_insufficient",
+        "social_editorial_hook_missing",
+        "social_editorial_analysis_insufficient",
+    }
 
 
 def test_terminal_social_gate_accepts_deep_distinct_model_editorial():
