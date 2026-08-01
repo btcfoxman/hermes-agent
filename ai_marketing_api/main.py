@@ -735,9 +735,18 @@ async def _run_compose(
             "quality_retry": {
                 "instruction": (
                     "Rewrite once from scratch. The previous draft was safe "
-                    "but not publishable social copy. Return original, "
-                    "event-specific editorial blocks for every surface."
+                    "but not publishable social copy. First choose one concrete "
+                    "reader-facing thesis from the approved facts, then return "
+                    "original, event-specific editorial blocks for every surface. "
+                    "Do not describe the review process, label facts/opinions, "
+                    "repeat a generic 'worth watching' wrapper, or end with an "
+                    "automatic observation list."
                 ),
+                "required_shape": [
+                    "platform-native hook anchored to a concrete actor, amount, rule, constraint, or consequence from approved claims",
+                    "at least two distinct analytical steps that explain mechanism and reader impact without inventing facts",
+                    "a firm useful landing; CTA only when it is genuinely natural for that platform",
+                ],
                 "critic_errors": list(output.critic.errors),
             },
         }

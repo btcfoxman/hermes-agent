@@ -208,7 +208,9 @@ _UNSUPPORTED_EDITORIAL_ASSERTION_RE = re.compile(
 _GENERIC_EDITORIAL_META_RE = re.compile(
     r"(?:"
     r"先把.{0,16}事实.{0,16}(?:判断|观点).{0,8}分开|"
-    r"以下.{0,12}(?:分析|事实|观点)|编辑说明|"
+    r"以下.{0,12}(?:分析|事实|观点)|"
+    r"(?:编辑|审稿)(?:说明|观点|判断|分析)[：:]?|"
+    r"(?:事实|判断|观点)(?:部分|层面|如下)?[：:]|"
     r"公开信息只是起点|欢迎围绕公开证据|"
     r"对.{0,24}(?:的人|读者)来说[，,]?(?:重点|价值).{0,20}(?:不只是|在于)|"
     r"从(?:行业|商业|平台|用户).{0,8}(?:视角|角度)看[，,]?|"
@@ -1880,6 +1882,20 @@ def content_request_payload(
             "cta": None,
         }
     )
+    publication_brief = {
+        "commercial": {
+            "voice": "A precise business operator who connects one verified capability or offer to one concrete customer situation.",
+            "reader_outcome": "The reader understands whether the verified offer fits their situation and what useful next step is available.",
+        },
+        "industry": {
+            "voice": "An informed industry operator with a clear thesis, not a news copier or compliance reviewer.",
+            "reader_outcome": "The reader understands one concrete change in incentives, costs, bargaining position, or operating rules and knows what observable consequence matters next.",
+        },
+        "personal_ip": {
+            "voice": "A recognizable personal-IP operator who uses only approved personal cards and never invents a first-person experience.",
+            "reader_outcome": "The reader gets one specific, useful point of view grounded in the owner's approved experience or viewpoint.",
+        },
+    }[role.value]
     platform_briefs = {
         "wechat_moments": (
             "A concise personal-feed post: lead with a concrete judgment, "
@@ -1928,14 +1944,28 @@ def content_request_payload(
         "as_of": request.as_of.isoformat(),
         "approved_proposal": {
             "title": public_title,
-            "angle": "Keep verified source excerpts separate from non-factual editorial framing.",
-            "audience_value": "Explain the approved public direction clearly.",
+            "angle": editorial_brief["angle"],
+            "audience_value": editorial_brief["audience_value"],
             "key_points": public_key_points,
             "suggested_formats": list(request.channels),
-            "cta": None,
+            "cta": editorial_brief["cta"],
             "first_person": role is OperatorRole.PERSONAL_IP,
         },
         "approved_editorial_brief": editorial_brief,
+        "publication_brief": {
+            **publication_brief,
+            "thesis_contract": [
+                "Choose one event-specific thesis before writing. Do not merely summarize the source or announce that facts and opinions are separate.",
+                "Build the thesis around a concrete relationship already visible in the approved claims: actor versus affected party, penalty versus remedy, capability versus customer constraint, or action versus observable consequence.",
+                "Make every editorial block earn its place: hook with the tension, explain the mechanism or reader impact, then land on a useful judgment. Do not add an automatic observation list or engagement question.",
+                "Use factual nouns, actors, rules, and exact grounded numbers from the approved claims as anchors. Avoid abstract paragraphs that could be pasted under an unrelated news item.",
+            ],
+            "reader_facing_rule": (
+                "Never expose editorial workflow labels such as fact section, "
+                "opinion section, editor's note, review note, evidence note, "
+                "or 'first separate fact from judgment'."
+            ),
+        },
         "platform_editorial_briefs": {
             channel: platform_briefs[channel]
             for channel in request.channels
@@ -2008,7 +2038,7 @@ def content_request_payload(
             "For master and long-form variants, use three to six concise editorial blocks: a concrete hook, at least two distinct analytical steps, and an optional natural close. Short-feed variants may use two to four.",
             "Editorial blocks may only be opinion, transition, or CTA. They must not add unsupported facts, named-entity claims, quotations, prices, promises, or first-person attribution.",
             "A verified number or date may appear in editorial framing only when copied exactly from the supplied public claims; never calculate, round, compare, or combine numbers.",
-            "Do not use audit/meta copy such as '先把事实和判断分开', '以下分析', '编辑说明', '公开信息只是起点', or '接下来可以继续观察'. The draft must read as publishable copy, not an internal review note.",
+            "Do not use audit/meta copy such as '先把事实和判断分开', '以下分析', '编辑说明', '编辑观点', '事实部分', '公开信息只是起点', or '接下来可以继续观察'. The draft must read as publishable copy, not an internal review note.",
             "Avoid interchangeable filler such as '对关注某领域的人来说', '从行业视角看', '这类案例的价值在于', or '重点不只是……更是……'. Every analytical block must advance a concrete thesis tied to this event.",
             "Build the thesis from a concrete contrast or relationship already present in the approved facts (for example penalty versus restitution, announcement versus enforceable action, or platform versus affected participant). Name the affected actor, changed rule/incentive, or observable consequence instead of merely saying the event is important.",
             "Keep fact/opinion separation in block metadata, never as reader-facing wording. The published copy should not explain its own editorial process.",

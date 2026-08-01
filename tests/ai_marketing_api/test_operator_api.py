@@ -315,6 +315,8 @@ def test_compose_retries_shallow_model_copy_once(monkeypatch):
     assert len(calls) == 2
     assert "quality_retry" not in calls[0]
     assert calls[1]["quality_retry"]["critic_errors"]
+    assert calls[1]["quality_retry"]["required_shape"]
+    assert "Do not describe the review process" in calls[1]["quality_retry"]["instruction"]
 
 
 def test_compose_uses_the_same_byte_stable_role_prompt(monkeypatch):

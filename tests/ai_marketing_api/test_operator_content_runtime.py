@@ -1382,7 +1382,7 @@ def test_server_restores_required_claim_when_model_only_returns_safe_editorial()
     )
 
 
-def test_safe_industry_model_opinion_is_accepted_as_editorial():
+def test_reader_facing_editorial_label_is_rejected_as_meta_copy():
     source = _context(
         "official-opinion-gate",
         "industry",
@@ -1428,22 +1428,20 @@ def test_safe_industry_model_opinion_is_accepted_as_editorial():
     )
 
     assert output.status == ContentStatus.CONTENT_READY.value
-    assert "编辑观点：这项变化值得持续观察。" in (output.master_content or "")
-    editorial = next(
-        block
-        for block in output.blocks
-        if block.text == "编辑观点：这项变化值得持续观察。"
+    assert "编辑观点：这项变化值得持续观察。" not in (output.master_content or "")
+    assert any(
+        warning.endswith(":generic_meta_copy_forbidden")
+        for warning in output.critic.warnings
     )
-    assert editorial.origin == "model_editorial"
-    assert editorial.evidence_ids == []
-    assert editorial.required is False
+    publishable = enforce_social_publishability(output)
+    assert publishable.status == ContentStatus.QUALITY_INSUFFICIENT.value
 
 
 @pytest.mark.parametrize(
     ("alias", "text", "expected_kind"),
     [
         ("hook", "真正值得关注的，是后续执行如何影响行业预期。", "transition"),
-        ("analysis", "编辑观点：关键在于后续规则是否更透明。", "opinion"),
+        ("analysis", "关键在于后续规则是否更透明，而不是只记住一次通报。", "opinion"),
         ("reader_question", "你更关注规则透明度，还是后续执行？", "cta"),
     ],
 )
