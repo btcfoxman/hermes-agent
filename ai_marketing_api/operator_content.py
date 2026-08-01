@@ -1126,12 +1126,19 @@ def _safe_candidate_blocks(
             return None, "first_person_forbidden"
         if role is OperatorRole.COMMERCIAL and _COMMERCIAL_ASSERTION_RE.search(text):
             return None, "commercial_assertion_forbidden"
+        # A social hook is structural, not a lexical template. Requiring words
+        # such as "值得关注", "影响", or "先看" trains the model toward the
+        # exact generic AI voice this gate is meant to reject.  Safety is
+        # already enforced above; for transitions require only a substantive
+        # reader-facing line. Opinion and CTA intent remain explicit.
+        compact_text = re.sub(r"[\s，。！？、；：,.!?;:'\"“”‘’()（）\-—]", "", text)
         intent_patterns = {
-            ContentBlockKind.TRANSITION.value: _EDITORIAL_TRANSITION_RE,
             ContentBlockKind.OPINION.value: _EDITORIAL_OPINION_RE,
             ContentBlockKind.CTA.value: _EDITORIAL_CTA_RE,
         }
-        if not intent_patterns[kind].search(text):
+        if kind == ContentBlockKind.TRANSITION.value and len(compact_text) < 8:
+            return None, "editorial_substance_required"
+        if kind in intent_patterns and not intent_patterns[kind].search(text):
             return None, "editorial_intent_required"
         # Do not let an editorial block simply echo an exact fact while
         # dropping its evidence binding.

@@ -1441,7 +1441,7 @@ def test_reader_facing_editorial_label_is_rejected_as_meta_copy():
 @pytest.mark.parametrize(
     ("alias", "text", "expected_kind"),
     [
-        ("hook", "真正值得关注的，是后续执行如何影响行业预期。", "transition"),
+        ("hook", "A penalty puts both sides of the platform on the same ledger.", "transition"),
         ("analysis", "关键在于后续规则是否更透明，而不是只记住一次通报。", "opinion"),
         ("reader_question", "你更关注规则透明度，还是后续执行？", "cta"),
     ],
