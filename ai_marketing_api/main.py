@@ -747,8 +747,9 @@ async def _run_compose(
                     "automatic observation list."
                 ),
                 "required_shape": [
-                    "platform-native hook anchored to a concrete actor, amount, rule, constraint, or consequence from approved claims",
-                    "at least two distinct analytical steps that explain mechanism and reader impact without inventing facts",
+                    "one kind=transition platform-native hook anchored to a concrete actor, amount, rule, constraint, or consequence from approved claims",
+                    "for master, wechat_mp, and toutiao: at least two distinct kind=opinion analytical blocks that explain mechanism and reader impact without inventing facts",
+                    "for every other platform: at least one kind=opinion analytical block in addition to the kind=transition hook",
                     "a firm useful landing; CTA only when it is genuinely natural for that platform",
                 ],
                 "block_binding_rule": (

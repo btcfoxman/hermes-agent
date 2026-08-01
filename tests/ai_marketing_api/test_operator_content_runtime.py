@@ -349,6 +349,10 @@ def test_content_request_exposes_server_owned_canonical_block_refs():
     assert "one exact block_ref from canonical_block_registry" in block_contract
     assert "opinion|transition|cta" in block_contract
     assert "do not copy this description" in block_contract
+    editorial_shape = payload["response_contract"]["editorial_shape"]
+    assert "two distinct authored kind=opinion" in editorial_shape["master_and_long_form"]
+    assert "one authored kind=opinion" in editorial_shape["short_form"]
+    assert "Do not label analysis as transition" in editorial_shape["classification_rule"]
 
 
 def test_commercial_internal_context_is_readable_but_never_publishable_or_model_visible():

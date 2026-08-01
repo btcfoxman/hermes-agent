@@ -2204,6 +2204,21 @@ def content_request_payload(
                 "blocks": "array of actual block objects using the same blocks contract",
             }
         ],
+        "editorial_shape": {
+            "master_and_long_form": (
+                "include at least one authored kind=transition hook and at least "
+                "two distinct authored kind=opinion analysis blocks"
+            ),
+            "short_form": (
+                "include at least one authored kind=transition hook and at least "
+                "one authored kind=opinion analysis block"
+            ),
+            "classification_rule": (
+                "Use kind=transition only for the reader-facing hook or bridge. "
+                "Use kind=opinion for every mechanism, tradeoff, implication, "
+                "reader impact, or concluding judgment. Do not label analysis as transition."
+            ),
+        },
         "safety": [
             "Do not write master_content or variant body directly; the server renders normalized blocks.",
             "Every factual, pricing, identity, or experience statement must use its exact block_ref from canonical_block_registry; never paraphrase it.",
