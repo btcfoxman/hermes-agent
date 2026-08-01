@@ -1582,7 +1582,7 @@ def test_editorial_type_and_content_field_aliases_are_safely_normalized():
     )
     candidate = _candidate_from_required_refs(payload, request.channels)
     editorial = (
-        "从行业视角看，规则是否改变、执行是否持续、参与者是否真实感受到变化，才是判断影响的关键。"
+        "这项变动影响谁的规则与选择、执行是否持续，才是判断其行业影响的关键。"
     )
     candidate["blocks"].append(
         {"type": "analysis", "content": editorial, "evidence_ids": []}
@@ -1720,11 +1720,13 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
     candidate = _candidate_from_required_refs(payload, request.channels)
     grounded = "51.79亿元罚没款之后，更关键的问题是整改能否真正改变相关规则。"
     meta = "先把这条消息里的事实和判断分开。"
+    filler = "对关注平台经济和反垄断的人来说，重点不只是金额，更是监管定性与整改要求。"
     invented = "52亿元罚没款之后，更关键的问题是整改能否真正改变相关规则。"
     candidate["blocks"].extend(
         [
             {"kind": "transition", "text": grounded, "evidence_ids": []},
             {"kind": "transition", "text": meta, "evidence_ids": []},
+            {"kind": "opinion", "text": filler, "evidence_ids": []},
             {"kind": "transition", "text": invented, "evidence_ids": []},
         ]
     )
@@ -1741,11 +1743,12 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
     assert output.status == ContentStatus.CONTENT_READY.value
     assert grounded in output.master_content
     assert meta not in output.master_content
+    assert filler not in output.master_content
     assert invented not in output.master_content
-    assert any(
+    assert sum(
         warning.endswith(":generic_meta_copy_forbidden")
         for warning in output.critic.warnings
-    )
+    ) == 2
     assert any(
         warning.endswith(":number_ungrounded")
         for warning in output.critic.warnings

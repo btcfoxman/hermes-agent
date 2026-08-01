@@ -209,8 +209,12 @@ _GENERIC_EDITORIAL_META_RE = re.compile(
     r"先把.{0,16}事实.{0,16}(?:判断|观点).{0,8}分开|"
     r"以下.{0,12}(?:分析|事实|观点)|编辑说明|"
     r"公开信息只是起点|欢迎围绕公开证据|"
+    r"对.{0,24}(?:的人|读者)来说[，,]?(?:重点|价值).{0,20}(?:不只是|在于)|"
+    r"从(?:行业|商业|平台|用户).{0,8}(?:视角|角度)看[，,]?|"
+    r"这类(?:事件|案例|消息).{0,12}(?:价值|重点).{0,12}(?:在于|是)|"
     r"真正值得关注的[，,]?\s*不只是事件本身|"
-    r"接下来可以继续观察"
+    r"(?:接下来|后续)可以继续观察|"
+    r"后续措施如何落地.{0,24}(?:透明|可预期|到位)"
     r")",
     re.IGNORECASE,
 )
@@ -1813,7 +1817,9 @@ def content_request_payload(
             "Editorial blocks may only be opinion, transition, or CTA. They must not add unsupported facts, named-entity claims, quotations, prices, promises, or first-person attribution.",
             "A verified number or date may appear in editorial framing only when copied exactly from the supplied public claims; never calculate, round, compare, or combine numbers.",
             "Do not use audit/meta copy such as '先把事实和判断分开', '以下分析', '编辑说明', '公开信息只是起点', or '接下来可以继续观察'. The draft must read as publishable copy, not an internal review note.",
-            "Avoid interchangeable filler. Every analytical block must advance a concrete thesis tied to this event: who is affected, what rule or incentive changes, or what observable result should be checked next.",
+            "Avoid interchangeable filler such as '对关注某领域的人来说', '从行业视角看', '这类案例的价值在于', or '重点不只是……更是……'. Every analytical block must advance a concrete thesis tied to this event.",
+            "Build the thesis from a concrete contrast or relationship already present in the approved facts (for example penalty versus restitution, announcement versus enforceable action, or platform versus affected participant). Name the affected actor, changed rule/incentive, or observable consequence instead of merely saying the event is important.",
+            "Keep fact/opinion separation in block metadata, never as reader-facing wording. The published copy should not explain its own editorial process.",
             "Do not force a question, invitation, disclaimer, or CTA when a firm closing judgment is more natural.",
             "The server keeps required factual blocks verbatim for audit and renders long ones as concise source-exact fact beats. Do not repeat the full announcement in editorial prose.",
             "Make each requested platform variant meaningfully different in title, rhythm, depth, and reader action while preserving every required factual block reference.",
