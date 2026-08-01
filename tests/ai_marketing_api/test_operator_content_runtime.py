@@ -1844,7 +1844,7 @@ def test_terminal_social_gate_accepts_deep_distinct_model_editorial():
         if block["required"]
     ]
 
-    def editorial(label: str) -> list[dict]:
+    def editorial(label: str, count: int = 3) -> list[dict]:
         return [
             {
                 "kind": "transition",
@@ -1870,7 +1870,7 @@ def test_terminal_social_gate_accepts_deep_distinct_model_editorial():
                 ),
                 "evidence_ids": [],
             },
-        ]
+        ][:count]
 
     candidate = {
         "_model": "publishable-test-model",
@@ -1878,7 +1878,13 @@ def test_terminal_social_gate_accepts_deep_distinct_model_editorial():
         "platform_variants": [
             {
                 "platform": channel,
-                "blocks": [*deepcopy(required), *editorial(channel)],
+                "blocks": [
+                    *deepcopy(required),
+                    *editorial(
+                        channel,
+                        2 if channel == "wechat_mp" else 1,
+                    ),
+                ],
             }
             for channel in request.channels
         ],

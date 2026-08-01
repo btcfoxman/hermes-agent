@@ -1493,7 +1493,7 @@ def _questions(role: OperatorRole, errors: Sequence[str]) -> List[OperatorQuesti
     return result
 
 
-_LONG_FORM_SURFACES = frozenset({"master", "wechat_mp", "toutiao"})
+_LONG_FORM_SURFACES = frozenset({"wechat_mp", "toutiao"})
 
 
 def _social_surface_quality_errors(
@@ -1519,18 +1519,33 @@ def _social_surface_quality_errors(
             ContentBlockKind.CTA.value,
         }
     ]
-    long_form = surface in _LONG_FORM_SURFACES
-    minimum_editorial = 3 if long_form else 2
-    minimum_analysis = 2 if long_form else 1
+    # The master is the reusable editorial source and therefore carries the
+    # deepest argument.  Long-form platform adaptations may be tighter, while
+    # short social/video copy often expresses its hook and its one useful
+    # implication in the same authored block.  Requiring every short variant
+    # to imitate an article creates padding and rejects platform-native copy.
+    if surface == "master":
+        minimum_editorial = 3
+        minimum_analysis = 2
+        hook_counts_as_analysis = False
+    elif surface in _LONG_FORM_SURFACES:
+        minimum_editorial = 2
+        minimum_analysis = 1
+        hook_counts_as_analysis = False
+    else:
+        minimum_editorial = 1
+        minimum_analysis = 1
+        hook_counts_as_analysis = True
     # Model-authored ``kind`` is useful rendering metadata, but it is not a
     # reliable quality signal: good hooks are often labelled ``opinion`` and
     # analytical steps are often labelled ``transition``.  Judge the actual
     # reading order instead.  The first substantive authored block is the hook;
     # subsequent non-CTA authored blocks must carry the analytical depth.
     hook = editorial[0] if editorial else None
+    analysis_candidates = editorial if hook_counts_as_analysis else editorial[1:]
     analysis = [
         block
-        for block in editorial[1:]
+        for block in analysis_candidates
         if _value(block.kind) in {
             ContentBlockKind.TRANSITION.value,
             ContentBlockKind.OPINION.value,
