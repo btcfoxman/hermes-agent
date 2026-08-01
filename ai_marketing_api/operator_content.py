@@ -1154,13 +1154,15 @@ def _safe_candidate_blocks(
         # already enforced above; for transitions require only a substantive
         # reader-facing line. Opinion and CTA intent remain explicit.
         compact_text = re.sub(r"[\s，。！？、；：,.!?;:'\"“”‘’()（）\-—]", "", text)
-        intent_patterns = {
-            ContentBlockKind.OPINION.value: _EDITORIAL_OPINION_RE,
-            ContentBlockKind.CTA.value: _EDITORIAL_CTA_RE,
-        }
-        if kind == ContentBlockKind.TRANSITION.value and len(compact_text) < 8:
+        if (
+            kind in {
+                ContentBlockKind.TRANSITION.value,
+                ContentBlockKind.OPINION.value,
+            }
+            and len(compact_text) < 8
+        ):
             return None, "editorial_substance_required"
-        if kind in intent_patterns and not intent_patterns[kind].search(text):
+        if kind == ContentBlockKind.CTA.value and not _EDITORIAL_CTA_RE.search(text):
             return None, "editorial_intent_required"
         # Do not let an editorial block simply echo an exact fact while
         # dropping its evidence binding.

@@ -1587,9 +1587,7 @@ def test_editorial_type_and_content_field_aliases_are_safely_normalized():
         authorized,
     )
     candidate = _candidate_from_required_refs(payload, request.channels)
-    editorial = (
-        "这项变动影响谁的规则与选择、执行是否持续，才是判断其行业影响的关键。"
-    )
+    editorial = "一张罚单，把平台和经营者拉回了同一张账本；扣款落到谁身上，话语权也落到谁身上。"
     candidate["blocks"].append(
         {"type": "analysis", "content": editorial, "evidence_ids": []}
     )
