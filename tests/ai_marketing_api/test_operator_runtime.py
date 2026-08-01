@@ -603,6 +603,52 @@ def test_proposal_key_points_cannot_retain_discarded_model_facts():
     }
 
 
+def test_industry_proposal_framing_cannot_drift_from_its_evidence_topic():
+    source = _context(
+        "ctrip-source",
+        "industry",
+        "industry",
+        "source_fact",
+        title="Ctrip antitrust penalty and rectification measures",
+        content="The regulator announced an antitrust penalty against Ctrip.",
+        source_uri="https://official.test/ctrip-penalty",
+        source_tier="official",
+    )
+    candidate = {
+        "_model": "test-model",
+        "proposal": {
+            "title": "Seedance launches longer 4K video generation",
+            "angle": "Explain why Seedance changes AI film production.",
+            "audience_value": "Help video creators try Seedance.",
+            "key_points": ["Unsupported Seedance capability."],
+            "suggested_formats": ["wechat_mp"],
+            "cta": "Try Seedance now.",
+            "first_person": False,
+        },
+        "claims": [
+            {
+                "text": "Unsupported Seedance capability.",
+                "kind": "fact",
+                "evidence_ids": ["ctrip-source"],
+            }
+        ],
+    }
+
+    output = _run(
+        OperatorRegistry(),
+        OperatorRole.INDUSTRY,
+        _request("Write about Seedance"),
+        [source],
+        candidate,
+    )
+
+    assert output.proposal is not None
+    assert output.proposal.title == source.title
+    assert "Seedance" not in output.proposal.angle
+    assert "Seedance" not in (output.proposal.cta or "")
+    assert output.proposal.key_points == [source.content]
+
+
 def test_personal_boundary_card_is_not_repeated_as_publishable_content():
     boundary = _context(
         "boundary-1",

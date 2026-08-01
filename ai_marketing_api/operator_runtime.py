@@ -405,6 +405,43 @@ def _personal_title(
     return _title(request)
 
 
+def _evidence_title(
+    request: OperatorProposeRequest,
+    contexts: Sequence[AuthorizedContext],
+    *,
+    role: OperatorRole,
+) -> str:
+    """Anchor proposal framing to a title supplied by authorized evidence.
+
+    The daily objective is an editorial intent, not a source.  Echoing it as
+    the proposal title can make an unrelated model topic look evidence-backed
+    even when the normalized claims correctly point somewhere else.
+    """
+
+    candidates = list(contexts)
+    if role is OperatorRole.COMMERCIAL:
+        candidates = [
+            context
+            for context in candidates
+            if context.record_type != "business_offer"
+        ]
+    elif role is OperatorRole.INDUSTRY:
+        candidates = [
+            context
+            for context in candidates
+            if _enum_value(context.space) == "industry"
+        ]
+    for context in candidates:
+        title = str(context.title or "").strip()
+        if title:
+            return title[:300]
+    for context in candidates:
+        content = _context_text(context, limit=96).strip()
+        if content:
+            return content[:96]
+    return _title(request)
+
+
 def _formats(request: OperatorProposeRequest) -> List[str]:
     return [str(channel).strip() for channel in request.channels if str(channel).strip()][:12]
 
@@ -526,7 +563,11 @@ def _commercial_fallback(
     return {
         "status": status.value,
         "proposal": {
-            "title": _title(request),
+            "title": _evidence_title(
+                request,
+                contexts,
+                role=OperatorRole.COMMERCIAL,
+            ),
             "angle": "把已批准的产品能力或案例证据连接到明确的客户场景和下一步沟通。",
             "audience_value": request.audience.strip() or "帮助潜在客户判断该能力是否适合自己的业务场景。",
             "key_points": [claim.text for claim in claims[:4]],
@@ -601,7 +642,11 @@ def _industry_fallback(
     return {
         "status": status.value,
         "proposal": {
-            "title": _title(request),
+            "title": _evidence_title(
+                request,
+                industry_sources,
+                role=OperatorRole.INDUSTRY,
+            ),
             "angle": "区分已核验事实与编辑观点，解释变化的业务影响及后续观察项。",
             "audience_value": request.audience.strip() or "帮助读者理解事件影响，而不是重复新闻摘要。",
             "key_points": [claim.text for claim in claims[:4]],
@@ -730,6 +775,14 @@ def _safe_model_proposal(
                 merged[key] = cleaned[:12]
     if isinstance(candidate.get("first_person"), bool):
         merged["first_person"] = candidate["first_person"]
+
+    if role in {OperatorRole.COMMERCIAL, OperatorRole.INDUSTRY}:
+        # These fields are visible to the owner and later seed the content
+        # package.  Keep their prose on the deterministic evidence-backed
+        # frame; otherwise a model can pair a Seedance headline with a Ctrip
+        # evidence manifest while the exact-claim gate still appears green.
+        for key in ("title", "angle", "audience_value", "cta", "first_person"):
+            merged[key] = fallback.get(key)
 
     rendered = json.dumps(merged, ensure_ascii=False)
     if role is OperatorRole.COMMERCIAL:
