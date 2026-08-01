@@ -2068,7 +2068,7 @@ def test_personal_model_editorial_can_add_safe_first_person_judgment():
         request,
         authorized,
     )
-    assert "Do not use first-person attribution" in (
+    assert "First-person present-tense judgment is allowed" in (
         payload["publication_brief"]["authored_block_rule"]
     )
     candidate = _candidate_from_required_refs(payload, request.channels)
