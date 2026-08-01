@@ -336,6 +336,62 @@ def test_compose_retries_shallow_model_copy_once(monkeypatch):
     )
 
 
+def test_compose_keeps_good_surfaces_while_retry_fills_other_platforms(monkeypatch):
+    payload = _compose_payload()
+    payload["channels"] = ["wechat_mp", "xiaohongshu"]
+    calls: list[dict] = []
+
+    async def fake_llm(system, model_payload, fallback, *args, **kwargs):
+        calls.append(model_payload)
+        candidate = _publishable_model_candidate(model_payload)
+        required = [
+            {"block_ref": block["block_ref"]}
+            for block in model_payload["canonical_block_registry"]
+            if block["required"]
+        ]
+        if len(calls) == 1:
+            # The first attempt has a good master and WeChat article, but its
+            # Xiaohongshu body is only a fact wrapper.
+            next(
+                variant
+                for variant in candidate["platform_variants"]
+                if variant["platform"] == "xiaohongshu"
+            )["blocks"] = required
+        else:
+            # The retry repairs Xiaohongshu but regresses surfaces that were
+            # already good. Whole-surface aggregation must retain the earlier
+            # copy instead of making the second response all-or-nothing.
+            candidate["blocks"] = required
+            next(
+                variant
+                for variant in candidate["platform_variants"]
+                if variant["platform"] == "wechat_mp"
+            )["blocks"] = required
+        return candidate
+
+    monkeypatch.setattr(marketing_api, "_llm_json", fake_llm)
+
+    response = _request(
+        "POST",
+        "/api/v1/operators/industry/compose",
+        json=payload,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "content_ready"
+    assert len(calls) == 2
+    assert {variant["platform"] for variant in data["platform_variants"]} == {
+        "wechat_mp",
+        "xiaohongshu",
+    }
+    assert next(
+        check
+        for check in data["critic"]["checks"]
+        if check["code"] == "social_surface_retry_aggregation"
+    )["passed"] is True
+
+
 def test_compose_uses_the_same_byte_stable_role_prompt(monkeypatch):
     prompts: list[str] = []
 

@@ -19,6 +19,7 @@ from ai_marketing_api.operator_content import (
     OperatorComposeRequest,
     OperatorContentOutput,
     build_content_fallback,
+    combine_publishable_surfaces,
     content_request_payload,
     enforce_social_publishability,
     normalize_content_output,
@@ -712,29 +713,32 @@ async def _run_compose(
             model_name,
             timeout_seconds,
         )
-    output = enforce_social_publishability(
-        normalize_content_output(
-            OPERATOR_REGISTRY,
-            role_id,
-            payload,
-            contexts,
-            fallback,
-            candidate,
-        )
+    normalized = normalize_content_output(
+        OPERATOR_REGISTRY,
+        role_id,
+        payload,
+        contexts,
+        fallback,
+        candidate,
     )
+    normalized_attempts = [normalized]
+    output = enforce_social_publishability(normalized)
     candidate_model = str(
         candidate.get("_model") or candidate.get("model") or "fallback"
     ).strip().lower()
-    if (
-        output.status == ContentStatus.QUALITY_INSUFFICIENT.value
-        and candidate_model != "fallback"
-        and not candidate.get("_error")
-    ):
+    for retry_number in range(1, 3):
+        if (
+            output.status != ContentStatus.QUALITY_INSUFFICIENT.value
+            or candidate_model == "fallback"
+            or candidate.get("_error")
+        ):
+            break
         retry_payload = {
             **compose_payload,
             "quality_retry": {
+                "attempt": retry_number,
                 "instruction": (
-                    "Rewrite once from scratch. The previous draft was safe "
+                    "Rewrite this attempt from scratch. The previous draft was safe "
                     "but not publishable social copy. First choose one concrete "
                     "reader-facing thesis from the approved facts, then return "
                     "original, event-specific editorial blocks for every surface. "
@@ -761,7 +765,7 @@ async def _run_compose(
                 ],
             },
         }
-        retry_candidate = await _llm_json(
+        candidate = await _llm_json(
             profile.system_prompt,
             retry_payload,
             fallback,
@@ -770,16 +774,20 @@ async def _run_compose(
             model_name,
             timeout_seconds,
         )
-        return enforce_social_publishability(
-            normalize_content_output(
-                OPERATOR_REGISTRY,
-                role_id,
-                payload,
-                contexts,
-                fallback,
-                retry_candidate,
-            )
+        normalized = normalize_content_output(
+            OPERATOR_REGISTRY,
+            role_id,
+            payload,
+            contexts,
+            fallback,
+            candidate,
         )
+        normalized_attempts.append(normalized)
+        combined = combine_publishable_surfaces(normalized_attempts)
+        output = enforce_social_publishability(combined or normalized)
+        candidate_model = str(
+            candidate.get("_model") or candidate.get("model") or "fallback"
+        ).strip().lower()
     return output
 
 

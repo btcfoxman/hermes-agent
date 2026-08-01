@@ -1830,6 +1830,126 @@ def enforce_social_publishability(
     return OperatorContentOutput(**data)
 
 
+def combine_publishable_surfaces(
+    outputs: Sequence[OperatorContentOutput],
+) -> Optional[OperatorContentOutput]:
+    """Combine whole, independently safe surfaces from multiple model attempts.
+
+    A single compose call can contain a strong master and six strong platform
+    variants while one or two variants are shallow.  Replacing that entire
+    response with a second all-or-nothing attempt makes quality nondeterministic:
+    the retry may fix those two surfaces but regress a different one.  This
+    helper keeps only *whole* surfaces that already pass the same terminal
+    editorial gate.  It never splices paragraphs, changes immutable evidence
+    blocks, or promotes a server template.
+    """
+
+    ready = [
+        output
+        for output in outputs
+        if _value(output.status) == ContentStatus.CONTENT_READY.value
+        and output.master_content
+        and output.platform_variants
+        and not output.critic.errors
+    ]
+    if not ready:
+        return None
+
+    master = next(
+        (
+            output
+            for output in ready
+            if not _social_surface_quality_errors(output.blocks, surface="master")
+        ),
+        None,
+    )
+    if master is None:
+        return None
+
+    platform_order = [variant.platform for variant in ready[0].platform_variants]
+    selected_variants: List[PlatformVariant] = []
+    used_signatures: set[tuple[str, ...]] = set()
+    for platform in platform_order:
+        options = [
+            variant
+            for output in ready
+            for variant in output.platform_variants
+            if variant.platform == platform
+            and not _social_surface_quality_errors(
+                variant.blocks,
+                surface=platform,
+            )
+        ]
+        selected = next(
+            (
+                variant
+                for variant in options
+                if _editorial_signature(variant.blocks) not in used_signatures
+            ),
+            None,
+        )
+        if selected is None:
+            return None
+        selected_variants.append(selected)
+        used_signatures.add(_editorial_signature(selected.blocks))
+
+    warnings = list(
+        dict.fromkeys(
+            warning
+            for output in ready
+            for warning in output.critic.warnings
+        )
+    )[:50]
+    checks = list(_dump(master.critic).get("checks", []))
+    checks.append(
+        _dump(
+            CriticCheck(
+                code="social_surface_retry_aggregation",
+                passed=True,
+                message=(
+                    "Each retained master or platform variant independently passed "
+                    "the terminal social-copy gate without paragraph splicing."
+                ),
+            )
+        )
+    )
+    selected_blocks = [
+        *master.blocks,
+        *(
+            block
+            for variant in selected_variants
+            for block in variant.blocks
+        ),
+    ]
+    data = _dump(master)
+    data.update(
+        {
+            "master_content": _render(master.blocks),
+            "blocks": [_dump(block) for block in master.blocks],
+            "platform_variants": [
+                _dump(variant) for variant in selected_variants
+            ],
+            "evidence_refs": _evidence_refs(selected_blocks),
+            "questions": [],
+            "risk_flags": [
+                {
+                    "code": warning.split(":", 1)[0],
+                    "message": warning,
+                    "blocking": False,
+                }
+                for warning in warnings
+            ],
+            "critic": {
+                "passed": True,
+                "errors": [],
+                "warnings": warnings,
+                "checks": checks,
+            },
+        }
+    )
+    return OperatorContentOutput(**data)
+
+
 def _sanitized_context(context: AuthorizedContext) -> Dict[str, Any]:
     data = _dump(context)
     if context.record_type == "business_offer":
