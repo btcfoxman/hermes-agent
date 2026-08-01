@@ -350,9 +350,11 @@ def test_content_request_exposes_server_owned_canonical_block_refs():
     assert "opinion|transition|cta" in block_contract
     assert "do not copy this description" in block_contract
     editorial_shape = payload["response_contract"]["editorial_shape"]
-    assert "two distinct authored analysis blocks" in editorial_shape["master_and_long_form"]
-    assert "one authored analysis block" in editorial_shape["short_form"]
+    assert "two distinct authored analysis blocks" in editorial_shape["master"]
+    assert "at least one distinct authored analysis block" in editorial_shape["long_form"]
+    assert "same block may satisfy both jobs" in editorial_shape["short_form"]
     assert "Reading order is mandatory" in editorial_shape["classification_rule"]
+    assert "our company" in payload["publication_brief"]["authored_block_rule"]
 
 
 def test_commercial_internal_context_is_readable_but_never_publishable_or_model_visible():

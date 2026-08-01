@@ -2165,6 +2165,25 @@ def content_request_payload(
                 "opinion section, editor's note, review note, evidence note, "
                 "or 'first separate fact from judgment'."
             ),
+            "authored_block_rule": {
+                "commercial": (
+                    "Keep capability, service, price, discount, and company claims in "
+                    "canonical block_ref objects only. In authored blocks, do not say "
+                    "we, our company, our product, or our team provides or supports "
+                    "anything. Write only the customer decision, constraint, tradeoff, "
+                    "risk, or useful next conversation implied by the canonical facts."
+                ),
+                "industry": (
+                    "Write analysis rather than another event assertion: name the changed "
+                    "incentive, cost, bargaining position, rule, or observable consequence."
+                ),
+                "personal_ip": (
+                    "Use canonical block_ref objects for every action, project, customer, "
+                    "result, credential, and past experience. Authored first-person prose "
+                    "may express only a present judgment, tradeoff, or principle; it must "
+                    "not add another thing the owner did, has done, is doing, or achieved."
+                ),
+            }[role.value],
         },
         "platform_editorial_briefs": {
             channel: platform_briefs[channel]
@@ -2231,13 +2250,18 @@ def content_request_payload(
             }
         ],
         "editorial_shape": {
-            "master_and_long_form": (
+            "master": (
                 "include at least one authored hook followed by at least two "
                 "distinct authored analysis blocks"
             ),
+            "long_form": (
+                "for wechat_mp and toutiao, include one authored hook followed "
+                "by at least one distinct authored analysis block"
+            ),
             "short_form": (
-                "include at least one authored hook followed by at least one "
-                "authored analysis block"
+                "include at least one authored block whose first sentence is a "
+                "platform-native hook and whose full text carries one concrete "
+                "implication; the same block may satisfy both jobs"
             ),
             "classification_rule": (
                 "kind=transition and kind=opinion are rendering hints. Reading order "
@@ -2250,7 +2274,7 @@ def content_request_payload(
             "Every factual, pricing, identity, or experience statement must use its exact block_ref from canonical_block_registry; never paraphrase it.",
             "Every platform variant must include every registry block marked required, but may choose its own safe order.",
             "Write a native social master_title and a distinct title for each platform. Keep each title between 12 and 36 Chinese characters when possible; it may use grounded entity names and numbers from public claims plus a clearly editorial judgment, but no new event assertion.",
-            "For master and long-form variants, use three to six concise editorial blocks: a concrete hook, at least two distinct analytical steps, and an optional natural close. Short-feed variants may use two to four.",
+            "For the master, use three to six concise editorial blocks: a concrete hook, at least two distinct analytical steps, and an optional natural close. For wechat_mp and toutiao use at least two authored blocks: a hook plus one analytical step. A short-feed or video variant may use one to three authored blocks; its first block must itself contain a concrete event-specific implication, not merely announce the topic.",
             "Editorial blocks may only be opinion, transition, or CTA. They must not add unsupported facts, named-entity claims, quotations, prices, promises, or unapproved first-person attribution.",
             "For personal_ip only, opinion and transition blocks may use a first-person present-tense judgment such as '我越来越确定' or '我的判断是'. They must not claim a new action, project, customer, result, credential, or past experience; those belong only in exact canonical personal-card blocks.",
             "Every authored opinion, transition, or CTA object must set evidence_ids to [] and omit claim_id and block_ref. Evidence binding belongs only to canonical registry blocks selected by block_ref.",
