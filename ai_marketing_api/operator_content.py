@@ -161,12 +161,19 @@ _PERSONAL_ATTRIBUTION_RE = re.compile(
 _PERSONAL_EDITORIAL_ASSERTION_RE = re.compile(
     r"(?:"
     r"(?:我|我们)(?:曾经?|已经|正在|刚刚|亲自|做过|参与|负责|管理|开发|创办|"
-    r"服务|拥有|有着|发现|遇到|经历|见过|把|花了|用了|实现|获得|赚|亏)|"
+    r"服务|拥有|有着|发现|遇到|经历|见过|创业|任职|从业|把|花了|用了|实现|获得|赚|亏)|"
     r"我的(?:公司|团队|客户|产品|项目|业务|经历|收入|员工)|"
     r"\b(?:i|we)\s+(?:have|had|did|built|made|led|managed|served|owned|"
     r"founded|earned|lost|experienced|discovered)\b|"
     r"\b(?:my|our)\s+(?:company|team|client|customer|product|project|"
     r"business|revenue|employee|experience)\b"
+    r")",
+    re.IGNORECASE,
+)
+_SAFE_PERSONAL_JUDGMENT_RE = re.compile(
+    r"(?:"
+    r"我(?:现在|目前|一直|仍然|仍|更)?(?:认为|觉得|判断|认同|看重|在意|倾向|相信|关注|担心)|"
+    r"我的(?:判断|观点|看法|态度|原则|建议)(?:是|为|：|:)?"
     r")",
     re.IGNORECASE,
 )
@@ -843,6 +850,15 @@ def _safe_master_title(
         match.group(0)
         for match in _UNSUPPORTED_EDITORIAL_ASSERTION_RE.finditer(supplied)
     ]
+    personal_title_safe = bool(
+        not request.approved_proposal.first_person
+        or not _contains_personal_attribution(supplied)
+        or any(supplied in text for text in exact_texts)
+        or (
+            _SAFE_PERSONAL_JUDGMENT_RE.search(supplied)
+            and not _PERSONAL_EDITORIAL_ASSERTION_RE.search(supplied)
+        )
+    )
     if (
         8 <= len(supplied) <= 72
         and not _HTML_RE.search(supplied)
@@ -853,6 +869,7 @@ def _safe_master_title(
         and all(entity in source_text for entity in supplied_entities)
         and bool(supplied_numbers or supplied_entities or grounded_phrase)
         and all(assertion in source_text for assertion in supplied_assertions)
+        and personal_title_safe
     ):
         return supplied
     if (

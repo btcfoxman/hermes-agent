@@ -1727,8 +1727,8 @@ def test_personal_model_can_supply_grounded_titles_without_entities_or_numbers()
         authorized,
     )
     candidate = _candidate_from_required_refs(payload, request.channels)
-    candidate["master_title"] = "自动发布改成人工终审，差的不是一步"
-    candidate["platform_variants"][0]["title"] = "人工终审，把补救挡在发布之前"
+    candidate["master_title"] = "从自动发布到人工终审：我更看重补救成本"
+    candidate["platform_variants"][0]["title"] = "我把自动发布改成了人工终审"
     candidate["platform_variants"][1]["title"] = "错误内容发出去，补救才最费时间"
 
     output = normalize_content_output(
@@ -1740,13 +1740,25 @@ def test_personal_model_can_supply_grounded_titles_without_entities_or_numbers()
         candidate,
     )
 
-    assert output.master_title == "自动发布改成人工终审，差的不是一步"
+    assert output.master_title == "从自动发布到人工终审：我更看重补救成本"
     assert {
         item.platform: item.title for item in output.platform_variants
     } == {
-        "wechat_mp": "人工终审，把补救挡在发布之前",
+        "wechat_mp": "我把自动发布改成了人工终审",
         "xiaohongshu": "错误内容发出去，补救才最费时间",
     }
+
+    unsafe = deepcopy(candidate)
+    unsafe["master_title"] = "为什么我把自动发布改成了人工终审"
+    unsafe_output = normalize_content_output(
+        registry,
+        OperatorRole.PERSONAL_IP,
+        request,
+        authorized,
+        fallback,
+        unsafe,
+    )
+    assert unsafe_output.master_title != unsafe["master_title"]
 
 
 def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_new_numbers():
