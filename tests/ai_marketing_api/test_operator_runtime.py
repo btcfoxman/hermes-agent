@@ -29,6 +29,7 @@ def _context(
     record_type: str,
     *,
     content: str = "Approved source fact.",
+    title: str = "",
     source_uri: str | None = None,
     source_tier: str = "trusted",
     structured_data: dict | None = None,
@@ -37,6 +38,7 @@ def _context(
         record_id=record_id,
         space=space,
         record_type=record_type,
+        title=title,
         content=content,
         structured_data=structured_data or {},
         status="approved",
@@ -533,6 +535,72 @@ def test_personal_ip_claims_are_exact_approved_card_text():
     assert output.proposal is not None
     assert output.proposal.key_points == [card.content]
     assert output.proposal.title != "我靠一次投放赚了百万"
+
+
+def test_personal_ip_title_comes_from_approved_card_not_raw_daily_brief():
+    card = _context(
+        "card-title",
+        "personal_ip",
+        "personal_approved",
+        "opinion",
+        title="我为什么坚持人工终审",
+        content="我更重视可回放、可人工确认的内容运营流程。",
+    )
+    request = _request(
+        "Seedance 2.5 终于上线，30 秒、4K、活动折扣拉满，抢先体验？"
+    )
+    request.topic = ""
+
+    output = _run(OperatorRegistry(), OperatorRole.PERSONAL_IP, request, [card])
+
+    assert output.proposal is not None
+    assert output.proposal.title == card.title
+    assert "Seedance" not in output.proposal.title
+
+
+def test_proposal_key_points_cannot_retain_discarded_model_facts():
+    source = _context(
+        "industry-source",
+        "industry",
+        "industry",
+        "source_fact",
+        content="官方公告确认该产品今天开放测试。",
+        source_uri="https://official.test/announcement",
+        source_tier="official",
+    )
+    candidate = {
+        "_model": "test-model",
+        "proposal": {
+            "title": "开放测试",
+            "angle": "解释影响",
+            "audience_value": "帮助读者判断",
+            "key_points": ["未经证实的销量增长 999%。"],
+            "suggested_formats": ["wechat_mp"],
+            "cta": None,
+            "first_person": False,
+        },
+        "claims": [
+            {
+                "text": "未经证实的销量增长 999%。",
+                "kind": "fact",
+                "evidence_ids": ["industry-source"],
+            }
+        ],
+    }
+
+    output = _run(
+        OperatorRegistry(),
+        OperatorRole.INDUSTRY,
+        _request(),
+        [source],
+        candidate,
+    )
+
+    assert output.proposal is not None
+    assert output.proposal.key_points == [source.content]
+    assert "discarded_unsupported_fact" in {
+        risk.code for risk in output.risk_flags
+    }
 
 
 def test_personal_boundary_card_is_not_repeated_as_publishable_content():

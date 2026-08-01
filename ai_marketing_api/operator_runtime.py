@@ -382,6 +382,29 @@ def _title(request: OperatorProposeRequest) -> str:
     return (request.topic.strip() or request.objective.strip())[:300]
 
 
+def _personal_title(
+    request: OperatorProposeRequest,
+    cards: Sequence[AuthorizedContext],
+) -> str:
+    """Use owner-approved identity material instead of echoing a raw brief.
+
+    The daily objective may contain third-party facts, promotion language, or
+    a very long pasted headline.  It is useful for topic selection but it is
+    not an authorized first-person title.  Prefer the reviewed card title and
+    fall back to a compact excerpt of its exact approved content.
+    """
+
+    for card in cards:
+        title = str(card.title or "").strip()
+        if title:
+            return title[:300]
+    for card in cards:
+        content = _context_text(card, limit=72).strip()
+        if content:
+            return content[:72]
+    return _title(request)
+
+
 def _formats(request: OperatorProposeRequest) -> List[str]:
     return [str(channel).strip() for channel in request.channels if str(channel).strip()][:12]
 
@@ -652,7 +675,7 @@ def _personal_fallback(
     return {
         "status": OutputStatus.PROPOSAL.value,
         "proposal": {
-            "title": _title(request),
+            "title": _personal_title(request, cards),
             "angle": "只使用已批准个人卡片中的经历或观点，围绕真实矛盾、判断和变化组织叙事。",
             "audience_value": request.audience.strip() or "以真实经历提供可验证、可共鸣的个人判断。",
             "key_points": [claim.text for claim in claims[:4]],
@@ -816,6 +839,11 @@ def normalize_output(
         role, candidate.get("claims"), fallback_claims, contexts
     )
     proposal = _safe_model_proposal(role, fallback.get("proposal"), candidate.get("proposal"), contexts)
+    if proposal is not None:
+        # Key points are presented to the owner as the factual basis of the
+        # direction.  They must never retain prose whose corresponding model
+        # claim was discarded by the evidence normalizer.
+        proposal["key_points"] = [claim.text for claim in claims[:4]]
 
     questions = [OperatorQuestion(**item) for item in fallback.get("questions") or []]
     risks = [OperatorRisk(**item) for item in fallback.get("risk_flags") or []]
