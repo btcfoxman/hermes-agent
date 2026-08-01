@@ -158,6 +158,18 @@ _PERSONAL_ATTRIBUTION_RE = re.compile(
     r"\b(?:i|i['’]m|i['’]ve|me|my|mine|myself|we|us|our|ours|ourselves)\b)",
     re.IGNORECASE,
 )
+_PERSONAL_EDITORIAL_ASSERTION_RE = re.compile(
+    r"(?:"
+    r"(?:我|我们)(?:曾经?|已经|正在|刚刚|亲自|做过|参与|负责|管理|开发|创办|"
+    r"服务|拥有|有着|发现|遇到|经历|见过|把|花了|用了|实现|获得|赚|亏)|"
+    r"我的(?:公司|团队|客户|产品|项目|业务|经历|收入|员工)|"
+    r"\b(?:i|we)\s+(?:have|had|did|built|made|led|managed|served|owned|"
+    r"founded|earned|lost|experienced|discovered)\b|"
+    r"\b(?:my|our)\s+(?:company|team|client|customer|product|project|"
+    r"business|revenue|employee|experience)\b"
+    r")",
+    re.IGNORECASE,
+)
 _HTML_RE = re.compile(r"<\s*/?\s*[a-z][^>]*>", re.IGNORECASE)
 _NUMBER_RE = re.compile(
     r"(?<![A-Za-z0-9])\d+(?:\.\d+)?(?:%|年|月|日|天|小时|分钟|万|亿)?"
@@ -1123,7 +1135,17 @@ def _safe_candidate_blocks(
         if _GENERIC_EDITORIAL_META_RE.search(text):
             return None, "generic_meta_copy_forbidden"
         if _contains_personal_attribution(text):
-            return None, "first_person_forbidden"
+            # Personal-IP copy needs a recognizable first-person point of view,
+            # but the model still may not invent a first-person event, asset,
+            # customer, result, or experience.  Exact personal-card statements
+            # remain canonical evidence blocks; authored copy may only add a
+            # safe present-tense judgment around them.
+            if (
+                role is not OperatorRole.PERSONAL_IP
+                or kind == ContentBlockKind.CTA.value
+                or _PERSONAL_EDITORIAL_ASSERTION_RE.search(text)
+            ):
+                return None, "first_person_forbidden"
         if role is OperatorRole.COMMERCIAL and _COMMERCIAL_ASSERTION_RE.search(text):
             return None, "commercial_assertion_forbidden"
         # A social hook is structural, not a lexical template. Requiring words
@@ -2095,6 +2117,23 @@ def content_request_payload(
                 "Make every editorial block earn its place: hook with the tension, explain the mechanism or reader impact, then land on a useful judgment. Do not add an automatic observation list or engagement question.",
                 "Use factual nouns, actors, rules, and exact grounded numbers from the approved claims as anchors. Avoid abstract paragraphs that could be pasted under an unrelated news item.",
             ],
+            "role_thesis": {
+                "commercial": (
+                    "Connect the verified capability and offer to one concrete customer "
+                    "constraint: what decision becomes easier, what risk remains under "
+                    "human control, and what specific next conversation is useful."
+                ),
+                "industry": (
+                    "Explain the changed incentive, bargaining position, operating cost, "
+                    "or enforceable rule and name the affected participant."
+                ),
+                "personal_ip": (
+                    "Let the exact approved personal-card block carry the experience. "
+                    "Around it, write a first-person present-tense judgment, the tradeoff "
+                    "behind that judgment, and a practical principle the reader can use. "
+                    "Do not invent another first-person event or credential."
+                ),
+            }[role.value],
             "reader_facing_rule": (
                 "Never expose editorial workflow labels such as fact section, "
                 "opinion section, editor's note, review note, evidence note, "
@@ -2171,7 +2210,8 @@ def content_request_payload(
             "Every platform variant must include every registry block marked required, but may choose its own safe order.",
             "Write a native social master_title and a distinct title for each platform. Keep each title between 12 and 36 Chinese characters when possible; it may use grounded entity names and numbers from public claims plus a clearly editorial judgment, but no new event assertion.",
             "For master and long-form variants, use three to six concise editorial blocks: a concrete hook, at least two distinct analytical steps, and an optional natural close. Short-feed variants may use two to four.",
-            "Editorial blocks may only be opinion, transition, or CTA. They must not add unsupported facts, named-entity claims, quotations, prices, promises, or first-person attribution.",
+            "Editorial blocks may only be opinion, transition, or CTA. They must not add unsupported facts, named-entity claims, quotations, prices, promises, or unapproved first-person attribution.",
+            "For personal_ip only, opinion and transition blocks may use a first-person present-tense judgment such as '我越来越确定' or '我的判断是'. They must not claim a new action, project, customer, result, credential, or past experience; those belong only in exact canonical personal-card blocks.",
             "Every authored opinion, transition, or CTA object must set evidence_ids to [] and omit claim_id and block_ref. Evidence binding belongs only to canonical registry blocks selected by block_ref.",
             "A verified number or date may appear in editorial framing only when copied exactly from the supplied public claims; never calculate, round, compare, or combine numbers.",
             "Do not use audit/meta copy such as '先把事实和判断分开', '以下分析', '编辑说明', '编辑观点', '事实部分', '公开信息只是起点', or '接下来可以继续观察'. The draft must read as publishable copy, not an internal review note.",

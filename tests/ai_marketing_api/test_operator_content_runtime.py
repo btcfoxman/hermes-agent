@@ -2001,6 +2001,121 @@ def test_personal_approved_viewpoint_stays_verbatim_and_keeps_card_evidence():
     assert all(viewpoint.content in variant.body for variant in output.platform_variants)
 
 
+def test_personal_model_editorial_can_add_safe_first_person_judgment():
+    experience = _context(
+        "experience-with-safe-editorial",
+        "personal_ip",
+        "personal_approved",
+        "experience",
+        content=(
+            "在这次验收中，我把自动发布改成了人工终审。"
+            "真正费时间的，是错误内容发出后的补救。"
+        ),
+    )
+    request = _request(
+        [experience],
+        [_claim(experience.content, "experience", [experience.record_id])],
+    )
+    registry = OperatorRegistry()
+    authorized = registry.authorize(
+        OperatorRole.PERSONAL_IP,
+        [experience],
+        AS_OF,
+    )
+    fallback = build_content_fallback(
+        registry,
+        OperatorRole.PERSONAL_IP,
+        request,
+        authorized,
+    )
+    payload = content_request_payload(
+        OperatorRole.PERSONAL_IP,
+        request,
+        authorized,
+    )
+    candidate = _candidate_from_required_refs(payload, request.channels)
+    candidate["blocks"].extend(
+        [
+            {
+                "kind": "transition",
+                "text": "我越来越确定，内容运营最怕的不是慢一步，而是错一步。",
+                "evidence_ids": [],
+            },
+            {
+                "kind": "opinion",
+                "text": "我的判断是，人工确认不是流程负担，而是把补救成本提前变成一道选择题。",
+                "evidence_ids": [],
+            },
+        ]
+    )
+
+    output = normalize_content_output(
+        registry,
+        OperatorRole.PERSONAL_IP,
+        request,
+        authorized,
+        fallback,
+        candidate,
+    )
+
+    assert any(block.text.startswith("我越来越确定") for block in output.blocks)
+    assert any(block.text.startswith("我的判断是") for block in output.blocks)
+
+
+def test_personal_model_editorial_cannot_invent_first_person_experience():
+    experience = _context(
+        "experience-with-invented-editorial",
+        "personal_ip",
+        "personal_approved",
+        "experience",
+        content="我选择让最终发布保留人工确认。",
+    )
+    request = _request(
+        [experience],
+        [_claim(experience.content, "experience", [experience.record_id])],
+    )
+    registry = OperatorRegistry()
+    authorized = registry.authorize(
+        OperatorRole.PERSONAL_IP,
+        [experience],
+        AS_OF,
+    )
+    fallback = build_content_fallback(
+        registry,
+        OperatorRole.PERSONAL_IP,
+        request,
+        authorized,
+    )
+    payload = content_request_payload(
+        OperatorRole.PERSONAL_IP,
+        request,
+        authorized,
+    )
+    candidate = _candidate_from_required_refs(payload, request.channels)
+    candidate["blocks"].append(
+        {
+            "kind": "opinion",
+            "text": "我服务过很多客户，所以这套方法对所有人都有效。",
+            "evidence_ids": [],
+        }
+    )
+
+    output = normalize_content_output(
+        registry,
+        OperatorRole.PERSONAL_IP,
+        request,
+        authorized,
+        fallback,
+        candidate,
+    )
+
+    assert all("我服务过很多客户" not in block.text for block in output.blocks)
+    assert any(
+        warning.endswith(":first_person_forbidden")
+        for warning in output.critic.warnings
+    )
+
+
 def test_personal_server_template_refs_are_selectable_without_dropping_required_claims():
     experience = _context(
         "experience-template-ref",
