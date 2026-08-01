@@ -1519,14 +1519,17 @@ def _social_surface_quality_errors(
             ContentBlockKind.CTA.value,
         }
     ]
-    # The master is the reusable editorial source and therefore carries the
-    # deepest argument.  Long-form platform adaptations may be tighter, while
+    # The master is the reusable editorial source and is prompted toward the
+    # deepest argument, but two specific authored beats are enough to clear the
+    # terminal gate. Requiring a third beat caused models to pad a good hook and
+    # analysis with the exact generic observation tail this gate rejects.
+    # Long-form platform adaptations may be tighter, while
     # short social/video copy often expresses its hook and its one useful
     # implication in the same authored block.  Requiring every short variant
     # to imitate an article creates padding and rejects platform-native copy.
     if surface == "master":
-        minimum_editorial = 3
-        minimum_analysis = 2
+        minimum_editorial = 2
+        minimum_analysis = 1
         hook_counts_as_analysis = False
     elif surface in _LONG_FORM_SURFACES:
         minimum_editorial = 2
@@ -2181,7 +2184,9 @@ def content_request_payload(
                     "Use canonical block_ref objects for every action, project, customer, "
                     "result, credential, and past experience. Authored first-person prose "
                     "may express only a present judgment, tradeoff, or principle; it must "
-                    "not add another thing the owner did, has done, is doing, or achieved."
+                    "not add another thing the owner did, has done, is doing, or achieved. "
+                    "For platform variants, prefer neutral present-tense analysis and let "
+                    "the canonical personal-card block carry the first-person experience."
                 ),
             }[role.value],
         },
@@ -2251,8 +2256,8 @@ def content_request_payload(
         ],
         "editorial_shape": {
             "master": (
-                "include at least one authored hook followed by at least two "
-                "distinct authored analysis blocks"
+                "include at least one authored hook followed by at least one "
+                "distinct authored analysis block"
             ),
             "long_form": (
                 "for wechat_mp and toutiao, include one authored hook followed "
@@ -2274,7 +2279,7 @@ def content_request_payload(
             "Every factual, pricing, identity, or experience statement must use its exact block_ref from canonical_block_registry; never paraphrase it.",
             "Every platform variant must include every registry block marked required, but may choose its own safe order.",
             "Write a native social master_title and a distinct title for each platform. Keep each title between 12 and 36 Chinese characters when possible; it may use grounded entity names and numbers from public claims plus a clearly editorial judgment, but no new event assertion.",
-            "For the master, use three to six concise editorial blocks: a concrete hook, at least two distinct analytical steps, and an optional natural close. For wechat_mp and toutiao use at least two authored blocks: a hook plus one analytical step. A short-feed or video variant may use one to three authored blocks; its first block must itself contain a concrete event-specific implication, not merely announce the topic.",
+            "For the master, use two to six concise editorial blocks: a concrete hook, at least one distinct analytical step, and an optional natural close. For wechat_mp and toutiao use at least two authored blocks: a hook plus one analytical step. A short-feed or video variant may use one to three authored blocks; its first block must itself contain a concrete event-specific implication, not merely announce the topic.",
             "Editorial blocks may only be opinion, transition, or CTA. They must not add unsupported facts, named-entity claims, quotations, prices, promises, or unapproved first-person attribution.",
             "For personal_ip only, opinion and transition blocks may use a first-person present-tense judgment such as '我越来越确定' or '我的判断是'. They must not claim a new action, project, customer, result, credential, or past experience; those belong only in exact canonical personal-card blocks.",
             "Every authored opinion, transition, or CTA object must set evidence_ids to [] and omit claim_id and block_ref. Evidence binding belongs only to canonical registry blocks selected by block_ref.",

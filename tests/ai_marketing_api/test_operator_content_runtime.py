@@ -350,7 +350,7 @@ def test_content_request_exposes_server_owned_canonical_block_refs():
     assert "opinion|transition|cta" in block_contract
     assert "do not copy this description" in block_contract
     editorial_shape = payload["response_contract"]["editorial_shape"]
-    assert "two distinct authored analysis blocks" in editorial_shape["master"]
+    assert "at least one distinct authored analysis block" in editorial_shape["master"]
     assert "at least one distinct authored analysis block" in editorial_shape["long_form"]
     assert "same block may satisfy both jobs" in editorial_shape["short_form"]
     assert "Reading order is mandatory" in editorial_shape["classification_rule"]
@@ -1876,7 +1876,7 @@ def test_terminal_social_gate_accepts_deep_distinct_model_editorial():
 
     candidate = {
         "_model": "publishable-test-model",
-        "blocks": [*deepcopy(required), *editorial("the master story")],
+        "blocks": [*deepcopy(required), *editorial("the master story", 2)],
         "platform_variants": [
             {
                 "platform": channel,

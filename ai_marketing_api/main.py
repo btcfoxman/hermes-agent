@@ -748,7 +748,7 @@ async def _run_compose(
                 ),
                 "required_shape": [
                     "one platform-native authored hook anchored to a concrete actor, amount, rule, constraint, or consequence from approved claims",
-                    "for master: at least two distinct authored analytical blocks after the hook that explain mechanism and reader impact without inventing facts",
+                    "for master: at least one distinct authored analytical block after the hook that explains mechanism or reader impact without inventing facts",
                     "for wechat_mp and toutiao: at least one authored analytical block after the hook",
                     "for every shorter platform: one authored block may combine the hook and one concrete implication; do not pad it with a generic second paragraph",
                     "a firm useful landing; CTA only when it is genuinely natural for that platform",
