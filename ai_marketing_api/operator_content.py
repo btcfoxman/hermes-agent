@@ -2158,9 +2158,9 @@ def content_request_payload(
                 ),
                 "personal_ip": (
                     "Let the exact approved personal-card block carry the experience. "
-                    "Around it, write a first-person present-tense judgment, the tradeoff "
-                    "behind that judgment, and a practical principle the reader can use. "
-                    "Do not invent another first-person event or credential."
+                    "Around it, write neutral present-tense analysis of the tradeoff and "
+                    "a practical principle the reader can use. Do not use I or we in "
+                    "authored blocks and do not invent another event or credential."
                 ),
             }[role.value],
             "reader_facing_rule": (
@@ -2182,11 +2182,10 @@ def content_request_payload(
                 ),
                 "personal_ip": (
                     "Use canonical block_ref objects for every action, project, customer, "
-                    "result, credential, and past experience. Authored first-person prose "
-                    "may express only a present judgment, tradeoff, or principle; it must "
-                    "not add another thing the owner did, has done, is doing, or achieved. "
-                    "For platform variants, prefer neutral present-tense analysis and let "
-                    "the canonical personal-card block carry the first-person experience."
+                    "result, credential, and past experience. Do not use first-person "
+                    "attribution in any authored block. Use neutral present-tense analysis "
+                    "and let the canonical personal-card block carry the owner's voice "
+                    "and every first-person experience."
                 ),
             }[role.value],
         },
@@ -2281,7 +2280,7 @@ def content_request_payload(
             "Write a native social master_title and a distinct title for each platform. Keep each title between 12 and 36 Chinese characters when possible; it may use grounded entity names and numbers from public claims plus a clearly editorial judgment, but no new event assertion.",
             "For the master, use two to six concise editorial blocks: a concrete hook, at least one distinct analytical step, and an optional natural close. For wechat_mp and toutiao use at least two authored blocks: a hook plus one analytical step. A short-feed or video variant may use one to three authored blocks; its first block must itself contain a concrete event-specific implication, not merely announce the topic.",
             "Editorial blocks may only be opinion, transition, or CTA. They must not add unsupported facts, named-entity claims, quotations, prices, promises, or unapproved first-person attribution.",
-            "For personal_ip only, opinion and transition blocks may use a first-person present-tense judgment such as '我越来越确定' or '我的判断是'. They must not claim a new action, project, customer, result, credential, or past experience; those belong only in exact canonical personal-card blocks.",
+            "For personal_ip, do not use first-person attribution in authored opinion, transition, or CTA blocks. The exact canonical personal-card block carries the owner's voice and every action, project, customer, result, credential, or experience; authored blocks add only neutral present-tense analysis.",
             "Every authored opinion, transition, or CTA object must set evidence_ids to [] and omit claim_id and block_ref. Evidence binding belongs only to canonical registry blocks selected by block_ref.",
             "A verified number or date may appear in editorial framing only when copied exactly from the supplied public claims; never calculate, round, compare, or combine numbers.",
             "Do not use audit/meta copy such as '先把事实和判断分开', '以下分析', '编辑说明', '编辑观点', '事实部分', '公开信息只是起点', or '接下来可以继续观察'. The draft must read as publishable copy, not an internal review note.",
