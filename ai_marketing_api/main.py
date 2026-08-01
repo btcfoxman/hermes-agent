@@ -15,10 +15,12 @@ import httpx
 from fastapi import FastAPI, Header, HTTPException
 
 from ai_marketing_api.operator_content import (
+    ContentStatus,
     OperatorComposeRequest,
     OperatorContentOutput,
     build_content_fallback,
     content_request_payload,
+    enforce_social_publishability,
     normalize_content_output,
 )
 from ai_marketing_api.operator_runtime import (
@@ -693,29 +695,72 @@ async def _run_compose(
         ) from exc
 
     fallback = build_content_fallback(OPERATOR_REGISTRY, role_id, payload, contexts)
+    compose_payload: Dict[str, Any] = {}
     if fallback.get("_fallback_errors"):
         # A blocked evidence/disclosure gate must not be sent to the model.
         # The deterministic result already contains the questions and critic
         # state orchestration needs to recover safely.
         candidate = fallback
     else:
+        compose_payload = content_request_payload(role_id, payload, contexts)
         candidate = await _llm_json(
             profile.system_prompt,
-            content_request_payload(role_id, payload, contexts),
+            compose_payload,
             fallback,
             openai_base_url,
             openai_api_key,
             model_name,
             timeout_seconds,
         )
-    return normalize_content_output(
-        OPERATOR_REGISTRY,
-        role_id,
-        payload,
-        contexts,
-        fallback,
-        candidate,
+    output = enforce_social_publishability(
+        normalize_content_output(
+            OPERATOR_REGISTRY,
+            role_id,
+            payload,
+            contexts,
+            fallback,
+            candidate,
+        )
     )
+    candidate_model = str(
+        candidate.get("_model") or candidate.get("model") or "fallback"
+    ).strip().lower()
+    if (
+        output.status == ContentStatus.QUALITY_INSUFFICIENT.value
+        and candidate_model != "fallback"
+        and not candidate.get("_error")
+    ):
+        retry_payload = {
+            **compose_payload,
+            "quality_retry": {
+                "instruction": (
+                    "Rewrite once from scratch. The previous draft was safe "
+                    "but not publishable social copy. Return original, "
+                    "event-specific editorial blocks for every surface."
+                ),
+                "critic_errors": list(output.critic.errors),
+            },
+        }
+        retry_candidate = await _llm_json(
+            profile.system_prompt,
+            retry_payload,
+            fallback,
+            openai_base_url,
+            openai_api_key,
+            model_name,
+            timeout_seconds,
+        )
+        return enforce_social_publishability(
+            normalize_content_output(
+                OPERATOR_REGISTRY,
+                role_id,
+                payload,
+                contexts,
+                fallback,
+                retry_candidate,
+            )
+        )
+    return output
 
 
 @app.post("/api/v1/operators/{role_id}/propose", response_model=OperatorOutput)

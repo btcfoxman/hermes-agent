@@ -131,6 +131,45 @@ def _role_compose_payload(role: str) -> dict:
     }
 
 
+def _publishable_model_candidate(payload: dict) -> dict:
+    required = [
+        {"block_ref": block["block_ref"]}
+        for block in payload["canonical_block_registry"]
+        if block["required"]
+    ]
+
+    def editorial(label: str) -> list[dict]:
+        return [
+            {
+                "kind": "transition",
+                "text": f"First, {label} opens with the concrete approved tension.",
+                "evidence_ids": [],
+            },
+            {
+                "kind": "opinion",
+                "text": f"What matters for {label} is the reader's changed choice.",
+                "evidence_ids": [],
+            },
+            {
+                "kind": "opinion",
+                "text": f"The implication for {label} is a clearer decision boundary.",
+                "evidence_ids": [],
+            },
+        ]
+
+    return {
+        "_model": "publishable-test-model",
+        "blocks": [*required, *editorial("the master story")],
+        "platform_variants": [
+            {
+                "platform": channel,
+                "blocks": [*required, *editorial(channel)],
+            }
+            for channel in payload["channels"]
+        ],
+    }
+
+
 def _protected_endpoints() -> list[tuple[str, str, dict | None]]:
     return [
         ("GET", "/api/v1/operators/health", None),
@@ -204,7 +243,7 @@ def test_revise_stays_in_the_same_profile(monkeypatch):
     assert "Focus on product teams" in response.json()["proposal"]["angle"]
 
 
-def test_compose_returns_content_v1_with_exact_variants_and_critic(monkeypatch):
+def test_compose_without_model_never_promotes_safe_fallback(monkeypatch):
     monkeypatch.delenv("HERMES_OPENAI_API_KEY", raising=False)
     payload = _compose_payload()
     payload["channels"] = ["wechat_mp", "xiaohongshu"]
@@ -216,21 +255,16 @@ def test_compose_returns_content_v1_with_exact_variants_and_critic(monkeypatch):
     assert data["schema_version"] == "operator.content.v1"
     assert data["role_id"] == "industry"
     assert data["action"] == "compose"
-    assert data["status"] == "content_ready"
+    assert data["status"] == "quality_insufficient"
     assert data["requires_human_review"] is True
-    assert data["critic"]["passed"] is True
-    assert {variant["platform"] for variant in data["platform_variants"]} == {
-        "wechat_mp",
-        "xiaohongshu",
-    }
-    fact = next(block for block in data["blocks"] if block["kind"] == "fact")
-    assert fact["text"] == payload["authorized_context"][0]["content"]
-    assert fact["evidence_ids"] == ["source-1"]
-    assert all(fact["text"] in variant["body"] for variant in data["platform_variants"])
+    assert data["critic"]["passed"] is False
+    assert data["master_content"] is None
+    assert data["platform_variants"] == []
+    assert "model_generation_required" in data["critic"]["errors"]
 
 
 @pytest.mark.parametrize("role", ["commercial", "personal_ip"])
-def test_compose_endpoint_supports_each_role_profile(role, monkeypatch):
+def test_compose_endpoint_blocks_fallback_for_each_role_profile(role, monkeypatch):
     monkeypatch.delenv("HERMES_OPENAI_API_KEY", raising=False)
     payload = _role_compose_payload(role)
 
@@ -239,10 +273,48 @@ def test_compose_endpoint_supports_each_role_profile(role, monkeypatch):
     assert response.status_code == 200
     data = response.json()
     assert data["role_id"] == role
-    assert data["status"] == "content_ready"
-    assert data["critic"]["passed"] is True
-    assert data["blocks"][0]["text"] == payload["claims"][0]["text"]
-    assert data["blocks"][0]["evidence_ids"] == ["record-1"]
+    assert data["status"] == "quality_insufficient"
+    assert data["critic"]["passed"] is False
+    assert "model_generation_required" in data["critic"]["errors"]
+    assert data["blocks"] == []
+
+
+def test_compose_retries_shallow_model_copy_once(monkeypatch):
+    payload = _compose_payload()
+    payload["channels"] = ["wechat_mp", "xiaohongshu"]
+    calls: list[dict] = []
+
+    async def fake_llm(system, payload, fallback, *args, **kwargs):
+        calls.append(payload)
+        if len(calls) == 1:
+            required = [
+                {"block_ref": block["block_ref"]}
+                for block in payload["canonical_block_registry"]
+                if block["required"]
+            ]
+            return {
+                "_model": "shallow-test-model",
+                "blocks": required,
+                "platform_variants": [
+                    {"platform": channel, "blocks": required}
+                    for channel in payload["channels"]
+                ],
+            }
+        return _publishable_model_candidate(payload)
+
+    monkeypatch.setattr(marketing_api, "_llm_json", fake_llm)
+
+    response = _request(
+        "POST",
+        "/api/v1/operators/industry/compose",
+        json=payload,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "content_ready"
+    assert len(calls) == 2
+    assert "quality_retry" not in calls[0]
+    assert calls[1]["quality_retry"]["critic_errors"]
 
 
 def test_compose_uses_the_same_byte_stable_role_prompt(monkeypatch):

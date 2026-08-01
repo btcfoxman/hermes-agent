@@ -14,6 +14,7 @@ from ai_marketing_api.operator_content import (
     build_content_fallback,
     content_request_payload,
     disclosable_contexts,
+    enforce_social_publishability,
     normalize_content_output,
 )
 from ai_marketing_api.operator_runtime import (
@@ -1753,6 +1754,110 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
         warning.endswith(":number_ungrounded")
         for warning in output.critic.warnings
     )
+    publishable = enforce_social_publishability(output)
+    assert publishable.status == ContentStatus.QUALITY_INSUFFICIENT.value
+    assert publishable.master_content is None
+    assert publishable.platform_variants == []
+    assert any(
+        error.startswith("social_editorial_")
+        for error in publishable.critic.errors
+    )
+
+
+def test_terminal_social_gate_accepts_deep_distinct_model_editorial():
+    fact = "The regulator published an approved platform rule update."
+    source = _context(
+        "official-social-depth",
+        "industry",
+        "industry",
+        "source_item",
+        content=fact,
+        source_uri="https://official.example/rule-update",
+        source_tier="official",
+    )
+    request = _request(
+        [source],
+        [_claim(fact, "fact", [source.record_id])],
+        channels=["wechat_mp", "xiaohongshu"],
+    )
+    registry = OperatorRegistry()
+    authorized = registry.authorize(OperatorRole.INDUSTRY, [source], AS_OF)
+    fallback = build_content_fallback(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    payload = content_request_payload(
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    required = [
+        {"block_ref": block["block_ref"]}
+        for block in payload["canonical_block_registry"]
+        if block["required"]
+    ]
+
+    def editorial(label: str) -> list[dict]:
+        return [
+            {
+                "kind": "transition",
+                "text": (
+                    f"First, {label} should focus on the concrete tension "
+                    "already present in the approved facts."
+                ),
+                "evidence_ids": [],
+            },
+            {
+                "kind": "opinion",
+                "text": (
+                    f"What matters for {label} is how that tension changes "
+                    "the reader's available choice."
+                ),
+                "evidence_ids": [],
+            },
+            {
+                "kind": "opinion",
+                "text": (
+                    f"The implication for {label} is to compare the rule, "
+                    "the cost, and the observable outcome."
+                ),
+                "evidence_ids": [],
+            },
+        ]
+
+    candidate = {
+        "_model": "publishable-test-model",
+        "blocks": [*deepcopy(required), *editorial("the master story")],
+        "platform_variants": [
+            {
+                "platform": channel,
+                "blocks": [*deepcopy(required), *editorial(channel)],
+            }
+            for channel in request.channels
+        ],
+    }
+    normalized = normalize_content_output(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+        fallback,
+        candidate,
+    )
+
+    publishable = enforce_social_publishability(normalized)
+
+    assert publishable.status == ContentStatus.CONTENT_READY.value
+    assert publishable.critic.passed is True
+    assert publishable.master_content
+    assert len(publishable.platform_variants) == 2
+    assert next(
+        check
+        for check in publishable.critic.checks
+        if check.code == "social_copy_publishable"
+    ).passed is True
 
 
 def test_personal_background_fact_cannot_replace_an_approved_personal_card():

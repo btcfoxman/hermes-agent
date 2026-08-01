@@ -30,6 +30,7 @@ class ContentStatus(str, Enum):
     CONTENT_READY = "content_ready"
     NEEDS_INPUT = "needs_input"
     EVIDENCE_INSUFFICIENT = "evidence_insufficient"
+    QUALITY_INSUFFICIENT = "quality_insufficient"
 
 
 class ContentBlockKind(str, Enum):
@@ -1368,6 +1369,13 @@ def _safe_candidate_blocks(
 
 
 def _blocked_status(role: OperatorRole, errors: Sequence[str]) -> ContentStatus:
+    quality_codes = (
+        "model_generation_required",
+        "social_editorial_",
+        "platform_editorial_variants_not_distinct",
+    )
+    if any(error.startswith(quality_codes) for error in errors):
+        return ContentStatus.QUALITY_INSUFFICIENT
     input_codes = (
         "channels_required",
         "duplicate_channels",
@@ -1386,6 +1394,24 @@ def _blocked_status(role: OperatorRole, errors: Sequence[str]) -> ContentStatus:
 
 def _questions(role: OperatorRole, errors: Sequence[str]) -> List[OperatorQuestion]:
     result: List[OperatorQuestion] = []
+    if any(
+        error.startswith(
+            (
+                "model_generation_required",
+                "social_editorial_",
+                "platform_editorial_variants_not_distinct",
+            )
+        )
+        for error in errors
+    ):
+        result.append(
+            OperatorQuestion(
+                question="请重新生成平台原生成稿，补足具体开场、事件相关分析和自然结尾。",
+                reason="当前内容虽未越过事实边界，但仍是内部审稿话术、通用模板或简单事实复述，不适合直接发布。",
+                blocking=True,
+            )
+        )
+        return result
     if any(error.startswith(("channels_required", "duplicate_channels", "unsupported_channels")) for error in errors):
         result.append(
             OperatorQuestion(
@@ -1427,6 +1453,80 @@ def _questions(role: OperatorRole, errors: Sequence[str]) -> List[OperatorQuesti
             )
         )
     return result
+
+
+_LONG_FORM_SURFACES = frozenset({"master", "wechat_mp", "toutiao"})
+
+
+def _social_surface_quality_errors(
+    blocks: Sequence[ContentBlock],
+    *,
+    surface: str,
+) -> List[str]:
+    """Require authored social prose, not a safe but generic fact wrapper.
+
+    Evidence and disclosure checks answer whether prose is safe.  They do not
+    answer whether it is worth publishing.  Server templates are useful as a
+    deterministic diagnostic fallback, but must never satisfy the publishable
+    editorial-depth contract.
+    """
+
+    editorial = [
+        block
+        for block in blocks
+        if _value(block.origin) == ContentBlockOrigin.MODEL_EDITORIAL.value
+        and _value(block.kind) in {
+            ContentBlockKind.TRANSITION.value,
+            ContentBlockKind.OPINION.value,
+            ContentBlockKind.CTA.value,
+        }
+    ]
+    transitions = [
+        block
+        for block in editorial
+        if _value(block.kind) == ContentBlockKind.TRANSITION.value
+    ]
+    opinions = [
+        block
+        for block in editorial
+        if _value(block.kind) == ContentBlockKind.OPINION.value
+    ]
+    long_form = surface in _LONG_FORM_SURFACES
+    minimum_editorial = 3 if long_form else 2
+    minimum_opinions = 2 if long_form else 1
+    errors: List[str] = []
+    if any(
+        _value(block.origin) == ContentBlockOrigin.SERVER_TEMPLATE.value
+        for block in blocks
+    ):
+        errors.append(f"social_editorial_template_forbidden:{surface}")
+    if len(editorial) < minimum_editorial:
+        errors.append(
+            f"social_editorial_depth_insufficient:{surface}:"
+            f"{len(editorial)}/{minimum_editorial}"
+        )
+    if not transitions:
+        errors.append(f"social_editorial_hook_missing:{surface}")
+    if len(opinions) < minimum_opinions:
+        errors.append(
+            f"social_editorial_analysis_insufficient:{surface}:"
+            f"{len(opinions)}/{minimum_opinions}"
+        )
+    return errors
+
+
+def _editorial_signature(blocks: Sequence[ContentBlock]) -> tuple[str, ...]:
+    return tuple(
+        block.text.strip()
+        for block in blocks
+        if _value(block.origin) == ContentBlockOrigin.MODEL_EDITORIAL.value
+        and _value(block.kind) in {
+            ContentBlockKind.TRANSITION.value,
+            ContentBlockKind.OPINION.value,
+            ContentBlockKind.CTA.value,
+        }
+        and block.text.strip()
+    )
 
 
 def normalize_content_output(
@@ -1619,6 +1719,98 @@ def normalize_content_output(
         requires_human_review=True,
         model=model,
     )
+
+
+def enforce_social_publishability(
+    output: OperatorContentOutput,
+) -> OperatorContentOutput:
+    """Fail closed when safe content is still not real social copy.
+
+    ``normalize_content_output`` owns evidence and disclosure safety.  This
+    separate terminal gate owns editorial usefulness so unit callers can
+    inspect safely-normalized blocks while the HTTP compose boundary never
+    exposes a generic fallback as ``content_ready``.
+    """
+
+    if _value(output.status) != ContentStatus.CONTENT_READY.value:
+        return output
+
+    errors: List[str] = []
+    if output.model.strip().lower() == "fallback":
+        errors.append("model_generation_required")
+    errors.extend(
+        _social_surface_quality_errors(output.blocks, surface="master")
+    )
+    for variant in output.platform_variants:
+        errors.extend(
+            _social_surface_quality_errors(
+                variant.blocks,
+                surface=variant.platform,
+            )
+        )
+    if len(output.platform_variants) > 1:
+        signatures = [
+            _editorial_signature(variant.blocks)
+            for variant in output.platform_variants
+        ]
+        if len(set(signatures)) != len(signatures):
+            errors.append("platform_editorial_variants_not_distinct")
+    errors = list(dict.fromkeys(errors))[:50]
+    checks = list(_dump(output.critic).get("checks", []))
+    checks.append(
+        _dump(
+            CriticCheck(
+                code="social_copy_publishable",
+                passed=not errors,
+                message=(
+                    "Every surface contains model-authored, platform-native editorial depth."
+                    if not errors
+                    else "Safe fallback, generic templates, or shallow prose cannot be published."
+                ),
+            )
+        )
+    )
+    if not errors:
+        data = _dump(output)
+        data["critic"] = {
+            **data["critic"],
+            "checks": checks,
+        }
+        return OperatorContentOutput(**data)
+
+    data = _dump(output)
+    data.update(
+        {
+            "status": ContentStatus.QUALITY_INSUFFICIENT.value,
+            "master_title": None,
+            "master_content": None,
+            "blocks": [],
+            "platform_variants": [],
+            "evidence_refs": [],
+            "questions": [
+                _dump(question)
+                for question in _questions(output.role_id, errors)
+            ],
+            "risk_flags": [
+                *data.get("risk_flags", []),
+                *[
+                    {
+                        "code": error.split(":", 1)[0],
+                        "message": error,
+                        "blocking": True,
+                    }
+                    for error in errors
+                ],
+            ],
+            "critic": {
+                **data["critic"],
+                "passed": False,
+                "errors": errors,
+                "checks": checks,
+            },
+        }
+    )
+    return OperatorContentOutput(**data)
 
 
 def _sanitized_context(context: AuthorizedContext) -> Dict[str, Any]:
