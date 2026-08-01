@@ -292,9 +292,21 @@ def test_compose_retries_shallow_model_copy_once(monkeypatch):
                 for block in payload["canonical_block_registry"]
                 if block["required"]
             ]
+            evidence_id = next(
+                block["evidence_ids"][0]
+                for block in payload["canonical_block_registry"]
+                if block["required"] and block["evidence_ids"]
+            )
             return {
                 "_model": "shallow-test-model",
-                "blocks": required,
+                "blocks": [
+                    *required,
+                    {
+                        "kind": "opinion",
+                        "text": "What matters is how this rule changes the reader's available choice.",
+                        "evidence_ids": [evidence_id],
+                    },
+                ],
                 "platform_variants": [
                     {"platform": channel, "blocks": required}
                     for channel in payload["channels"]
@@ -317,6 +329,11 @@ def test_compose_retries_shallow_model_copy_once(monkeypatch):
     assert calls[1]["quality_retry"]["critic_errors"]
     assert calls[1]["quality_retry"]["required_shape"]
     assert "Do not describe the review process" in calls[1]["quality_retry"]["instruction"]
+    assert "evidence_ids to []" in calls[1]["quality_retry"]["block_binding_rule"]
+    assert any(
+        diagnostic.endswith(":evidence_forbidden")
+        for diagnostic in calls[1]["quality_retry"]["discarded_block_diagnostics"]
+    )
 
 
 def test_compose_uses_the_same_byte_stable_role_prompt(monkeypatch):

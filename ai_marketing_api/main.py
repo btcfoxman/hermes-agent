@@ -747,7 +747,18 @@ async def _run_compose(
                     "at least two distinct analytical steps that explain mechanism and reader impact without inventing facts",
                     "a firm useful landing; CTA only when it is genuinely natural for that platform",
                 ],
+                "block_binding_rule": (
+                    "For every authored transition, opinion, or CTA block, "
+                    "set evidence_ids to [] and omit claim_id and block_ref. "
+                    "Only a canonical fact/identity/experience block may use "
+                    "block_ref or retain evidence bindings."
+                ),
                 "critic_errors": list(output.critic.errors),
+                "discarded_block_diagnostics": [
+                    warning
+                    for warning in output.critic.warnings
+                    if warning.startswith("discarded_unsafe_model_editorial:")
+                ],
             },
         }
         retry_candidate = await _llm_json(
