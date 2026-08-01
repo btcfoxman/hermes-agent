@@ -1696,6 +1696,59 @@ def test_industry_model_can_supply_grounded_social_titles_per_platform():
     }
 
 
+def test_personal_model_can_supply_grounded_titles_without_entities_or_numbers():
+    experience = (
+        "在这次端到端验收中，我把自动发布改成了人工终审。"
+        "真正费时间的不是多点一次确认，而是在错误内容发出去之后补救。"
+    )
+    card = _context(
+        "personal-grounded-title",
+        "personal_ip",
+        "personal_approved",
+        "experience",
+        content=experience,
+    )
+    request = _request(
+        [card],
+        [_claim(experience, "experience", [card.record_id])],
+        channels=["wechat_mp", "xiaohongshu"],
+    )
+    registry = OperatorRegistry()
+    authorized = registry.authorize(OperatorRole.PERSONAL_IP, [card], AS_OF)
+    fallback = build_content_fallback(
+        registry,
+        OperatorRole.PERSONAL_IP,
+        request,
+        authorized,
+    )
+    payload = content_request_payload(
+        OperatorRole.PERSONAL_IP,
+        request,
+        authorized,
+    )
+    candidate = _candidate_from_required_refs(payload, request.channels)
+    candidate["master_title"] = "自动发布改成人工终审，差的不是一步"
+    candidate["platform_variants"][0]["title"] = "人工终审，把补救挡在发布之前"
+    candidate["platform_variants"][1]["title"] = "错误内容发出去，补救才最费时间"
+
+    output = normalize_content_output(
+        registry,
+        OperatorRole.PERSONAL_IP,
+        request,
+        authorized,
+        fallback,
+        candidate,
+    )
+
+    assert output.master_title == "自动发布改成人工终审，差的不是一步"
+    assert {
+        item.platform: item.title for item in output.platform_variants
+    } == {
+        "wechat_mp": "人工终审，把补救挡在发布之前",
+        "xiaohongshu": "错误内容发出去，补救才最费时间",
+    }
+
+
 def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_new_numbers():
     fact = "监管部门作出行政处罚，罚没款合计51.79亿元，并要求企业全面整改。"
     source = _context(

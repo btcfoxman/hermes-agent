@@ -834,6 +834,15 @@ def _safe_master_title(
         match.group(0) for match in _TITLE_ENTITY_RE.finditer(supplied)
     ]
     source_text = "\n".join(exact_texts)
+    grounded_phrase = any(
+        chunk[index : index + 4] in source_text
+        for chunk in re.findall(r"[\u4e00-\u9fffA-Za-z0-9]{4,}", supplied)
+        for index in range(len(chunk) - 3)
+    )
+    supplied_assertions = [
+        match.group(0)
+        for match in _UNSUPPORTED_EDITORIAL_ASSERTION_RE.finditer(supplied)
+    ]
     if (
         8 <= len(supplied) <= 72
         and not _HTML_RE.search(supplied)
@@ -842,8 +851,8 @@ def _safe_master_title(
         and not _GENERIC_EDITORIAL_META_RE.search(supplied)
         and supplied_numbers.issubset(approved_numbers)
         and all(entity in source_text for entity in supplied_entities)
-        and bool(supplied_numbers or supplied_entities)
-        and not _UNSUPPORTED_EDITORIAL_ASSERTION_RE.search(supplied)
+        and bool(supplied_numbers or supplied_entities or grounded_phrase)
+        and all(assertion in source_text for assertion in supplied_assertions)
     ):
         return supplied
     if (
@@ -859,7 +868,7 @@ def _safe_master_title(
     if not exact_texts:
         return requested[:300]
     source = exact_texts[0].strip()
-    if len(source) <= 80:
+    if len(source) <= 48:
         return source[:300]
     spans = [
         match.span()
