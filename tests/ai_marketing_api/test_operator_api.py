@@ -329,7 +329,7 @@ def test_compose_retries_shallow_model_copy_once(monkeypatch):
     assert calls[1]["quality_retry"]["critic_errors"]
     assert calls[1]["quality_retry"]["required_shape"]
     assert any(
-        "kind=opinion" in item
+        "analytical block" in item
         for item in calls[1]["quality_retry"]["required_shape"]
     )
     assert "Do not describe the review process" in calls[1]["quality_retry"]["instruction"]

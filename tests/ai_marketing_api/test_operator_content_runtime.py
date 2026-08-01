@@ -350,9 +350,9 @@ def test_content_request_exposes_server_owned_canonical_block_refs():
     assert "opinion|transition|cta" in block_contract
     assert "do not copy this description" in block_contract
     editorial_shape = payload["response_contract"]["editorial_shape"]
-    assert "two distinct authored kind=opinion" in editorial_shape["master_and_long_form"]
-    assert "one authored kind=opinion" in editorial_shape["short_form"]
-    assert "Do not label analysis as transition" in editorial_shape["classification_rule"]
+    assert "two distinct authored analysis blocks" in editorial_shape["master_and_long_form"]
+    assert "one authored analysis block" in editorial_shape["short_form"]
+    assert "Reading order is mandatory" in editorial_shape["classification_rule"]
 
 
 def test_commercial_internal_context_is_readable_but_never_publishable_or_model_visible():
@@ -1903,6 +1903,31 @@ def test_terminal_social_gate_accepts_deep_distinct_model_editorial():
         for check in publishable.critic.checks
         if check.code == "social_copy_publishable"
     ).passed is True
+
+    # The reader-facing structure stays valid even when the model labels every
+    # authored block as a transition.  Safety is still enforced block by block;
+    # quality must not depend on model-authored metadata being semantically exact.
+    swapped = deepcopy(candidate)
+    for block in swapped["blocks"]:
+        if "block_ref" not in block:
+            block["kind"] = "transition"
+    for variant in swapped["platform_variants"]:
+        for block in variant["blocks"]:
+            if "block_ref" not in block:
+                block["kind"] = "transition"
+    relabelled = normalize_content_output(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+        fallback,
+        swapped,
+    )
+    relabelled_publishable = enforce_social_publishability(relabelled)
+    assert relabelled_publishable.status == ContentStatus.CONTENT_READY.value, (
+        relabelled_publishable.critic.errors,
+        relabelled_publishable.critic.warnings,
+    )
 
 
 def test_personal_background_fact_cannot_replace_an_approved_personal_card():

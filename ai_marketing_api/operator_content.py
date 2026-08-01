@@ -1367,7 +1367,14 @@ def _safe_candidate_blocks(
             warnings.append(
                 f"model_required_blocks_restored:{prefix}:{labels}"
             )
-    if role is OperatorRole.INDUSTRY and not errors:
+    if (
+        role is OperatorRole.INDUSTRY
+        and not errors
+        and not any(
+            _value(block.origin) == ContentBlockOrigin.MODEL_EDITORIAL.value
+            for block in selected
+        )
+    ):
         present_kinds = {
             _value(block.kind)
             for block in selected
@@ -1512,19 +1519,23 @@ def _social_surface_quality_errors(
             ContentBlockKind.CTA.value,
         }
     ]
-    transitions = [
-        block
-        for block in editorial
-        if _value(block.kind) == ContentBlockKind.TRANSITION.value
-    ]
-    opinions = [
-        block
-        for block in editorial
-        if _value(block.kind) == ContentBlockKind.OPINION.value
-    ]
     long_form = surface in _LONG_FORM_SURFACES
     minimum_editorial = 3 if long_form else 2
-    minimum_opinions = 2 if long_form else 1
+    minimum_analysis = 2 if long_form else 1
+    # Model-authored ``kind`` is useful rendering metadata, but it is not a
+    # reliable quality signal: good hooks are often labelled ``opinion`` and
+    # analytical steps are often labelled ``transition``.  Judge the actual
+    # reading order instead.  The first substantive authored block is the hook;
+    # subsequent non-CTA authored blocks must carry the analytical depth.
+    hook = editorial[0] if editorial else None
+    analysis = [
+        block
+        for block in editorial[1:]
+        if _value(block.kind) in {
+            ContentBlockKind.TRANSITION.value,
+            ContentBlockKind.OPINION.value,
+        }
+    ]
     errors: List[str] = []
     if any(
         _value(block.origin) == ContentBlockOrigin.SERVER_TEMPLATE.value
@@ -1536,12 +1547,12 @@ def _social_surface_quality_errors(
             f"social_editorial_depth_insufficient:{surface}:"
             f"{len(editorial)}/{minimum_editorial}"
         )
-    if not transitions:
+    if hook is None:
         errors.append(f"social_editorial_hook_missing:{surface}")
-    if len(opinions) < minimum_opinions:
+    if len(analysis) < minimum_analysis:
         errors.append(
             f"social_editorial_analysis_insufficient:{surface}:"
-            f"{len(opinions)}/{minimum_opinions}"
+            f"{len(analysis)}/{minimum_analysis}"
         )
     return errors
 
@@ -2206,17 +2217,17 @@ def content_request_payload(
         ],
         "editorial_shape": {
             "master_and_long_form": (
-                "include at least one authored kind=transition hook and at least "
-                "two distinct authored kind=opinion analysis blocks"
+                "include at least one authored hook followed by at least two "
+                "distinct authored analysis blocks"
             ),
             "short_form": (
-                "include at least one authored kind=transition hook and at least "
-                "one authored kind=opinion analysis block"
+                "include at least one authored hook followed by at least one "
+                "authored analysis block"
             ),
             "classification_rule": (
-                "Use kind=transition only for the reader-facing hook or bridge. "
-                "Use kind=opinion for every mechanism, tradeoff, implication, "
-                "reader impact, or concluding judgment. Do not label analysis as transition."
+                "kind=transition and kind=opinion are rendering hints. Reading order "
+                "is mandatory: hook first, then mechanism, tradeoff, implication, "
+                "reader impact, or concluding judgment."
             ),
         },
         "safety": [
