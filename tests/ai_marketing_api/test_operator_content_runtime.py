@@ -3110,6 +3110,99 @@ def test_channel_contract_never_silently_drops_or_duplicates_variants(channels, 
     assert any(error.startswith(error_prefix) for error in output.critic.errors)
 
 
+def test_duplicate_model_variant_is_discarded_without_becoming_an_evidence_error():
+    fact = "监管部门发布了新的平台经营规则。"
+    source = _context(
+        "source-duplicate-variant",
+        "industry",
+        "industry",
+        "source_item",
+        content=fact,
+        source_uri="https://official.example/rule",
+        source_tier="official",
+    )
+    request = _request(
+        [source],
+        [_claim(fact, "fact", [source.record_id])],
+        channels=["wechat_mp"],
+    )
+    registry = OperatorRegistry()
+    authorized = registry.authorize(
+        OperatorRole.INDUSTRY,
+        request.authorized_context,
+        request.as_of,
+    )
+    fallback = build_content_fallback(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    payload = content_request_payload(
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    required = [
+        {"block_ref": block["block_ref"]}
+        for block in payload["canonical_block_registry"]
+        if block.get("required")
+    ]
+    master_blocks = [
+        {
+            "kind": "transition",
+            "text": "一条规则真正进入运营，要看它如何改变团队每天的判断。",
+            "evidence_ids": [],
+        },
+        *required,
+        {
+            "kind": "opinion",
+            "text": "团队需要把新的约束放进具体流程，才能知道哪些决定必须调整。",
+            "evidence_ids": [],
+        },
+    ]
+    variant = {
+        "platform": "wechat_mp",
+        "title": "新规则会落在哪个经营环节",
+        "blocks": [
+            {
+                "kind": "transition",
+                "text": "平台团队先找到这条规则会落在哪个具体环节。",
+                "evidence_ids": [],
+            },
+            *required,
+            {
+                "kind": "opinion",
+                "text": "流程有对应调整，规则变化才会成为可执行的经营判断。",
+                "evidence_ids": [],
+            },
+        ],
+    }
+    candidate = {
+        "_model": "duplicate-variant-probe",
+        "master_title": "新规则如何进入日常经营",
+        "blocks": master_blocks,
+        "platform_variants": [variant, deepcopy(variant)],
+    }
+
+    output = normalize_content_output(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+        fallback,
+        candidate,
+    )
+
+    assert output.status == ContentStatus.CONTENT_READY.value
+    assert output.critic.errors == []
+    assert len(output.platform_variants) == 1
+    assert (
+        "duplicate_model_platform_variant_discarded:wechat_mp"
+        in output.critic.warnings
+    )
+
+
 def test_model_failure_returns_a_safe_deterministic_fallback_with_warning():
     source = _context(
         "source-1",

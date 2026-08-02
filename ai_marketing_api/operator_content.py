@@ -1913,7 +1913,13 @@ def normalize_content_output(
             continue
         platform = str(raw.get("platform") or "").strip().lower()
         if platform in by_platform:
-            errors.append(f"duplicate_model_platform_variant:{platform}")
+            # A duplicated object is a model-shape defect, not an evidence
+            # defect. Keep the first whole variant, make the discard visible,
+            # and let the terminal social-copy gate repair that surface when
+            # the retained object is shallow. Blocking normalization here
+            # misclassified an otherwise recoverable draft as evidence
+            # insufficient and prevented the targeted quality retry loop.
+            warnings.append(f"duplicate_model_platform_variant_discarded:{platform}")
             continue
         by_platform[platform] = raw
 
