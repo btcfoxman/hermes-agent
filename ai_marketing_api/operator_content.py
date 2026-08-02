@@ -2181,6 +2181,11 @@ def content_request_payload(
         [*approved_blocks, *_fallback_freeform(role, request)],
         prefix="canonical",
     )
+    model_blocks = [
+        block
+        for block in canonical_blocks
+        if _value(block.origin) == ContentBlockOrigin.APPROVED_CLAIM.value
+    ]
     public_title = (
         _safe_master_title(request, approved_blocks, role=role)
         if approved_blocks
@@ -2379,7 +2384,7 @@ def content_request_payload(
                 "required": block.required,
                 "binding_hash": block.binding_hash,
             }
-            for block in canonical_blocks
+            for block in model_blocks
         ],
     }
 
@@ -2446,6 +2451,7 @@ def content_request_payload(
             "Do not write master_content or variant body directly; the server renders normalized blocks.",
             "Every factual, pricing, identity, or experience statement must use its exact block_ref from canonical_block_registry; never paraphrase it.",
             "Every platform variant must include every registry block marked required, but may choose its own safe order.",
+            "The canonical registry exposed to the model contains approved evidence blocks only. Never invent or request a server-template block_ref; write all editorial prose as original opinion/transition objects.",
             "Write a native social master_title and a distinct title for each platform. Keep each title between 12 and 36 Chinese characters when possible; it may use grounded entity names and numbers from public claims plus a clearly editorial judgment, but no new event assertion.",
             "For the master, use two to six concise editorial blocks: a concrete hook, at least one distinct analytical step, and an optional natural close. For wechat_mp and toutiao use at least two authored blocks: a hook plus one analytical step. A short-feed or video variant may use one to three authored blocks; its first block must itself contain a concrete event-specific implication, not merely announce the topic.",
             "Editorial blocks may only be opinion, transition, or CTA. They must not add unsupported facts, named-entity claims, quotations, prices, promises, or unapproved first-person attribution.",

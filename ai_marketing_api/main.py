@@ -774,6 +774,30 @@ async def _run_compose(
                 **approved_proposal,
                 "suggested_formats": list(retry_channels),
             }
+        surface_contracts: Dict[str, Any] = {}
+        for surface in failed_surfaces:
+            is_long = surface == "master" or surface in {"wechat_mp", "toutiao"}
+            surface_contracts[surface] = {
+                "authored_blocks_required": 2 if is_long else 1,
+                "required_reading_order": (
+                    [
+                        "original authored hook first",
+                        "all required canonical evidence block_ref objects",
+                        "a distinct original authored analysis after the evidence",
+                    ]
+                    if is_long
+                    else [
+                        "one original authored hook/implication block first",
+                        "all required canonical evidence block_ref objects",
+                    ]
+                ),
+                "positive_writing_recipe": [
+                    "Open with the approved actor and one concrete approved action, amount, remedy, or rule.",
+                    "Name the directly affected party and explain one operating mechanism: cash occupation, settlement, contract boundary, workflow, cost, bargaining position, or available choice.",
+                    "Use short declarative sentences in the source language. Mark uncertain future effects with may, depends on, or an equivalent cautious phrase.",
+                    "End on one observable operating consequence, not on the importance of the story or a list of things to watch.",
+                ],
+            }
         retry_payload = {
             **compose_payload,
             "channels": list(retry_channels),
@@ -782,9 +806,11 @@ async def _run_compose(
             "quality_retry": {
                 "attempt": retry_number,
                 "failed_surfaces": failed_surfaces,
+                "requested_surfaces": list(failed_surfaces),
                 "requested_channels": list(retry_channels),
                 "instruction": (
-                    "Return a compact repair for the requested channels only. The "
+                    "Return a compact repair for every failed surface named below; "
+                    "master is a required surface even though it is not a channel. The "
                     "previous draft was safe but not publishable social copy. First "
                     "choose one concrete "
                     "reader-facing thesis from the approved facts and state it as "
@@ -796,9 +822,12 @@ async def _run_compose(
                     "wrapper, mix untranslated English into Chinese prose, or end "
                     "with an automatic observation list. Do not invent loaded labels "
                     "such as grey fees, black-box practices, rip-offs, or scandals. "
-                    "Write only the failed surfaces listed in this repair request; "
+                    "Never select a server-template block_ref; the registry contains "
+                    "approved evidence refs only. Write only the failed surfaces listed "
+                    "in this repair request; "
                     "other valid surfaces are retained independently by the server."
                 ),
+                "surface_contracts": surface_contracts,
                 "required_shape": [
                     "one platform-native authored hook anchored to a concrete actor, amount, rule, constraint, or consequence from approved claims",
                     "for master: at least one distinct authored analytical block after the hook that explains mechanism or reader impact without inventing facts",

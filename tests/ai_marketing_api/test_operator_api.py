@@ -352,13 +352,20 @@ def test_compose_retries_shallow_model_copy_once(monkeypatch):
     assert "quality_retry" not in calls[0]
     assert calls[1]["quality_retry"]["critic_errors"]
     assert calls[1]["quality_retry"]["failed_surfaces"]
+    assert calls[1]["quality_retry"]["requested_surfaces"] == calls[1]["quality_retry"]["failed_surfaces"]
     assert calls[1]["quality_retry"]["requested_channels"] == calls[1]["channels"]
+    assert "master" in calls[1]["quality_retry"]["surface_contracts"]
+    assert calls[1]["quality_retry"]["surface_contracts"]["master"][
+        "authored_blocks_required"
+    ] == 2
     assert calls[1]["quality_retry"]["required_shape"]
     assert any(
         "analytical block" in item
         for item in calls[1]["quality_retry"]["required_shape"]
     )
     assert "Do not describe the review process" in calls[1]["quality_retry"]["instruction"]
+    assert "master is a required surface" in calls[1]["quality_retry"]["instruction"]
+    assert "server-template block_ref" in calls[1]["quality_retry"]["instruction"]
     assert "evidence_ids to []" in calls[1]["quality_retry"]["block_binding_rule"]
     assert any(
         diagnostic.endswith(":evidence_forbidden")

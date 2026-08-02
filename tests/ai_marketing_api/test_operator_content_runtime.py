@@ -812,7 +812,7 @@ def test_industry_official_fact_cannot_launder_unrelated_secondary_fact():
     )
 
 
-def test_industry_two_independent_sources_allow_server_template_refs():
+def test_model_prompt_exposes_only_approved_evidence_refs():
     exact_fact = "Two independent publishers report the same exact statement."
     sources = [
         _context(
@@ -846,45 +846,23 @@ def test_industry_two_independent_sources_allow_server_template_refs():
         request,
         authorized,
     )
-    candidate = _candidate_from_required_refs(payload, request.channels)
-    candidate["_model"] = "safe-test-model"
-    transition = next(
-        block
+    assert payload["canonical_block_registry"]
+    assert all(
+        block["origin"] == "approved_claim"
         for block in payload["canonical_block_registry"]
-        if block["text"] == "一个事件是否重要，不能只看热度，还要看它改变了谁的规则、成本与选择。"
     )
-    opinion = next(
-        block
+    assert all(
+        block["required"] is True
         for block in payload["canonical_block_registry"]
-        if block["text"] == "行业判断不能停在结论上：规则是否改变、执行是否持续、相关参与者是否真实感受到变化，才是后续验证重点。"
     )
-    candidate["blocks"].append({"block_ref": transition["block_ref"]})
-    candidate["platform_variants"][0]["blocks"].append(
-        {"block_ref": opinion["block_ref"]}
+    assert not any(
+        block.get("origin") == "server_template"
+        for block in payload["canonical_block_registry"]
     )
-
-    output = normalize_content_output(
-        registry,
-        OperatorRole.INDUSTRY,
-        request,
-        authorized,
-        fallback,
-        candidate,
+    assert any(
+        block.get("origin") == "server_template"
+        for block in fallback["blocks"]
     )
-
-    assert output.status == ContentStatus.CONTENT_READY.value
-    assert output.critic.passed is True
-    assert transition["text"] in (output.master_content or "")
-    assert opinion["text"] in output.platform_variants[0].body
-    selected_template = next(
-        block for block in output.blocks if block.text == transition["text"]
-    )
-    assert selected_template.origin == "server_template"
-    assert selected_template.locked is True
-    assert selected_template.required is False
-    assert selected_template.binding_hash == transition["block_ref"]
-    exact = [block for block in output.blocks if block.source_exact]
-    assert {block.text for block in exact} == {source.content for source in sources}
 
 
 def test_model_may_select_canonical_blocks_with_bare_hash_refs():
@@ -1325,32 +1303,32 @@ def test_model_ref_order_and_server_templates_create_distinct_channel_drafts():
     )
     transition = next(
         block
-        for block in payload["canonical_block_registry"]
+        for block in fallback["blocks"]
         if block["kind"] == "transition" and block["origin"] == "server_template"
     )
     cta = next(
         block
-        for block in payload["canonical_block_registry"]
+        for block in fallback["platform_variants"][0]["blocks"]
         if block["kind"] == "cta" and block["origin"] == "server_template"
     )
     candidate = {
         "_model": "structured-editorial-model",
         "blocks": [
             {"block_ref": required_ref},
-            {"block_ref": transition["block_ref"]},
+            {"block_ref": transition["binding_hash"]},
         ],
         "platform_variants": [
             {
                 "platform": "wechat_mp",
                 "blocks": [
                     {"block_ref": required_ref},
-                    {"block_ref": cta["block_ref"]},
+                    {"block_ref": cta["binding_hash"]},
                 ],
             },
             {
                 "platform": "xiaohongshu",
                 "blocks": [
-                    {"block_ref": transition["block_ref"]},
+                    {"block_ref": transition["binding_hash"]},
                     {"block_ref": required_ref},
                 ],
             },
@@ -2475,8 +2453,8 @@ def test_personal_server_template_refs_are_selectable_without_dropping_required_
         if block["required"]
     ]
     template_refs = [
-        block["block_ref"]
-        for block in payload["canonical_block_registry"]
+        block["binding_hash"]
+        for block in fallback["blocks"]
         if block["origin"] == "server_template"
     ]
     selected = [
