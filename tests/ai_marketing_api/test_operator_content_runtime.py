@@ -1942,6 +1942,12 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
     next_watch = "接下来最值得关注的是整改措施如何落地。"
     real_landing = "真正落点是平台与经营者之间的规则。"
     core_impact = "核心影响是在平台与经营者之间重新分配谈判空间。"
+    most_direct_change = "最直接的变化，是酒店经营者不必再承担这笔资金占用。"
+    directly_felt = "酒店经营者最直接感受到的变化，是现金不再被平台长期锁住。"
+    next_focus = "接下来盯住一件事：平台如何公开整改措施。"
+    later_watch = "后面要看的是平台会不会调整合同条款。"
+    followup_point = "后续看点是平台规则能否变得透明。"
+    business_landing = "这类处罚真正落到业务上，会改变平台与酒店的议价关系。"
     mixed_language = "这会迫使相关参与者重新评估 bargaining position。"
     loaded_label = "平台不能再把灰色扣费当成默认规则。"
     invented = "52亿元罚没款之后，更关键的问题是整改能否真正改变相关规则。"
@@ -1963,6 +1969,12 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
             {"kind": "opinion", "text": next_watch, "evidence_ids": []},
             {"kind": "opinion", "text": real_landing, "evidence_ids": []},
             {"kind": "opinion", "text": core_impact, "evidence_ids": []},
+            {"kind": "opinion", "text": most_direct_change, "evidence_ids": []},
+            {"kind": "opinion", "text": directly_felt, "evidence_ids": []},
+            {"kind": "opinion", "text": next_focus, "evidence_ids": []},
+            {"kind": "opinion", "text": later_watch, "evidence_ids": []},
+            {"kind": "opinion", "text": followup_point, "evidence_ids": []},
+            {"kind": "opinion", "text": business_landing, "evidence_ids": []},
             {"kind": "opinion", "text": mixed_language, "evidence_ids": []},
             {"kind": "opinion", "text": loaded_label, "evidence_ids": []},
             {"kind": "transition", "text": invented, "evidence_ids": []},
@@ -2000,6 +2012,12 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
     assert next_watch not in output.master_content
     assert real_landing not in output.master_content
     assert core_impact not in output.master_content
+    assert most_direct_change not in output.master_content
+    assert directly_felt not in output.master_content
+    assert next_focus not in output.master_content
+    assert later_watch not in output.master_content
+    assert followup_point not in output.master_content
+    assert business_landing not in output.master_content
     assert mixed_language not in output.master_content
     assert loaded_label not in output.master_content
     assert invented not in output.master_content
@@ -2007,7 +2025,7 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
     assert sum(
         warning.endswith(":generic_meta_copy_forbidden")
         for warning in output.critic.warnings
-    ) == 14
+    ) == 20
     assert output.master_title != candidate["master_title"]
     assert any(
         warning.endswith(":mixed_language_phrase_forbidden")
@@ -2028,6 +2046,61 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
     assert any(
         error.startswith("social_editorial_")
         for error in publishable.critic.errors
+    )
+
+
+def test_industry_editorial_cannot_restate_the_approved_source_paragraph():
+    fact = (
+        "中国国家市场监督管理总局周日（25日）通报，依据《中华人民共和国反垄断法》相关规定，"
+        "对携程集团有限公司滥用市场支配地位实施垄断行为作出行政处罚，没收违法所得16.58亿元，"
+        "并处以罚款35.21亿元，罚没款合计51.79亿元。同时，责令其全额退还强制扣除酒店经营者的"
+        "订单储备金1.22亿元，要求企业全面整改并公开整改措施。"
+    )
+    source = _context(
+        "official-source-restatement",
+        "industry",
+        "industry",
+        "source_item",
+        content=fact,
+        source_uri="https://official.example/release",
+        source_tier="official",
+    )
+    request = _request([source], [_claim(fact, "fact", [source.record_id])])
+    registry = OperatorRegistry()
+    authorized = registry.authorize(OperatorRole.INDUSTRY, [source], AS_OF)
+    fallback = build_content_fallback(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    payload = content_request_payload(
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    candidate = _candidate_from_required_refs(payload, request.channels)
+    restatement = (
+        "携程集团有限公司因滥用市场支配地位实施垄断行为，被作出行政处罚，"
+        "没收违法所得16.58亿元，并处以罚款35.21亿元，罚没款合计51.79亿元。"
+    )
+    candidate["blocks"].append(
+        {"kind": "transition", "text": restatement, "evidence_ids": []}
+    )
+
+    output = normalize_content_output(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+        fallback,
+        candidate,
+    )
+
+    assert restatement not in output.master_content
+    assert any(
+        warning.endswith(":source_restatement_forbidden")
+        for warning in output.critic.warnings
     )
 
 

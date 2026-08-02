@@ -256,6 +256,12 @@ _INDUSTRY_CONTRAST_CLICHE_RE = re.compile(
     r"(?:如果|若).{1,100}[；;](?:如果|若)|"
     r"(?:接下来|后续).{0,12}(?:最|更)?值得(?:看|关注|观察|盯)|"
     r"最值得注意的?是|"
+    r"最(?:直接|实际|重要|有分量)的(?:变化|影响|冲击|后果)|"
+    r"最直接(?:感受|面对)到?的?(?:变化|影响|问题)?|"
+    r"(?:接下来|后面|后续).{0,12}(?:要|可以|最)?(?:看|盯|观察|关注)|"
+    r"后续看点|"
+    r"最该(?:看|关注|盯)|"
+    r"这类(?:处罚|事件|案例).{0,16}(?:落到业务|影响|变化)|"
     r"(?:真正(?:的)?落点|核心影响).{0,6}(?:是|在于)|"
     r"整改.{0,8}才是(?:重点|关键)"
     r")"
@@ -334,6 +340,32 @@ def _binding_hash(data: Dict[str, Any]) -> str:
 
 def _number_tokens(value: str) -> set[str]:
     return {match.group(0) for match in _NUMBER_RE.finditer(value)}
+
+
+def _source_restatement_ratio(value: str, source: str) -> float:
+    compact = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]+", "", value).lower()
+    source_compact = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]+", "", source).lower()
+    if len(compact) < 36 or len(source_compact) < 36:
+        return 0.0
+    width = 4
+    candidate_grams = [
+        compact[index : index + width]
+        for index in range(len(compact) - width + 1)
+    ]
+    source_grams = {
+        source_compact[index : index + width]
+        for index in range(len(source_compact) - width + 1)
+    }
+    if not candidate_grams:
+        return 0.0
+    return sum(gram in source_grams for gram in candidate_grams) / len(candidate_grams)
+
+
+def _restates_approved_source(value: str, approved_fact_texts: Sequence[str]) -> bool:
+    return any(
+        _source_restatement_ratio(value, source) >= 0.72
+        for source in approved_fact_texts
+    )
 
 
 def _fact_display_text(block: ContentBlock) -> str:
@@ -1222,6 +1254,8 @@ def _safe_candidate_blocks(
             return None, "generic_meta_copy_forbidden"
         if role is OperatorRole.INDUSTRY and _INDUSTRY_CONTRAST_CLICHE_RE.search(text):
             return None, "generic_meta_copy_forbidden"
+        if _restates_approved_source(text, approved_fact_texts):
+            return None, "source_restatement_forbidden"
         if _LOADED_EDITORIAL_LABEL_RE.search(text):
             return None, "loaded_editorial_label_forbidden"
         if re.search(r"[\u4e00-\u9fff]", text) and any(
@@ -2467,6 +2501,7 @@ def content_request_payload(
             "Keep fact/opinion separation in block metadata, never as reader-facing wording. The published copy should not explain its own editorial process.",
             "Do not force a question, invitation, disclaimer, or CTA when a firm closing judgment is more natural.",
             "The server keeps required factual blocks verbatim for audit and renders long ones as concise source-exact fact beats. Do not repeat the full announcement in editorial prose.",
+            "Do not turn an approved fact into a near-verbatim authored paragraph before or after its canonical block. Editorial prose must add a mechanism, affected party, decision, or consequence instead of repeating the source.",
             "Make each requested platform variant meaningfully different in title, rhythm, depth, and reader action while preserving every required factual block reference.",
         ],
     }

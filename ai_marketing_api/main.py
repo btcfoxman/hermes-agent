@@ -796,6 +796,7 @@ async def _run_compose(
                     "Name the directly affected party and explain one operating mechanism: cash occupation, settlement, contract boundary, workflow, cost, bargaining position, or available choice.",
                     "Use short declarative sentences in the source language. Mark uncertain future effects with may, depends on, or an equivalent cautious phrase.",
                     "End on one observable operating consequence, not on the importance of the story or a list of things to watch.",
+                    "Do not restate the source paragraph in an authored block; the canonical evidence block already renders the approved facts.",
                 ],
             }
         retry_payload = {
