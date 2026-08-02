@@ -736,6 +736,41 @@ async def _run_compose(
     candidate_model = str(
         candidate.get("_model") or candidate.get("model") or "fallback"
     ).strip().lower()
+
+    def candidate_authored_text(
+        raw_candidate: Dict[str, Any],
+        surface: str,
+    ) -> List[str]:
+        """Return bounded public model prose for one surface."""
+
+        raw_blocks: Any = raw_candidate.get("blocks")
+        if surface != "master":
+            variants = raw_candidate.get("platform_variants")
+            raw_blocks = None
+            if isinstance(variants, list):
+                raw_blocks = next(
+                    (
+                        item.get("blocks")
+                        for item in variants
+                        if isinstance(item, dict)
+                        and str(item.get("platform") or "") == surface
+                    ),
+                    None,
+                )
+        if not isinstance(raw_blocks, list):
+            return []
+        return [
+            str(item.get("text") or "").strip()[:320]
+            for item in raw_blocks
+            if isinstance(item, dict)
+            and not item.get("block_ref")
+            and str(item.get("text") or "").strip()
+        ][:6]
+
+    rejected_text_by_surface = {
+        surface: candidate_authored_text(candidate, surface)
+        for surface in ["master", *compose_payload.get("channels", [])]
+    }
     # A multi-platform response often has five good surfaces and one bad
     # short-feed variant. Repair one surface at a time so a small model can
     # concentrate on a real hook and mechanism instead of reproducing the
@@ -849,33 +884,6 @@ async def _run_compose(
                 )
             return blocks
 
-        def prior_rejected_text(surface: str) -> List[str]:
-            """Return only public model prose from the immediately failed surface."""
-
-            raw_blocks: Any = candidate.get("blocks")
-            if surface != "master":
-                variants = candidate.get("platform_variants")
-                raw_blocks = None
-                if isinstance(variants, list):
-                    raw_blocks = next(
-                        (
-                            item.get("blocks")
-                            for item in variants
-                            if isinstance(item, dict)
-                            and str(item.get("platform") or "") == surface
-                        ),
-                        None,
-                    )
-            if not isinstance(raw_blocks, list):
-                return []
-            return [
-                str(item.get("text") or "").strip()[:320]
-                for item in raw_blocks
-                if isinstance(item, dict)
-                and not item.get("block_ref")
-                and str(item.get("text") or "").strip()
-            ][:6]
-
         repair_response_contract = {
             "return_only_these_top_level_keys": [
                 "master_title",
@@ -907,10 +915,37 @@ async def _run_compose(
             ),
         }
         retry_payload = {
-            **compose_payload,
+            "objective": "Repair exactly one failed social-content surface.",
             "channels": list(retry_channels),
-            "approved_proposal": approved_proposal,
+            "approved_proposal": (
+                {
+                    key: approved_proposal.get(key)
+                    for key in (
+                        "title",
+                        "angle",
+                        "audience_value",
+                        "suggested_formats",
+                        "cta",
+                        "first_person",
+                    )
+                    if approved_proposal.get(key) not in (None, "", [])
+                }
+                if isinstance(approved_proposal, dict)
+                else approved_proposal
+            ),
+            "approved_editorial_brief": compose_payload.get(
+                "approved_editorial_brief"
+            ),
+            "publication_brief": compose_payload.get("publication_brief"),
             "platform_editorial_briefs": retry_platform_briefs,
+            "approved_preferences": compose_payload.get("approved_preferences", []),
+            # The canonical registry is the complete factual universe for a
+            # repair. Omitting duplicated claims and authorized_context keeps
+            # the focused request small without weakening the normalizer,
+            # which still validates against the original frozen request.
+            "canonical_block_registry": compose_payload.get(
+                "canonical_block_registry", []
+            ),
             "response_contract": repair_response_contract,
             "quality_retry": {
                 "attempt": retry_number,
@@ -919,7 +954,9 @@ async def _run_compose(
                 "requested_channels": list(retry_channels),
                 "focus_surface": retry_surface,
                 "surface_attempt": surface_attempts[retry_surface],
-                "previous_rejected_authored_text": prior_rejected_text(retry_surface),
+                "previous_rejected_authored_text": rejected_text_by_surface.get(
+                    retry_surface, []
+                ),
                 "validated_reference_copy": validated_reference_copy,
                 "instruction": (
                     "Return a compact repair only for focus_surface. If focus_surface is "
@@ -1015,6 +1052,9 @@ async def _run_compose(
             # to escape the exact same low-temperature completion.
             temperature=0.3,
         )
+        latest_rejected_text = candidate_authored_text(candidate, retry_surface)
+        if latest_rejected_text:
+            rejected_text_by_surface[retry_surface] = latest_rejected_text
         normalized = normalize_content_output(
             OPERATOR_REGISTRY,
             role_id,

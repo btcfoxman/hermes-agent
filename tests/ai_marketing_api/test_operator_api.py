@@ -355,6 +355,9 @@ def test_compose_repairs_each_shallow_surface_with_a_focused_request(monkeypatch
     assert calls[1]["quality_retry"]["requested_surfaces"] == ["master"]
     assert calls[1]["quality_retry"]["focus_surface"] == "master"
     assert calls[1]["channels"] == []
+    assert "claims" not in calls[1]
+    assert "authorized_context" not in calls[1]
+    assert calls[1]["canonical_block_registry"]
     assert calls[2]["quality_retry"]["requested_surfaces"] == ["wechat_mp"]
     assert calls[2]["channels"] == ["wechat_mp"]
     assert calls[3]["quality_retry"]["requested_surfaces"] == ["xiaohongshu"]
