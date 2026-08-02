@@ -1451,7 +1451,7 @@ def test_reader_facing_editorial_label_is_rejected_as_meta_copy():
     ("alias", "text", "expected_kind"),
     [
         ("hook", "A penalty puts both sides of the platform on the same ledger.", "transition"),
-        ("analysis", "关键在于后续规则是否更透明，而不是只记住一次通报。", "opinion"),
+        ("analysis", "后续规则透明度将决定这次通报能否真正改变行业约束。", "opinion"),
         ("reader_question", "你更关注规则透明度，还是后续执行？", "cta"),
     ],
 )
@@ -1896,6 +1896,7 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
     grounded = "51.79亿元罚没款之后，更关键的问题是整改能否真正改变相关规则。"
     meta = "先把这条消息里的事实和判断分开。"
     filler = "对关注平台经济和反垄断的人来说，重点不只是金额，更是监管定性与整改要求。"
+    unpaired_contrast = "51.79亿元罚没之后，不只是金额。"
     contrast = "这次处罚真正改变的，不只是一个数字，而是平台与经营者之间的规则。"
     not_but = "这次处罚真正改变的，不是一个数字，而是平台与经营者之间的规则。"
     vague = "这次最该被看见的，不只是51.79亿元，而是后续执行。"
@@ -1907,6 +1908,7 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
             {"kind": "transition", "text": grounded, "evidence_ids": []},
             {"kind": "transition", "text": meta, "evidence_ids": []},
             {"kind": "opinion", "text": filler, "evidence_ids": []},
+            {"kind": "opinion", "text": unpaired_contrast, "evidence_ids": []},
             {"kind": "opinion", "text": contrast, "evidence_ids": []},
             {"kind": "opinion", "text": not_but, "evidence_ids": []},
             {"kind": "opinion", "text": vague, "evidence_ids": []},
@@ -1915,6 +1917,7 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
             {"kind": "transition", "text": invented, "evidence_ids": []},
         ]
     )
+    candidate["master_title"] = "51.79亿元罚没之后，不只是金额"
 
     output = normalize_content_output(
         registry,
@@ -1929,6 +1932,7 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
     assert grounded in output.master_content
     assert meta not in output.master_content
     assert filler not in output.master_content
+    assert unpaired_contrast not in output.master_content
     assert contrast not in output.master_content
     assert not_but not in output.master_content
     assert vague not in output.master_content
@@ -1938,7 +1942,8 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
     assert sum(
         warning.endswith(":generic_meta_copy_forbidden")
         for warning in output.critic.warnings
-    ) == 5
+    ) == 6
+    assert output.master_title != candidate["master_title"]
     assert any(
         warning.endswith(":mixed_language_phrase_forbidden")
         for warning in output.critic.warnings

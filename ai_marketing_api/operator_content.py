@@ -243,7 +243,9 @@ _GENERIC_EDITORIAL_META_RE = re.compile(
     r")",
     re.IGNORECASE,
 )
-_INDUSTRY_CONTRAST_CLICHE_RE = re.compile(r"不是.{0,32}而是")
+_INDUSTRY_CONTRAST_CLICHE_RE = re.compile(
+    r"(?:不(?:只|仅)?是|并非|未必是|只是(?:结果|表面|数字|开始|第一步))"
+)
 _MIXED_LANGUAGE_PHRASE_RE = re.compile(
     r"\b[A-Za-z][A-Za-z'’-]{2,}(?:\s+[A-Za-z][A-Za-z'’-]{2,})+\b"
 )
@@ -839,6 +841,8 @@ def _safe_master_title(
     request: OperatorComposeRequest,
     approved_blocks: Sequence[ContentBlock],
     candidate_title: Any = None,
+    *,
+    role: OperatorRole | str | None = None,
 ) -> str:
     requested = request.approved_proposal.title.strip()
     exact_texts = [block.text for block in approved_blocks if block.source_exact]
@@ -847,6 +851,7 @@ def _safe_master_title(
         token for text in exact_texts for token in _number_tokens(text)
     }
     source_text = "\n".join(exact_texts)
+    role_value = _value(role) if role is not None else ""
 
     def title_is_safe(value: str) -> bool:
         numbers = _number_tokens(value)
@@ -877,6 +882,10 @@ def _safe_master_title(
             and not _URL_RE.search(value)
             and not _PROMISE_RE.search(value)
             and not _GENERIC_EDITORIAL_META_RE.search(value)
+            and not (
+                role_value == OperatorRole.INDUSTRY.value
+                and _INDUSTRY_CONTRAST_CLICHE_RE.search(value)
+            )
             and numbers.issubset(approved_numbers)
             and all(entity in source_text for entity in entities)
             and bool(numbers or entities or phrase_grounded)
@@ -1088,7 +1097,7 @@ def build_content_fallback(
             "_model": "fallback",
         }
 
-    title = _safe_master_title(request, approved_blocks)
+    title = _safe_master_title(request, approved_blocks, role=role)
     variants = [
         {
             "platform": channel,
@@ -1727,6 +1736,7 @@ def normalize_content_output(
         request,
         approved_blocks,
         candidate.get("master_title"),
+        role=role,
     )
     fallback_variants = {
         str(raw.get("platform") or "").strip().lower(): raw
@@ -1772,6 +1782,7 @@ def normalize_content_output(
                 request,
                 approved_blocks,
                 raw.get("title"),
+                role=role,
             )
             variants.append(
                 PlatformVariant(
@@ -2118,7 +2129,11 @@ def content_request_payload(
         [*approved_blocks, *_fallback_freeform(role, request)],
         prefix="canonical",
     )
-    public_title = _safe_master_title(request, approved_blocks) if approved_blocks else ""
+    public_title = (
+        _safe_master_title(request, approved_blocks, role=role)
+        if approved_blocks
+        else ""
+    )
     public_key_points = [
         str(claim["text"])
         for claim in public_claims
@@ -2361,7 +2376,7 @@ def content_request_payload(
             "Every authored opinion, transition, or CTA object must set evidence_ids to [] and omit claim_id and block_ref. Evidence binding belongs only to canonical registry blocks selected by block_ref.",
             "A verified number or date may appear in editorial framing only when copied exactly from the supplied public claims; never calculate, round, compare, or combine numbers.",
             "Do not use audit/meta copy such as '先把事实和判断分开', '以下分析', '编辑说明', '编辑观点', '事实部分', '公开信息只是起点', or '接下来可以继续观察'. The draft must read as publishable copy, not an internal review note.",
-            "For industry copy, avoid interchangeable contrast filler built from '不只是/不仅是/不是……而是/更是'. For every role, avoid phrases such as '对关注某领域的人来说', '从行业视角看', '这类案例的价值在于', '真正值得关注', or '重点在于'. State the concrete relationship directly. Every analytical block must advance a thesis tied to this event.",
+            "For industry copy, never use 不只是, 不仅是, 不是, 并非, 未必是, or '只是结果/表面/数字/开始/第一步' as a contrast wrapper, even when the comparison is split across sentences. For every role, avoid phrases such as '对关注某领域的人来说', '从行业视角看', '这类案例的价值在于', '真正值得关注', or '重点在于'. State the concrete actor-action-consequence relationship directly. Every analytical block must advance a thesis tied to this event.",
             "When the approved source and target audience are Chinese, keep reader-facing prose in natural Chinese. Do not insert an untranslated multi-word English phrase unless that phrase already appears in an approved public claim.",
             "Keep the tone professional. Do not upgrade legal or business facts into loaded labels such as '灰色扣费', '霸王条款', '割韭菜', '黑幕', '套路', or '暴雷'.",
             "Build the thesis as a direct subject-action-consequence relationship already present in the approved facts. Name the affected actor, changed rule or incentive, and observable consequence instead of using a rhetorical contrast or merely saying the event is important.",
