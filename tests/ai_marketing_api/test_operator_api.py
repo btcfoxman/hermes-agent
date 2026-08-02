@@ -61,6 +61,30 @@ def _base_payload() -> dict:
     }
 
 
+def test_proposal_rejects_cross_role_preference_before_model(monkeypatch):
+    payload = _base_payload()
+    payload["approved_preferences"] = [
+        {
+            "preference_version_id": "operatorpref-commercial-v1",
+            "role_id": "commercial",
+            "preference_key": "commercial.case.structure",
+            "guidance": "Use a commercial case structure.",
+            "status": "approved",
+            "version": 1,
+        }
+    ]
+
+    async def should_not_run(*_args, **_kwargs):
+        raise AssertionError("cross-role preference must fail before model execution")
+
+    monkeypatch.setattr(marketing_api, "_llm_json", should_not_run)
+    response = _request(
+        "POST", "/api/v1/operators/industry/propose", json=payload
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "preference_role_denied"
+
+
 def _revision_payload() -> dict:
     proposal = _request("POST", "/api/v1/operators/industry/propose", json=_base_payload()).json()
     payload = _base_payload()

@@ -16,6 +16,16 @@ from pydantic import BaseModel, ConfigDict, Field
 SCHEMA_VERSION = "operator.proposal.v1"
 CONTENT_SCHEMA_VERSION = "operator.content.v1"
 PROFILE_ROOT = Path(__file__).resolve().parent / "profiles"
+PREFERENCE_CHANNEL_CONTENT_TYPES = {
+    "wechat_moments": "post",
+    "wechat_mp": "article",
+    "wechat_channels": "video",
+    "douyin": "short_video",
+    "kuaishou": "short_video",
+    "xiaohongshu": "graphic",
+    "toutiao": "article",
+    "weitoutiao": "weitoutiao",
+}
 
 
 class OperatorRole(str, Enum):
@@ -83,6 +93,25 @@ class AuthorizedContext(StrictModel):
     source_tier: Literal["official", "primary", "trusted", "secondary", "unknown"] = "unknown"
 
 
+class ApprovedPreference(StrictModel):
+    """One owner-approved, versioned expression preference.
+
+    Preferences may influence structure or tone only. They are never evidence
+    and cannot authorize a factual, pricing, identity, or experience claim.
+    """
+
+    preference_version_id: str = Field(min_length=1, max_length=160)
+    role_id: OperatorRole
+    preference_key: str = Field(min_length=1, max_length=120)
+    platform: str = Field(default="", max_length=80)
+    account_id: str = Field(default="", max_length=160)
+    content_type: str = Field(default="", max_length=80)
+    title: str = Field(default="", max_length=300)
+    guidance: str = Field(min_length=1, max_length=2_000)
+    status: Literal["approved"] = "approved"
+    version: int = Field(ge=1)
+
+
 class OperatorProposeRequest(StrictModel):
     objective: str = Field(min_length=1, max_length=2_000)
     topic: str = Field(default="", max_length=2_000)
@@ -90,6 +119,7 @@ class OperatorProposeRequest(StrictModel):
     channels: List[str] = Field(default_factory=list, max_length=20)
     constraints: List[str] = Field(default_factory=list, max_length=30)
     authorized_context: List[AuthorizedContext] = Field(default_factory=list, max_length=100)
+    approved_preferences: List[ApprovedPreference] = Field(default_factory=list, max_length=100)
     as_of: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     decision_thread_id: Optional[str] = Field(default=None, max_length=160)
 
@@ -354,6 +384,38 @@ class OperatorRegistry:
                         "record_expired", record_id, f"record {record_id!r} has expired"
                     )
             authorized.append(context)
+        return authorized
+
+    def authorize_preferences(
+        self,
+        role_id: OperatorRole | str,
+        preferences: Sequence[ApprovedPreference],
+    ) -> List[ApprovedPreference]:
+        role = self.get(role_id).role_id.value
+        authorized: List[ApprovedPreference] = []
+        seen: Set[str] = set()
+        for preference in preferences:
+            preference_id = preference.preference_version_id
+            if preference_id in seen:
+                raise ContextAuthorizationError(
+                    "duplicate_preference",
+                    preference_id,
+                    f"duplicate approved preference version: {preference_id}",
+                )
+            seen.add(preference_id)
+            if _enum_value(preference.role_id) != role:
+                raise ContextAuthorizationError(
+                    "preference_role_denied",
+                    preference_id,
+                    f"preference {preference_id!r} is not authorized for role {role!r}",
+                )
+            if not preference.preference_key.startswith(f"{role}."):
+                raise ContextAuthorizationError(
+                    "preference_scope_denied",
+                    preference_id,
+                    f"preference {preference_id!r} crosses the role namespace",
+                )
+            authorized.append(preference)
         return authorized
 
 
@@ -939,6 +1001,26 @@ def request_payload(request: OperatorProposeRequest) -> Dict[str, Any]:
     """Serialize only user/context data; the SOUL remains a stable system message."""
 
     payload = _model_dump(request)
+    channels = {str(item or "").strip().lower() for item in request.channels}
+    payload["approved_preferences"] = [
+        _model_dump(preference)
+        for preference in request.approved_preferences
+        if not preference.account_id
+        and (not preference.platform or preference.platform.lower() in channels)
+        and (
+            not preference.content_type
+            or preference.content_type.lower()
+            in {
+                PREFERENCE_CHANNEL_CONTENT_TYPES.get(channel, "")
+                for channel in channels
+            }
+        )
+    ]
+    payload["preference_usage_contract"] = [
+        "Use approved_preferences only for expression, structure, tone, or format choices.",
+        "A preference is not evidence and cannot introduce a fact, number, price, promise, identity, event, or experience.",
+        "A platform-scoped preference applies only to its matching platform; an account-scoped preference is ignored unless the request explicitly targets that account.",
+    ]
     payload["response_contract"] = {
         "schema_version": SCHEMA_VERSION,
         "proposal": {

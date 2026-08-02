@@ -18,6 +18,7 @@ from ai_marketing_api.operator_content import (
     normalize_content_output,
 )
 from ai_marketing_api.operator_runtime import (
+    ApprovedPreference,
     AuthorizedContext,
     OperatorClaim,
     OperatorRegistry,
@@ -114,6 +115,61 @@ def _run(
         fallback,
         candidate if candidate is not None else fallback,
     )
+
+
+def test_compose_forwards_only_matching_non_account_preferences_as_style_guidance():
+    fact = "The vendor released version 2."
+    request = _request(
+        [
+            _context(
+                "source-1",
+                "industry",
+                "industry",
+                "source_item",
+                content=fact,
+                source_tier="official",
+            )
+        ],
+        [_claim(fact, "fact", ["source-1"])],
+        channels=["wechat_mp"],
+    )
+    request.approved_preferences = [
+        ApprovedPreference(
+            preference_version_id="operatorpref-industry-v2",
+            role_id="industry",
+            preference_key="industry.article.structure",
+            platform="wechat_mp",
+            content_type="article",
+            guidance="先说明规则变化，再落到产品团队的可观察影响。",
+            status="approved",
+            version=2,
+        ),
+        ApprovedPreference(
+            preference_version_id="operatorpref-industry-account-v1",
+            role_id="industry",
+            preference_key="industry.account.voice",
+            account_id="private-account",
+            guidance="仅用于指定账号。",
+            status="approved",
+            version=1,
+        ),
+    ]
+    registry = OperatorRegistry()
+    authorized = registry.authorize(
+        OperatorRole.INDUSTRY, request.authorized_context, request.as_of
+    )
+    registry.authorize_preferences(
+        OperatorRole.INDUSTRY, request.approved_preferences
+    )
+
+    payload = content_request_payload(
+        OperatorRole.INDUSTRY, request, authorized
+    )
+
+    assert [
+        item["preference_version_id"] for item in payload["approved_preferences"]
+    ] == ["operatorpref-industry-v2"]
+    assert "not evidence" in " ".join(payload["preference_usage_contract"])
 
 
 def _candidate_from_required_refs(

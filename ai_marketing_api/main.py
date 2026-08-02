@@ -640,6 +640,9 @@ async def _run_operator(
         )
     try:
         contexts = OPERATOR_REGISTRY.authorize(role_id, payload.authorized_context, payload.as_of)
+        OPERATOR_REGISTRY.authorize_preferences(
+            role_id, payload.approved_preferences
+        )
     except ContextAuthorizationError as exc:
         raise HTTPException(
             status_code=403,
@@ -689,6 +692,9 @@ async def _run_compose(
         raise HTTPException(status_code=403, detail={"code": "operator_action_denied"})
     try:
         contexts = OPERATOR_REGISTRY.authorize(role_id, payload.authorized_context, payload.as_of)
+        OPERATOR_REGISTRY.authorize_preferences(
+            role_id, payload.approved_preferences
+        )
     except ContextAuthorizationError as exc:
         raise HTTPException(
             status_code=403,

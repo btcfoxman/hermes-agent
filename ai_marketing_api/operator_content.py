@@ -2286,6 +2286,31 @@ def content_request_payload(
             for channel in request.channels
             if channel in platform_briefs
         },
+        "approved_preferences": [
+            _dump(preference)
+            for preference in request.approved_preferences
+            if not preference.account_id
+            and (
+                not preference.platform
+                or preference.platform.lower()
+                in {str(channel).strip().lower() for channel in request.channels}
+            )
+            and (
+                not preference.content_type
+                or preference.content_type.lower()
+                in {
+                    SUPPORTED_CHANNEL_FORMATS.get(
+                        str(channel).strip().lower(), ""
+                    ).lower()
+                    for channel in request.channels
+                }
+            )
+        ],
+        "preference_usage_contract": [
+            "Apply each preference only to expression, structure, tone, or its matching platform format.",
+            "Preferences are not evidence and must never introduce a fact, number, price, promise, identity, event, or experience.",
+            "Canonical approved claim blocks and all safety gates override a preference.",
+        ],
         "claims": public_claims,
         "authorized_context": [_sanitized_context(context) for context in visible],
         "canonical_block_registry": [
