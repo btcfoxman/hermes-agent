@@ -1676,7 +1676,7 @@ def test_industry_model_can_supply_grounded_social_titles_per_platform():
     candidate = _candidate_from_required_refs(payload, request.channels)
     candidate["master_title"] = "51.79亿元之后，整改才是真正看点"
     candidate["platform_variants"][0]["title"] = "51.79亿元之后，整改如何落地"
-    candidate["platform_variants"][1]["title"] = "51.79亿元罚没款，重点不只在金额"
+    candidate["platform_variants"][1]["title"] = "51.79亿元罚没后，整改要看执行动作"
 
     output = normalize_content_output(
         registry,
@@ -1692,8 +1692,111 @@ def test_industry_model_can_supply_grounded_social_titles_per_platform():
         item.platform: item.title for item in output.platform_variants
     } == {
         "wechat_mp": "51.79亿元之后，整改如何落地",
-        "xiaohongshu": "51.79亿元罚没款，重点不只在金额",
+        "xiaohongshu": "51.79亿元罚没后，整改要看执行动作",
     }
+
+
+def test_safe_approved_proposal_title_beats_a_legalistic_source_excerpt():
+    fact = (
+        "监管部门对某平台作出行政处罚，罚没款合计51.79亿元，"
+        "并责令其退还酒店经营者订单储备金1.22亿元。"
+    )
+    source = _context(
+        "official-approved-title",
+        "industry",
+        "industry",
+        "source_item",
+        content=fact,
+        source_uri="https://official.example/approved-title",
+        source_tier="official",
+    )
+    request = _request([source], [_claim(fact, "fact", [source.record_id])])
+    request = request.model_copy(
+        update={
+            "approved_proposal": request.approved_proposal.model_copy(
+                update={
+                    "title": "51.79亿元罚没之外，酒店经营者拿回了什么"
+                }
+            )
+        }
+    )
+    registry = OperatorRegistry()
+    authorized = registry.authorize(OperatorRole.INDUSTRY, [source], AS_OF)
+    fallback = build_content_fallback(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    payload = content_request_payload(
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    candidate = _candidate_from_required_refs(payload, request.channels)
+
+    output = normalize_content_output(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+        fallback,
+        candidate,
+    )
+
+    assert output.master_title == "51.79亿元罚没之外，酒店经营者拿回了什么"
+
+
+def test_industry_authored_hook_leads_even_when_model_labels_it_opinion():
+    fact = "监管部门责令某平台退还酒店经营者订单储备金1.22亿元。"
+    source = _context(
+        "official-hook-order",
+        "industry",
+        "industry",
+        "source_item",
+        content=fact,
+        source_uri="https://official.example/hook-order",
+        source_tier="official",
+    )
+    request = _request([source], [_claim(fact, "fact", [source.record_id])])
+    registry = OperatorRegistry()
+    authorized = registry.authorize(OperatorRole.INDUSTRY, [source], AS_OF)
+    fallback = build_content_fallback(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    payload = content_request_payload(
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    candidate = _candidate_from_required_refs(payload, request.channels)
+    hook = "监管处罚如何改变平台与酒店经营者之间的资金边界？"
+    analysis = "退款要求把酒店经营者承受的资金约束，拉回到可核验的监管框架内。"
+    candidate["blocks"].extend(
+        [
+            {"kind": "opinion", "text": hook, "evidence_ids": []},
+            {"kind": "opinion", "text": analysis, "evidence_ids": []},
+        ]
+    )
+    for variant in candidate["platform_variants"]:
+        variant["blocks"].extend(
+            [{"kind": "opinion", "text": hook, "evidence_ids": []}]
+        )
+
+    output = normalize_content_output(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+        fallback,
+        candidate,
+    )
+
+    assert output.blocks[0].text == hook
+    assert all(variant.blocks[0].text == hook for variant in output.platform_variants)
 
 
 def test_personal_model_can_supply_grounded_titles_without_entities_or_numbers():
@@ -1790,12 +1893,18 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
     grounded = "51.79亿元罚没款之后，更关键的问题是整改能否真正改变相关规则。"
     meta = "先把这条消息里的事实和判断分开。"
     filler = "对关注平台经济和反垄断的人来说，重点不只是金额，更是监管定性与整改要求。"
+    contrast = "这次处罚真正改变的，不只是一个数字，而是平台与经营者之间的规则。"
+    vague = "这次最该被看见的，不只是51.79亿元，而是后续执行。"
+    mixed_language = "这会迫使相关参与者重新评估 bargaining position。"
     invented = "52亿元罚没款之后，更关键的问题是整改能否真正改变相关规则。"
     candidate["blocks"].extend(
         [
             {"kind": "transition", "text": grounded, "evidence_ids": []},
             {"kind": "transition", "text": meta, "evidence_ids": []},
             {"kind": "opinion", "text": filler, "evidence_ids": []},
+            {"kind": "opinion", "text": contrast, "evidence_ids": []},
+            {"kind": "opinion", "text": vague, "evidence_ids": []},
+            {"kind": "opinion", "text": mixed_language, "evidence_ids": []},
             {"kind": "transition", "text": invented, "evidence_ids": []},
         ]
     )
@@ -1813,11 +1922,18 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
     assert grounded in output.master_content
     assert meta not in output.master_content
     assert filler not in output.master_content
+    assert contrast not in output.master_content
+    assert vague not in output.master_content
+    assert mixed_language not in output.master_content
     assert invented not in output.master_content
     assert sum(
         warning.endswith(":generic_meta_copy_forbidden")
         for warning in output.critic.warnings
-    ) == 2
+    ) == 4
+    assert any(
+        warning.endswith(":mixed_language_phrase_forbidden")
+        for warning in output.critic.warnings
+    )
     assert any(
         warning.endswith(":number_ungrounded")
         for warning in output.critic.warnings

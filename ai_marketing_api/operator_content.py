@@ -235,10 +235,16 @@ _GENERIC_EDITORIAL_META_RE = re.compile(
     r"从(?:行业|商业|平台|用户).{0,8}(?:视角|角度)看[，,]?|"
     r"这类(?:事件|案例|消息).{0,12}(?:价值|重点).{0,12}(?:在于|是)|"
     r"真正值得关注的[，,]?\s*不只是事件本身|"
+    r"(?:真正|更|最).{0,8}(?:值得|应该|该被).{0,8}(?:关注|注意|看见|盯住).{0,20}不(?:只|仅)是|"
+    r"(?:重点|关键|价值|意义|故事).{0,16}不(?:只|仅)是|"
+    r"不(?:只|仅)是.{0,32}(?:而是|更是)|"
     r"(?:接下来|后续)可以继续观察|"
     r"后续措施如何落地.{0,24}(?:透明|可预期|到位)"
     r")",
     re.IGNORECASE,
+)
+_MIXED_LANGUAGE_PHRASE_RE = re.compile(
+    r"\b[A-Za-z][A-Za-z'’-]{2,}(?:\s+[A-Za-z][A-Za-z'’-]{2,})+\b"
 )
 _URL_RE = re.compile(r"(?:https?://|www\.)", re.IGNORECASE)
 _TITLE_ENTITY_RE = re.compile(
@@ -836,47 +842,51 @@ def _safe_master_title(
     approved_numbers = {
         token for text in exact_texts for token in _number_tokens(text)
     }
-    supplied_numbers = _number_tokens(supplied)
-    supplied_entities = [
-        match.group(0) for match in _TITLE_ENTITY_RE.finditer(supplied)
-    ]
     source_text = "\n".join(exact_texts)
-    grounded_phrase = any(
-        chunk[index : index + 4] in source_text
-        for chunk in re.findall(r"[\u4e00-\u9fffA-Za-z0-9]{4,}", supplied)
-        for index in range(len(chunk) - 3)
-    )
-    supplied_assertions = [
-        match.group(0)
-        for match in _UNSUPPORTED_EDITORIAL_ASSERTION_RE.finditer(supplied)
-    ]
-    personal_title_safe = bool(
-        not request.approved_proposal.first_person
-        or not _contains_personal_attribution(supplied)
-        or any(supplied in text for text in exact_texts)
-        or (
-            _SAFE_PERSONAL_JUDGMENT_RE.search(supplied)
-            and not _PERSONAL_EDITORIAL_ASSERTION_RE.search(supplied)
+
+    def title_is_safe(value: str) -> bool:
+        numbers = _number_tokens(value)
+        entities = [
+            match.group(0) for match in _TITLE_ENTITY_RE.finditer(value)
+        ]
+        assertions = [
+            match.group(0)
+            for match in _UNSUPPORTED_EDITORIAL_ASSERTION_RE.finditer(value)
+        ]
+        phrase_grounded = any(
+            chunk[index : index + 4] in source_text
+            for chunk in re.findall(r"[\u4e00-\u9fffA-Za-z0-9]{4,}", value)
+            for index in range(len(chunk) - 3)
         )
-    )
-    if (
-        8 <= len(supplied) <= 72
-        and not _HTML_RE.search(supplied)
-        and not _URL_RE.search(supplied)
-        and not _PROMISE_RE.search(supplied)
-        and not _GENERIC_EDITORIAL_META_RE.search(supplied)
-        and supplied_numbers.issubset(approved_numbers)
-        and all(entity in source_text for entity in supplied_entities)
-        and bool(supplied_numbers or supplied_entities or grounded_phrase)
-        and all(assertion in source_text for assertion in supplied_assertions)
-        and personal_title_safe
-    ):
+        personal_safe = bool(
+            not request.approved_proposal.first_person
+            or not _contains_personal_attribution(value)
+            or any(value in text for text in exact_texts)
+            or (
+                _SAFE_PERSONAL_JUDGMENT_RE.search(value)
+                and not _PERSONAL_EDITORIAL_ASSERTION_RE.search(value)
+            )
+        )
+        return bool(
+            8 <= len(value) <= 48
+            and not _HTML_RE.search(value)
+            and not _URL_RE.search(value)
+            and not _PROMISE_RE.search(value)
+            and not _GENERIC_EDITORIAL_META_RE.search(value)
+            and numbers.issubset(approved_numbers)
+            and all(entity in source_text for entity in entities)
+            and bool(numbers or entities or phrase_grounded)
+            and all(assertion in source_text for assertion in assertions)
+            and personal_safe
+        )
+
+    if title_is_safe(supplied):
         return supplied
-    if (
-        requested
-        and len(requested) <= 72
-        and any(requested in text for text in exact_texts)
-    ):
+    # The proposal title has already passed owner approval, but it is still
+    # editorial direction rather than evidence. Reuse it only through the
+    # same deterministic title fence instead of falling back to a legalistic
+    # source excerpt whenever the model title drifts.
+    if title_is_safe(requested):
         return requested
     # A proposal title is an editorial direction, not evidence.  When it is
     # not itself a verbatim approved excerpt, extract a concise contiguous
@@ -946,7 +956,29 @@ def _platform_blocks(
         "xiaohongshu",
         "weitoutiao",
     }:
-        ordered = [*transitions, *exact, *opinions, *ctas]
+        authored = [
+            block
+            for block in blocks
+            if _value(block.origin) == ContentBlockOrigin.MODEL_EDITORIAL.value
+            and _value(block.kind) in {
+                ContentBlockKind.TRANSITION.value,
+                ContentBlockKind.OPINION.value,
+            }
+        ]
+        lead = authored[0] if authored else (transitions[0] if transitions else None)
+        remaining_editorial = [
+            block
+            for block in blocks
+            if not block.source_exact
+            and _value(block.kind) != ContentBlockKind.CTA.value
+            and block is not lead
+        ]
+        ordered = [
+            *([lead] if lead is not None else []),
+            *exact,
+            *remaining_editorial,
+            *ctas,
+        ]
     else:
         ordered = [*exact, *opinions, *transitions, *ctas]
     return _reindex(ordered, prefix=f"{platform}-block")
@@ -1124,6 +1156,7 @@ def _safe_candidate_blocks(
         for text in approved_fact_texts
         for token in _number_tokens(text)
     }
+    approved_source_text = "\n".join(approved_fact_texts).lower()
 
     def safe_editorial(
         raw: Dict[str, Any],
@@ -1160,6 +1193,11 @@ def _safe_candidate_blocks(
             return None, "assertion_forbidden"
         if _GENERIC_EDITORIAL_META_RE.search(text):
             return None, "generic_meta_copy_forbidden"
+        if re.search(r"[\u4e00-\u9fff]", text) and any(
+            match.group(0).lower() not in approved_source_text
+            for match in _MIXED_LANGUAGE_PHRASE_RE.finditer(text)
+        ):
+            return None, "mixed_language_phrase_forbidden"
         if _contains_personal_attribution(text):
             # Personal-IP copy needs a recognizable first-person point of view,
             # but the model still may not invent a first-person event, asset,
@@ -1595,6 +1633,8 @@ def _social_surface_quality_errors(
         )
     if hook is None:
         errors.append(f"social_editorial_hook_missing:{surface}")
+    elif not blocks or blocks[0].binding_hash != hook.binding_hash:
+        errors.append(f"social_editorial_hook_not_leading:{surface}")
     if len(analysis) < minimum_analysis:
         errors.append(
             f"social_editorial_analysis_insufficient:{surface}:"
@@ -2313,7 +2353,8 @@ def content_request_payload(
             "Every authored opinion, transition, or CTA object must set evidence_ids to [] and omit claim_id and block_ref. Evidence binding belongs only to canonical registry blocks selected by block_ref.",
             "A verified number or date may appear in editorial framing only when copied exactly from the supplied public claims; never calculate, round, compare, or combine numbers.",
             "Do not use audit/meta copy such as '先把事实和判断分开', '以下分析', '编辑说明', '编辑观点', '事实部分', '公开信息只是起点', or '接下来可以继续观察'. The draft must read as publishable copy, not an internal review note.",
-            "Avoid interchangeable filler such as '对关注某领域的人来说', '从行业视角看', '这类案例的价值在于', or '重点不只是……更是……'. Every analytical block must advance a concrete thesis tied to this event.",
+            "Avoid interchangeable contrast filler built from '不只是/不僅是/而是/更是', as well as phrases such as '对关注某领域的人来说', '从行业视角看', '这类案例的价值在于', '真正值得关注', or '重点在于'. State the concrete relationship directly. Every analytical block must advance a thesis tied to this event.",
+            "When the approved source and target audience are Chinese, keep reader-facing prose in natural Chinese. Do not insert an untranslated multi-word English phrase unless that phrase already appears in an approved public claim.",
             "Build the thesis from a concrete contrast or relationship already present in the approved facts (for example penalty versus restitution, announcement versus enforceable action, or platform versus affected participant). Name the affected actor, changed rule/incentive, or observable consequence instead of merely saying the event is important.",
             "Keep fact/opinion separation in block metadata, never as reader-facing wording. The published copy should not explain its own editorial process.",
             "Do not force a question, invitation, disclaimer, or CTA when a firm closing judgment is more natural.",

@@ -743,8 +743,9 @@ async def _run_compose(
                     "reader-facing thesis from the approved facts, then return "
                     "original, event-specific editorial blocks for every surface. "
                     "Do not describe the review process, label facts/opinions, "
-                    "repeat a generic 'worth watching' wrapper, or end with an "
-                    "automatic observation list."
+                    "repeat a generic 'worth watching' or 'not only ... but also' "
+                    "wrapper, mix untranslated English into Chinese prose, or end "
+                    "with an automatic observation list."
                 ),
                 "required_shape": [
                     "one platform-native authored hook anchored to a concrete actor, amount, rule, constraint, or consequence from approved claims",
