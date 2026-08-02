@@ -1983,6 +1983,7 @@ def test_industry_editorial_keeps_all_numbers_in_canonical_blocks_and_drops_meta
     cannot_only_watch = "判断整改效果不能只看公开表态，还要看执行结果。"
     dont_only_watch = "以后看这类治理，别只看处罚金额，先看钱有没有回到经营者手里。"
     paired_if = "如果整改停在纸面，约束有限；如果进入日常执行，议价关系不同。"
+    more_only = "平台把资金边界拿得越紧，后面的治理就越难只靠口头整改过去。"
     worth_noticing = "最值得注意的是平台与经营者之间的议价关系。"
     next_watch = "接下来最值得关注的是整改措施如何落地。"
     real_landing = "真正落点是平台与经营者之间的规则。"
@@ -1993,9 +1994,11 @@ def test_industry_editorial_keeps_all_numbers_in_canonical_blocks_and_drops_meta
     later_watch = "后面要看的是平台会不会调整合同条款。"
     followup_point = "后续看点是平台规则能否变得透明。"
     business_landing = "这类处罚真正落到业务上，会改变平台与酒店的议价关系。"
+    governance_landing = "这类治理真正落到经营端，看的就是资金能不能回到商家手里。"
     truly_changes = "携程这次被罚没，真正改变的是平台与酒店经营者之间的议价边界。"
     truly_must_change = "对酒店经营者而言，真正要变的是资金占用和结算方式。"
     pushed_to_front = "平台和酒店之间的规则边界被推到台前。"
+    placed_on_stage = "平台内部规则能否继续占用商家资金的问题被摆到台前。"
     reexamined = "平台对酒店经营者的规则定价权会被重新审视。"
     mixed_language = "这会迫使相关参与者重新评估 bargaining position。"
     loaded_label = "平台不能再把灰色扣费当成默认规则。"
@@ -2015,6 +2018,7 @@ def test_industry_editorial_keeps_all_numbers_in_canonical_blocks_and_drops_meta
             {"kind": "opinion", "text": cannot_only_watch, "evidence_ids": []},
             {"kind": "opinion", "text": dont_only_watch, "evidence_ids": []},
             {"kind": "opinion", "text": paired_if, "evidence_ids": []},
+            {"kind": "opinion", "text": more_only, "evidence_ids": []},
             {"kind": "opinion", "text": worth_noticing, "evidence_ids": []},
             {"kind": "opinion", "text": next_watch, "evidence_ids": []},
             {"kind": "opinion", "text": real_landing, "evidence_ids": []},
@@ -2025,9 +2029,11 @@ def test_industry_editorial_keeps_all_numbers_in_canonical_blocks_and_drops_meta
             {"kind": "opinion", "text": later_watch, "evidence_ids": []},
             {"kind": "opinion", "text": followup_point, "evidence_ids": []},
             {"kind": "opinion", "text": business_landing, "evidence_ids": []},
+            {"kind": "opinion", "text": governance_landing, "evidence_ids": []},
             {"kind": "opinion", "text": truly_changes, "evidence_ids": []},
             {"kind": "opinion", "text": truly_must_change, "evidence_ids": []},
             {"kind": "opinion", "text": pushed_to_front, "evidence_ids": []},
+            {"kind": "opinion", "text": placed_on_stage, "evidence_ids": []},
             {"kind": "opinion", "text": reexamined, "evidence_ids": []},
             {"kind": "opinion", "text": mixed_language, "evidence_ids": []},
             {"kind": "opinion", "text": loaded_label, "evidence_ids": []},
@@ -2063,6 +2069,7 @@ def test_industry_editorial_keeps_all_numbers_in_canonical_blocks_and_drops_meta
     assert cannot_only_watch not in output.master_content
     assert dont_only_watch not in output.master_content
     assert paired_if not in output.master_content
+    assert more_only not in output.master_content
     assert worth_noticing not in output.master_content
     assert next_watch not in output.master_content
     assert real_landing not in output.master_content
@@ -2073,9 +2080,11 @@ def test_industry_editorial_keeps_all_numbers_in_canonical_blocks_and_drops_meta
     assert later_watch not in output.master_content
     assert followup_point not in output.master_content
     assert business_landing not in output.master_content
+    assert governance_landing not in output.master_content
     assert truly_changes not in output.master_content
     assert truly_must_change not in output.master_content
     assert pushed_to_front not in output.master_content
+    assert placed_on_stage not in output.master_content
     assert reexamined not in output.master_content
     assert mixed_language not in output.master_content
     assert loaded_label not in output.master_content
@@ -2084,7 +2093,7 @@ def test_industry_editorial_keeps_all_numbers_in_canonical_blocks_and_drops_meta
     assert sum(
         warning.endswith(":generic_meta_copy_forbidden")
         for warning in output.critic.warnings
-    ) == 25
+    ) == 28
     assert output.master_title != candidate["master_title"]
     assert any(
         warning.endswith(":mixed_language_phrase_forbidden")
