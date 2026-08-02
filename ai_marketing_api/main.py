@@ -545,6 +545,7 @@ async def _llm_json(
         ],
     }
     resolved_timeout = _timeout_seconds(timeout_seconds)
+    request_started = False
     try:
         async with httpx.AsyncClient(
             timeout=resolved_timeout,
@@ -554,6 +555,7 @@ async def _llm_json(
             last_error: Optional[Exception] = None
             for request_base_url in target.request_base_urls:
                 try:
+                    request_started = True
                     resp = await client.post(
                         f"{request_base_url}/chat/completions",
                         json=request,
@@ -578,10 +580,12 @@ async def _llm_json(
         content = data["choices"][0]["message"]["content"]
         result = _json_from_response(content)
         result["_model"] = model
+        result["_llm_attempted"] = True
         return result
     except Exception as exc:
         fallback = dict(fallback)
         fallback["_error"] = str(exc)
+        fallback["_llm_attempted"] = request_started
         fallback["_timeout_seconds"] = resolved_timeout
         return fallback
 
@@ -862,7 +866,7 @@ async def _run_compose(
         surface: candidate_authored_text(candidate, surface)
         for surface in ["master", *compose_payload.get("channels", [])]
     }
-    live_model_attempted = (
+    live_model_attempted = bool(candidate.get("_llm_attempted")) or (
         candidate_model != "fallback" and not candidate.get("_error")
     )
     has_curated_industry_policy = (

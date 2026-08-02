@@ -644,7 +644,11 @@ def test_compose_uses_commercial_human_review_policy_only_after_model_attempt(
 
     async def fake_llm(system, model_payload, fallback, *args, **kwargs):
         calls.append(model_payload)
-        return {**fallback, "_model": "fake-live-model"}
+        return {
+            **fallback,
+            "_error": "upstream timeout after request started",
+            "_llm_attempted": True,
+        }
 
     monkeypatch.setattr(marketing_api, "_llm_json", fake_llm)
 
@@ -926,6 +930,7 @@ def test_llm_endpoint_rejects_non_public_ip_targets(monkeypatch, base_url):
 
     assert result["status"] == "safe-fallback"
     assert result["_error"] == "invalid_openai_base_url"
+    assert result.get("_llm_attempted") is not True
     assert "caller-owned-secret" not in str(result)
 
 
@@ -989,6 +994,7 @@ def test_llm_endpoint_never_follows_redirects(monkeypatch):
 
     assert result["status"] == "safe-fallback"
     assert result["_error"] == "llm_redirect_forbidden"
+    assert result["_llm_attempted"] is True
 
 
 def test_llm_endpoint_connects_to_the_validated_ip_without_resolving_hostname_again(monkeypatch):
@@ -1035,3 +1041,4 @@ def test_llm_endpoint_connects_to_the_validated_ip_without_resolving_hostname_ag
 
     assert resolutions == [("model.example", 443)]
     assert result["status"] == "ok"
+    assert result["_llm_attempted"] is True
