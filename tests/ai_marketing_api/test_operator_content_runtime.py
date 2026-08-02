@@ -2278,14 +2278,25 @@ def test_industry_funds_remedy_cannot_be_reframed_as_promotion_or_reversed_cash_
     event_restatement = (
         "平台把酒店经营者的订单储备金拿去内部占用，资金边界随之改变。"
     )
+    fact_only_restatement = (
+        "酒店经营者被强制扣除的订单储备金要全额退回。"
+    )
     unsupported_result = (
         "对酒店经营者而言，现金更充足，后续谈结算时也更有底气。"
+    )
+    boundary_speculation = (
+        "平台对这部分资金的占用边界会被压回去，经营者谈条件也更有底气。"
     )
     candidate["blocks"] = [
         {"kind": "opinion", "text": promotion, "evidence_ids": []},
         {
             "kind": "transition",
             "text": event_restatement,
+            "evidence_ids": [],
+        },
+        {
+            "kind": "transition",
+            "text": fact_only_restatement,
             "evidence_ids": [],
         },
         *candidate["blocks"],
@@ -2297,6 +2308,11 @@ def test_industry_funds_remedy_cannot_be_reframed_as_promotion_or_reversed_cash_
         {
             "kind": "opinion",
             "text": unsupported_result,
+            "evidence_ids": [],
+        },
+        {
+            "kind": "opinion",
+            "text": boundary_speculation,
             "evidence_ids": [],
         },
     ]
@@ -2313,7 +2329,9 @@ def test_industry_funds_remedy_cannot_be_reframed_as_promotion_or_reversed_cash_
     assert promotion not in (output.master_content or "")
     assert reversed_cash_flow not in (output.master_content or "")
     assert event_restatement not in (output.master_content or "")
+    assert fact_only_restatement not in (output.master_content or "")
     assert unsupported_result not in (output.master_content or "")
+    assert boundary_speculation not in (output.master_content or "")
     assert any(
         warning.endswith(":industry_funds_remedy_reframing_forbidden")
         for warning in output.critic.warnings
@@ -2356,6 +2374,10 @@ def test_industry_funds_remedy_cannot_be_reframed_as_promotion_or_reversed_cash_
         "对经营者来说，资金边界更清楚；对平台来说，规则成本更高。",
         "这类处理对行业的信号很明确，平台规则需要调整。",
         "结果很清楚，经营者需要重新判断谈判位置。",
+        "携程这次被处罚，落点很清楚，酒店需要重谈资金条款。",
+        "酒店经营者最怕资金被平台规则长期占住。",
+        "一个很具体的变化，是经营者需要重新判断结算条件。",
+        "这次通报最值得盯住的一点，是平台规则需要调整。",
     ],
 )
 def test_industry_current_social_cliches_are_discarded(cliche: str):

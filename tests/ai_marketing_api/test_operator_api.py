@@ -495,7 +495,7 @@ def test_compose_targeted_retries_only_request_the_remaining_surface(monkeypatch
     assert len(calls) == 3
 
 
-def test_compose_uses_curated_funds_repair_after_stubborn_live_model_retries(monkeypatch):
+def test_compose_uses_curated_funds_repair_without_futile_model_retries(monkeypatch):
     fact = (
         "监管部门要求平台全额退还强制扣除酒店经营者的订单储备金，"
         "并要求企业全面整改及公开整改措施。"
@@ -541,20 +541,6 @@ def test_compose_uses_curated_funds_repair_after_stubborn_live_model_retries(mon
             }
         ],
     }
-    retry_texts = [
-        [
-            "酒店经营者最怕的，不是账面变化，而是经营资金被内部规则卡住。",
-            "真正改变的不是余额，而是平台和经营者的资金边界。",
-        ],
-        [
-            "真正改变的是平台和经营者之间的结算关系。",
-            "资金边界被推到台前，后续值得继续观察。",
-        ],
-        [
-            "最值得注意的是平台资金规则会被重新审视。",
-            "接下来最值得看的是整改如何落到经营端。",
-        ],
-    ]
     calls: list[dict] = []
 
     async def fake_llm(system, model_payload, fallback, *args, **kwargs):
@@ -564,44 +550,14 @@ def test_compose_uses_curated_funds_repair_after_stubborn_live_model_retries(mon
             for block in model_payload["canonical_block_registry"]
             if block["required"]
         ]
-        if len(calls) == 1:
-            candidate = _publishable_model_candidate(model_payload)
-            next(
-                variant
-                for variant in candidate["platform_variants"]
-                if variant["platform"] == "toutiao"
-            )["blocks"] = required
-            return candidate
-
-        retry_index = len(calls) - 2
-        remembered = model_payload["quality_retry"][
-            "previous_rejected_authored_text"
-        ]
-        if retry_index == 1:
-            assert all(text in remembered for text in retry_texts[0])
-        if retry_index == 2:
-            assert all(
-                text in remembered
-                for text in [*retry_texts[0], *retry_texts[1]]
-            )
-        authored = [
-            {
-                "kind": "transition" if index == 0 else "opinion",
-                "text": text,
-                "evidence_ids": [],
-            }
-            for index, text in enumerate(retry_texts[retry_index])
-        ]
-        return {
-            "_model": "stubborn-live-model",
-            "platform_variants": [
-                {
-                    "platform": "toutiao",
-                    "title": "平台资金边界",
-                    "blocks": [authored[0], *required, authored[1]],
-                }
-            ],
-        }
+        assert len(calls) == 1
+        candidate = _publishable_model_candidate(model_payload)
+        next(
+            variant
+            for variant in candidate["platform_variants"]
+            if variant["platform"] == "toutiao"
+        )["blocks"] = required
+        return candidate
 
     monkeypatch.setattr(marketing_api, "_llm_json", fake_llm)
 
@@ -614,7 +570,7 @@ def test_compose_uses_curated_funds_repair_after_stubborn_live_model_retries(mon
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "content_ready"
-    assert len(calls) == 4
+    assert len(calls) == 1
     assert any(
         check["code"] == "curated_industry_policy_repair"
         and check["passed"] is True

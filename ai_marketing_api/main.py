@@ -785,6 +785,12 @@ async def _run_compose(
     live_model_attempted = (
         candidate_model != "fallback" and not candidate.get("_error")
     )
+    has_curated_industry_policy = (
+        role_id is OperatorRole.INDUSTRY
+        and isinstance(compose_payload.get("industry_editorial_guard"), dict)
+        and compose_payload["industry_editorial_guard"].get("event_type")
+        == "regulatory_return_of_withheld_business_funds"
+    )
 
     def remember_rejected_text(surface: str, values: List[str]) -> None:
         remembered = rejected_text_by_surface.setdefault(surface, [])
@@ -816,7 +822,8 @@ async def _run_compose(
         eligible_surfaces = [
             surface
             for surface in failed_surfaces
-            if surface_attempts.get(surface, 0) < 3
+            if surface_attempts.get(surface, 0)
+            < (0 if has_curated_industry_policy else 3)
         ]
         if not eligible_surfaces:
             break
