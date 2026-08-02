@@ -1938,7 +1938,7 @@ def test_personal_model_can_supply_grounded_titles_without_entities_or_numbers()
     assert unsafe_output.master_title != unsafe["master_title"]
 
 
-def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_new_numbers():
+def test_industry_editorial_keeps_all_numbers_in_canonical_blocks_and_drops_meta_copy():
     fact = "监管部门作出行政处罚，罚没款合计51.79亿元，并要求企业全面整改。"
     source = _context(
         "official-grounded-number",
@@ -2042,7 +2042,7 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
     )
 
     assert output.status == ContentStatus.CONTENT_READY.value
-    assert grounded in output.master_content
+    assert grounded not in output.master_content
     assert meta not in output.master_content
     assert filler not in output.master_content
     assert unpaired_contrast not in output.master_content
@@ -2088,6 +2088,10 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
         warning.endswith(":number_ungrounded")
         for warning in output.critic.warnings
     )
+    assert any(
+        warning.endswith(":number_context_forbidden")
+        for warning in output.critic.warnings
+    )
     publishable = enforce_social_publishability(output)
     assert publishable.status == ContentStatus.QUALITY_INSUFFICIENT.value
     assert publishable.master_content is None
@@ -2095,6 +2099,47 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
     assert any(
         error.startswith("social_editorial_")
         for error in publishable.critic.errors
+    )
+
+
+def test_industry_editorial_cannot_repurpose_a_grounded_date_as_a_count():
+    fact = "监管部门于25日通报处罚决定，并要求平台退还经营者资金。"
+    source = _context(
+        "official-number-context",
+        "industry",
+        "industry",
+        "source_item",
+        content=fact,
+        source_uri="https://official.example/number-context",
+        source_tier="official",
+    )
+    request = _request([source], [_claim(fact, "fact", [source.record_id])])
+    registry = OperatorRegistry()
+    authorized = registry.authorize(OperatorRole.INDUSTRY, [source], AS_OF)
+    fallback = build_content_fallback(
+        registry, OperatorRole.INDUSTRY, request, authorized
+    )
+    payload = content_request_payload(OperatorRole.INDUSTRY, request, authorized)
+    candidate = _candidate_from_required_refs(payload, request.channels)
+    repurposed = "25个相关项目被放进同一张比较表里，经营者的选择成本变了。"
+    candidate["blocks"].insert(
+        0,
+        {"kind": "opinion", "text": repurposed, "evidence_ids": []},
+    )
+
+    output = normalize_content_output(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+        fallback,
+        candidate,
+    )
+
+    assert repurposed not in (output.master_content or "")
+    assert any(
+        warning.endswith((":number_context_forbidden", ":number_ungrounded"))
+        for warning in output.critic.warnings
     )
 
 

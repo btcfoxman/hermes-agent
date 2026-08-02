@@ -1277,7 +1277,8 @@ def _safe_candidate_blocks(
             return None, "markup_or_url_forbidden"
         # A social hook may repeat a verified amount or date, but cannot invent
         # or recombine a numeric token that is absent from approved evidence.
-        if not _number_tokens(text).issubset(approved_number_tokens):
+        editorial_number_tokens = _number_tokens(text)
+        if not editorial_number_tokens.issubset(approved_number_tokens):
             return None, "number_ungrounded"
         if (
             (
@@ -1301,6 +1302,15 @@ def _safe_candidate_blocks(
             for match in _MIXED_LANGUAGE_PHRASE_RE.finditer(text)
         ):
             return None, "mixed_language_phrase_forbidden"
+        # A matching token is not a matching fact: a model can repurpose a
+        # date as a count or relabel penalty amounts as prices/percentiles.
+        # Industry numbers therefore stay in canonical evidence blocks (and
+        # evidence-checked titles) only. Authored prose explains mechanisms
+        # without restating or reinterpreting them. Run this after the more
+        # specific cliche/restatement checks so diagnostics retain their
+        # actionable cause.
+        if role is OperatorRole.INDUSTRY and editorial_number_tokens:
+            return None, "number_context_forbidden"
         if _contains_personal_attribution(text):
             # Personal-IP copy needs a recognizable first-person point of view,
             # but the model still may not invent a first-person event, asset,
@@ -2436,7 +2446,7 @@ def content_request_payload(
                 "Choose one event-specific thesis before writing. State it as a direct declaration, not as a correction such as 'not X but Y'. Do not merely summarize the source or announce that facts and opinions are separate.",
                 "Build the thesis by connecting one approved actor, action, rule, amount, or remedy to one affected party and one concrete cost, choice, boundary, or observable consequence. Do not frame the relationship as 'versus'.",
                 "Make every editorial block earn its place: open with the actor and concrete consequence, explain the mechanism or reader impact, then land on a useful judgment. Do not add an automatic observation list or engagement question.",
-                "Use factual nouns, actors, rules, and exact grounded numbers from the approved claims as anchors. Avoid abstract paragraphs that could be pasted under an unrelated news item.",
+                "Use factual nouns, actors, and rules from the approved claims as anchors. For industry copy, leave every number and date in canonical evidence blocks or evidence-checked titles; authored prose must not repeat or reinterpret a numeric token. Avoid abstract paragraphs that could be pasted under an unrelated news item.",
             ],
             "role_thesis": {
                 "commercial": (
@@ -2601,7 +2611,11 @@ def content_request_payload(
             "Editorial blocks may only be opinion, transition, or CTA. They must not add unsupported facts, named-entity claims, quotations, prices, promises, or unapproved first-person attribution.",
             "For personal_ip, authored transition/opinion blocks may use first-person present-tense judgment, but every action, project, customer, result, credential, and experience must remain in an exact canonical personal-card block. Never invent a new biographical or business assertion, and do not use first-person CTA copy.",
             "Every authored opinion, transition, or CTA object must set evidence_ids to [] and omit claim_id and block_ref. Evidence binding belongs only to canonical registry blocks selected by block_ref.",
-            "A verified number or date may appear in editorial framing only when copied exactly from the supplied public claims; never calculate, round, compare, or combine numbers.",
+            (
+                "For industry copy, do not place any Arabic number, date, or Chinese counted quantity in an authored opinion, transition, or CTA block. Use canonical block_ref objects for all numeric meaning; only evidence-checked titles may retain grounded numbers."
+                if role is OperatorRole.INDUSTRY
+                else "A verified number or date may appear in editorial framing only when copied exactly from the supplied public claims; never calculate, round, compare, or combine numbers."
+            ),
             "Do not use audit/meta copy such as '先把事实和判断分开', '以下分析', '编辑说明', '编辑观点', '事实部分', '公开信息只是起点', or '接下来可以继续观察'. The draft must read as publishable copy, not an internal review note.",
             "For industry copy, never use formulaic wrappers such as 不只是/不仅是/不是, 不只在X更在Y, 不在X而在Y, 不能只看X, paired 如果X；如果Y, 最值得注意的是, 接下来最值得关注, 真正改变的是, 真正要变的是, 规则被推到台前, 规则会被重新审视, 真正落点是, or 核心影响是. For every role, avoid phrases such as '对关注某领域的人来说', '从行业视角看', '这类案例的价值在于', '真正值得关注', or '重点在于'. State the concrete actor-action-consequence relationship directly. Every analytical block must advance a thesis tied to this event.",
             "Treat Chinese counted quantities such as '十九项', '三家', or '两轮' exactly like Arabic numbers: use them only when the identical quantity appears in an approved factual block.",
