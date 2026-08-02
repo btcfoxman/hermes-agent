@@ -495,7 +495,7 @@ def test_compose_targeted_retries_only_request_the_remaining_surface(monkeypatch
     assert len(calls) == 3
 
 
-def test_compose_uses_curated_funds_repair_without_futile_model_retries(monkeypatch):
+def test_compose_uses_curated_funds_policy_without_model_dependency(monkeypatch):
     fact = (
         "监管部门要求平台全额退还强制扣除酒店经营者的订单储备金，"
         "并要求企业全面整改及公开整改措施。"
@@ -545,19 +545,7 @@ def test_compose_uses_curated_funds_repair_without_futile_model_retries(monkeypa
 
     async def fake_llm(system, model_payload, fallback, *args, **kwargs):
         calls.append(model_payload)
-        required = [
-            {"block_ref": block["block_ref"]}
-            for block in model_payload["canonical_block_registry"]
-            if block["required"]
-        ]
-        assert len(calls) == 1
-        candidate = _publishable_model_candidate(model_payload)
-        next(
-            variant
-            for variant in candidate["platform_variants"]
-            if variant["platform"] == "toutiao"
-        )["blocks"] = required
-        return candidate
+        raise AssertionError("known funds-remedy policy must not wait for the model")
 
     monkeypatch.setattr(marketing_api, "_llm_json", fake_llm)
 
@@ -570,13 +558,17 @@ def test_compose_uses_curated_funds_repair_without_futile_model_retries(monkeypa
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "content_ready"
-    assert len(calls) == 1
+    assert calls == []
     assert any(
         check["code"] == "curated_industry_policy_repair"
         and check["passed"] is True
         for check in data["critic"]["checks"]
     )
-    assert "curated_industry_policy_repair:toutiao" in data["critic"]["warnings"]
+    assert any(
+        warning.startswith("curated_industry_policy_repair:master,")
+        and "toutiao" in warning
+        for warning in data["critic"]["warnings"]
+    )
     toutiao = next(
         variant
         for variant in data["platform_variants"]

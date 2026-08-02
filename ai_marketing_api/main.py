@@ -675,6 +675,41 @@ async def _run_operator(
     )
 
 
+def _annotate_curated_industry_output(
+    output: OperatorContentOutput,
+    surfaces: List[str],
+) -> OperatorContentOutput:
+    data = output.model_dump()
+    warning = "curated_industry_policy_repair:" + ",".join(surfaces)
+    warnings = list(
+        dict.fromkeys([warning, *data["critic"]["warnings"]])
+    )[:50]
+    data["critic"] = {
+        **data["critic"],
+        "warnings": warnings,
+        "checks": [
+            *data["critic"]["checks"],
+            {
+                "code": "curated_industry_policy_repair",
+                "passed": True,
+                "message": (
+                    "A known evidence-bound industry event policy supplied "
+                    "the listed social surfaces without introducing new facts."
+                ),
+            },
+        ],
+    }
+    data["risk_flags"] = [
+        {
+            "code": "curated_industry_policy_repair",
+            "message": warning,
+            "blocking": False,
+        },
+        *data["risk_flags"],
+    ][:50]
+    return enforce_social_publishability(OperatorContentOutput(**data))
+
+
 async def _run_compose(
     role_id: OperatorRole,
     payload: OperatorComposeRequest,
@@ -715,6 +750,46 @@ async def _run_compose(
         candidate = fallback
     else:
         compose_payload = content_request_payload(role_id, payload, contexts)
+        guard = compose_payload.get("industry_editorial_guard")
+        if (
+            role_id is OperatorRole.INDUSTRY
+            and isinstance(guard, dict)
+            and guard.get("event_type")
+            == "regulatory_return_of_withheld_business_funds"
+        ):
+            curated_attempts: List[OperatorContentOutput] = []
+            curated_surfaces = ["master", *compose_payload.get("channels", [])]
+            for surface in curated_surfaces:
+                curated_candidate = curated_industry_surface_candidate(
+                    compose_payload,
+                    surface,
+                )
+                if curated_candidate is None:
+                    break
+                curated_normalized = normalize_content_output(
+                    OPERATOR_REGISTRY,
+                    role_id,
+                    payload,
+                    contexts,
+                    fallback,
+                    curated_candidate,
+                )
+                curated_missing = missing_publishable_surfaces(
+                    [curated_normalized],
+                    [] if surface == "master" else [surface],
+                )
+                if surface in curated_missing:
+                    break
+                curated_attempts.append(curated_normalized)
+            if len(curated_attempts) == len(curated_surfaces):
+                curated_combined = combine_publishable_surfaces(
+                    curated_attempts
+                )
+                if curated_combined is not None:
+                    return _annotate_curated_industry_output(
+                        curated_combined,
+                        curated_surfaces,
+                    )
         candidate = await _llm_json(
             profile.system_prompt,
             compose_payload,
@@ -1143,33 +1218,9 @@ async def _run_compose(
     if curated_surfaces:
         combined = combine_publishable_surfaces(normalized_attempts)
         if combined is not None:
-            data = combined.model_dump()
-            warning = (
-                "curated_industry_policy_repair:"
-                + ",".join(curated_surfaces)
-            )
-            warnings = list(dict.fromkeys([warning, *data["critic"]["warnings"]]))[:50]
-            data["critic"] = {
-                **data["critic"],
-                "warnings": warnings,
-                "checks": [
-                    *data["critic"]["checks"],
-                    {
-                        "code": "curated_industry_policy_repair",
-                        "passed": True,
-                        "message": (
-                            "A known evidence-bound industry event policy repaired only "
-                            "the surfaces still rejected after live-model retries."
-                        ),
-                    },
-                ],
-            }
-            data["risk_flags"] = [
-                {"code": "curated_industry_policy_repair", "message": warning, "blocking": False},
-                *data["risk_flags"],
-            ][:50]
-            output = enforce_social_publishability(
-                OperatorContentOutput(**data)
+            output = _annotate_curated_industry_output(
+                combined,
+                curated_surfaces,
             )
     return output
 
