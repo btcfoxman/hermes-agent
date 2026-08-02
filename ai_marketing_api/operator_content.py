@@ -146,7 +146,8 @@ _PRICE_VALUE_RE = re.compile(
     re.IGNORECASE,
 )
 _PROMISE_RE = re.compile(
-    r"(?:保证|必然|百分之百|无风险|承诺.{0,12}(?:效果|交付)|guaranteed|risk[- ]?free)",
+    r"(?:保证|必然|必定|势必|注定|一定(?:会|能|可以)|百分之百|无风险|"
+    r"承诺.{0,12}(?:效果|交付)|guaranteed|risk[- ]?free)",
     re.IGNORECASE,
 )
 _COMMERCIAL_ASSERTION_RE = re.compile(
@@ -258,7 +259,7 @@ _INDUSTRY_CONTRAST_CLICHE_RE = re.compile(
     r"越.{1,48}越难只靠|"
     r"(?:接下来|后续).{0,12}(?:最|更)?值得(?:看|关注|观察|盯)|"
     r"最值得注意的?是|"
-    r"最(?:直接|实际|重要|有分量)的(?:变化|影响|冲击|后果)|"
+    r"最(?:直接|直观|实际|重要|有分量)的(?:一点|变化|影响|冲击|后果)|"
     r"最直接(?:感受|面对)到?的?(?:变化|影响|问题)?|"
     r"(?:接下来|后面|后续).{0,12}(?:要|可以|最)?(?:看|盯|观察|关注)|"
     r"后续看点|"
@@ -267,7 +268,12 @@ _INDUSTRY_CONTRAST_CLICHE_RE = re.compile(
     r"真正(?:改变|要变)的?是|"
     r"(?:规则|问题|边界).{0,12}(?:(?:推|摆)到台前|被重新审视)|"
     r"(?:真正(?:的)?落点|核心影响).{0,6}(?:是|在于)|"
-    r"整改.{0,8}才是(?:重点|关键)"
+    r"整改.{0,8}才是(?:重点|关键)|"
+    r"不再只(?:是|看|靠)|"
+    r"(?:更|最)?关键的是|"
+    r"对.{1,32}来说.{0,120}对.{1,32}来说|"
+    r"这类(?:处理|治理|处罚|事件).{0,20}(?:信号|意义).{0,12}(?:明确|实在|清楚)|"
+    r"(?:结果|结论|信号).{0,6}(?:很|已经|十分)?(?:清楚|明确)"
     r")"
 )
 _INTERNAL_EDITORIAL_DIRECTION_RE = re.compile(
@@ -295,6 +301,16 @@ _INDUSTRY_FUNDS_REMEDY_REVERSED_RE = re.compile(
     r"(?:账期|现金流|资金).{0,10}(?:压力|变紧|收紧|更早占用|占用增加)|"
     r"(?:议价|报价|排期).{0,12}(?:空间|缓冲).{0,8}(?:变窄|更窄|压缩)|"
     r"(?:更紧的?结算|更窄的?议价|承受资金占用)"
+)
+_INDUSTRY_FUNDS_REMEDY_EVENT_RESTATEMENT_RE = re.compile(
+    r"(?:平台|携程).{0,36}(?:订单储备金|储备金|经营资金).{0,20}(?:拿去|扣在|被要求退还|占用)|"
+    r"(?:酒店经营者|经营者).{0,24}(?:钱|资金|订单储备金|储备金).{0,24}(?:被强制扣|扣在).{0,32}(?:退还|被要求)|"
+    r"(?:占用|扣留).{0,20}被要求退还"
+)
+_INDUSTRY_FUNDS_REMEDY_SPECULATION_RE = re.compile(
+    r"(?:现金|周转|经营).{0,16}(?:更充足|明显提升|空间更大|经营缓冲)|"
+    r"(?:合规成本|谈判阻力|门槛).{0,16}(?:上升|更高)|"
+    r"(?:议价|谈判).{0,16}(?:被压低|更弱|空间更小|更有底气)"
 )
 _URL_RE = re.compile(r"(?:https?://|www\.)", re.IGNORECASE)
 _TITLE_ENTITY_RE = re.compile(
@@ -1022,10 +1038,10 @@ def _safe_master_title(
             end = spans[end_index][1]
             candidate = source[start:end].strip(" \t\r\n，；。！？!?")
             candidate = re.sub(r"^(?:同时|此外|并且|并|依据|根据|对)", "", candidate).strip()
-            if 12 <= len(candidate) <= 68 and candidate in source:
+            if 12 <= len(candidate) <= 48 and candidate in source:
                 candidates.append(candidate)
     if not candidates:
-        return source[:80]
+        return source[:48]
 
     def title_score(candidate: str) -> tuple[int, int, int, int, int]:
         has_entity = int(bool(_TITLE_ENTITY_RE.search(candidate)))
@@ -1321,6 +1337,10 @@ def _safe_candidate_blocks(
                 return None, "industry_funds_remedy_reframing_forbidden"
             if _INDUSTRY_FUNDS_REMEDY_REVERSED_RE.search(text):
                 return None, "industry_funds_remedy_direction_forbidden"
+            if _INDUSTRY_FUNDS_REMEDY_EVENT_RESTATEMENT_RE.search(text):
+                return None, "industry_funds_remedy_event_restatement_forbidden"
+            if _INDUSTRY_FUNDS_REMEDY_SPECULATION_RE.search(text):
+                return None, "industry_funds_remedy_speculation_forbidden"
         if re.search(r"[\u4e00-\u9fff]", text) and any(
             match.group(0).lower() not in approved_source_text
             for match in _MIXED_LANGUAGE_PHRASE_RE.finditer(text)
@@ -1700,10 +1720,28 @@ def _questions(role: OperatorRole, errors: Sequence[str]) -> List[OperatorQuesti
 _LONG_FORM_SURFACES = frozenset({"wechat_mp", "toutiao"})
 
 
+def _social_title_quality_errors(title: str, *, surface: str) -> List[str]:
+    value = str(title or "").strip()
+    errors: List[str] = []
+    if not 8 <= len(value) <= 48:
+        errors.append(f"social_title_length_invalid:{surface}:{len(value)}")
+    if len(_number_tokens(value)) > 2:
+        errors.append(f"social_title_number_overload:{surface}")
+    if re.search(
+        r"(?:中国国家市场监督管理总局.{0,20}通报|"
+        r"滥用市场支配地位实施垄断行为作出行政处罚|"
+        r"没收违法所得.{0,30}并处以罚款.{0,30}罚没款合计)",
+        value,
+    ):
+        errors.append(f"social_title_legalese_forbidden:{surface}")
+    return errors
+
+
 def _social_surface_quality_errors(
     blocks: Sequence[ContentBlock],
     *,
     surface: str,
+    title: str = "",
 ) -> List[str]:
     """Require authored social prose, not a safe but generic fact wrapper.
 
@@ -1758,7 +1796,7 @@ def _social_surface_quality_errors(
             ContentBlockKind.OPINION.value,
         }
     ]
-    errors: List[str] = []
+    errors: List[str] = _social_title_quality_errors(title, surface=surface)
     if any(
         _value(block.origin) == ContentBlockOrigin.SERVER_TEMPLATE.value
         for block in blocks
@@ -2011,13 +2049,18 @@ def enforce_social_publishability(
     if output.model.strip().lower() == "fallback":
         errors.append("model_generation_required")
     errors.extend(
-        _social_surface_quality_errors(output.blocks, surface="master")
+        _social_surface_quality_errors(
+            output.blocks,
+            surface="master",
+            title=output.master_title or "",
+        )
     )
     for variant in output.platform_variants:
         errors.extend(
             _social_surface_quality_errors(
                 variant.blocks,
                 surface=variant.platform,
+                title=variant.title,
             )
         )
     if len(output.platform_variants) > 1:
@@ -2122,7 +2165,11 @@ def combine_publishable_surfaces(
         (
             output
             for output in ready
-            if not _social_surface_quality_errors(output.blocks, surface="master")
+            if not _social_surface_quality_errors(
+                output.blocks,
+                surface="master",
+                title=output.master_title or "",
+            )
         ),
         None,
     )
@@ -2141,6 +2188,7 @@ def combine_publishable_surfaces(
             and not _social_surface_quality_errors(
                 variant.blocks,
                 surface=platform,
+                title=variant.title,
             )
         ]
         selected = next(
@@ -2233,7 +2281,11 @@ def missing_publishable_surfaces(
     missing: List[str] = []
     if not any(
         output.master_content
-        and not _social_surface_quality_errors(output.blocks, surface="master")
+        and not _social_surface_quality_errors(
+            output.blocks,
+            surface="master",
+            title=output.master_title or "",
+        )
         for output in ready
     ):
         missing.append("master")
@@ -2243,6 +2295,7 @@ def missing_publishable_surfaces(
             and not _social_surface_quality_errors(
                 variant.blocks,
                 surface=platform,
+                title=variant.title,
             )
             for output in ready
             for variant in output.platform_variants
@@ -2270,7 +2323,11 @@ def publishable_editorial_references(
     def add(surface: str, title: str, blocks: Sequence[ContentBlock]) -> None:
         if surface in seen_surfaces or len(references) >= max_surfaces:
             return
-        if _social_surface_quality_errors(blocks, surface=surface):
+        if _social_surface_quality_errors(
+            blocks,
+            surface=surface,
+            title=title,
+        ):
             return
         authored = [
             block.text

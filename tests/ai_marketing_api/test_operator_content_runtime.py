@@ -2271,12 +2271,28 @@ def test_industry_funds_remedy_cannot_be_reframed_as_promotion_or_reversed_cash_
     candidate = _candidate_from_required_refs(payload, request.channels)
     promotion = "免单会把流量提前释放出来，商家要想办法沉淀复购。"
     reversed_cash_flow = "酒店经营者先要面对回款节奏变紧和现金流压力。"
+    event_restatement = (
+        "平台把酒店经营者的订单储备金拿去内部占用，资金边界随之改变。"
+    )
+    unsupported_result = (
+        "对酒店经营者而言，现金更充足，后续谈结算时也更有底气。"
+    )
     candidate["blocks"] = [
         {"kind": "opinion", "text": promotion, "evidence_ids": []},
+        {
+            "kind": "transition",
+            "text": event_restatement,
+            "evidence_ids": [],
+        },
         *candidate["blocks"],
         {
             "kind": "opinion",
             "text": reversed_cash_flow,
+            "evidence_ids": [],
+        },
+        {
+            "kind": "opinion",
+            "text": unsupported_result,
             "evidence_ids": [],
         },
     ]
@@ -2292,12 +2308,88 @@ def test_industry_funds_remedy_cannot_be_reframed_as_promotion_or_reversed_cash_
 
     assert promotion not in (output.master_content or "")
     assert reversed_cash_flow not in (output.master_content or "")
+    assert event_restatement not in (output.master_content or "")
+    assert unsupported_result not in (output.master_content or "")
     assert any(
         warning.endswith(":industry_funds_remedy_reframing_forbidden")
         for warning in output.critic.warnings
     )
     assert any(
         warning.endswith(":industry_funds_remedy_direction_forbidden")
+        for warning in output.critic.warnings
+    )
+    assert any(
+        warning.endswith(":industry_funds_remedy_event_restatement_forbidden")
+        for warning in output.critic.warnings
+    )
+    assert any(
+        warning.endswith(":industry_funds_remedy_speculation_forbidden")
+        for warning in output.critic.warnings
+    )
+
+    forced = output.model_copy(
+        update={
+            "master_title": (
+                "携程集团有限公司滥用市场支配地位实施垄断行为作出行政处罚，"
+                "没收违法所得并处以罚款，罚没款合计"
+            )
+        }
+    )
+    blocked = enforce_social_publishability(forced)
+    assert blocked.status == ContentStatus.QUALITY_INSUFFICIENT.value
+    assert any(
+        error.startswith(("social_title_length_invalid", "social_title_legalese_forbidden"))
+        for error in blocked.critic.errors
+    )
+
+
+@pytest.mark.parametrize(
+    "cliche",
+    [
+        "这次处理最直接的一点，是平台的内部规则需要调整。",
+        "最直观的变化，是经营者可以重新判断结算条件。",
+        "这类规则不再只是商业安排，而是经营边界。",
+        "对经营者来说，资金边界更清楚；对平台来说，规则成本更高。",
+        "这类处理对行业的信号很明确，平台规则需要调整。",
+        "结果很清楚，经营者需要重新判断谈判位置。",
+    ],
+)
+def test_industry_current_social_cliches_are_discarded(cliche: str):
+    fact = "监管部门公布平台整改要求，经营者可以核对相关规则。"
+    source = _context(
+        "official-current-cliche",
+        "industry",
+        "industry",
+        "source_item",
+        content=fact,
+        source_uri="https://official.example/current-cliche",
+        source_tier="official",
+    )
+    request = _request([source], [_claim(fact, "fact", [source.record_id])])
+    registry = OperatorRegistry()
+    authorized = registry.authorize(OperatorRole.INDUSTRY, [source], AS_OF)
+    fallback = build_content_fallback(
+        registry, OperatorRole.INDUSTRY, request, authorized
+    )
+    payload = content_request_payload(OperatorRole.INDUSTRY, request, authorized)
+    candidate = _candidate_from_required_refs(payload, request.channels)
+    candidate["blocks"].insert(
+        0,
+        {"kind": "transition", "text": cliche, "evidence_ids": []},
+    )
+
+    output = normalize_content_output(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+        fallback,
+        candidate,
+    )
+
+    assert cliche not in (output.master_content or "")
+    assert any(
+        warning.endswith(":generic_meta_copy_forbidden")
         for warning in output.critic.warnings
     )
 
