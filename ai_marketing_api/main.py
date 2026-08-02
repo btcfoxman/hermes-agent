@@ -937,6 +937,9 @@ async def _run_compose(
                 "approved_editorial_brief"
             ),
             "publication_brief": compose_payload.get("publication_brief"),
+            "industry_editorial_guard": compose_payload.get(
+                "industry_editorial_guard", {}
+            ),
             "platform_editorial_briefs": retry_platform_briefs,
             "approved_preferences": compose_payload.get("approved_preferences", []),
             # The canonical registry is the complete factual universe for a

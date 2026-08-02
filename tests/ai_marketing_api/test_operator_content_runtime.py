@@ -203,6 +203,10 @@ def test_industry_compose_replaces_internal_review_angle_with_reader_facing_thes
     assert "观点" not in angle
     assert "cash flow" in angle
     assert "clear industry thesis" in angle
+    guard = payload["industry_editorial_guard"]
+    assert guard["event_type"] == "regulatory_return_of_withheld_business_funds"
+    assert guard["fund_or_rule"] == "经营资金"
+    assert "discounts or promotions" in guard["forbidden_reframes"]
 
 
 def _candidate_from_required_refs(
@@ -2139,6 +2143,58 @@ def test_industry_editorial_cannot_repurpose_a_grounded_date_as_a_count():
     assert repurposed not in (output.master_content or "")
     assert any(
         warning.endswith((":number_context_forbidden", ":number_ungrounded"))
+        for warning in output.critic.warnings
+    )
+
+
+def test_industry_funds_remedy_cannot_be_reframed_as_promotion_or_reversed_cash_flow():
+    fact = "监管要求平台全额退还强制扣除酒店经营者的订单储备金，并公开整改措施。"
+    source = _context(
+        "official-funds-remedy",
+        "industry",
+        "industry",
+        "source_item",
+        content=fact,
+        source_uri="https://official.example/funds-remedy",
+        source_tier="official",
+    )
+    request = _request([source], [_claim(fact, "fact", [source.record_id])])
+    registry = OperatorRegistry()
+    authorized = registry.authorize(OperatorRole.INDUSTRY, [source], AS_OF)
+    fallback = build_content_fallback(
+        registry, OperatorRole.INDUSTRY, request, authorized
+    )
+    payload = content_request_payload(OperatorRole.INDUSTRY, request, authorized)
+    candidate = _candidate_from_required_refs(payload, request.channels)
+    promotion = "免单会把流量提前释放出来，商家要想办法沉淀复购。"
+    reversed_cash_flow = "酒店经营者先要面对回款节奏变紧和现金流压力。"
+    candidate["blocks"] = [
+        {"kind": "opinion", "text": promotion, "evidence_ids": []},
+        *candidate["blocks"],
+        {
+            "kind": "opinion",
+            "text": reversed_cash_flow,
+            "evidence_ids": [],
+        },
+    ]
+
+    output = normalize_content_output(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+        fallback,
+        candidate,
+    )
+
+    assert promotion not in (output.master_content or "")
+    assert reversed_cash_flow not in (output.master_content or "")
+    assert any(
+        warning.endswith(":industry_funds_remedy_reframing_forbidden")
+        for warning in output.critic.warnings
+    )
+    assert any(
+        warning.endswith(":industry_funds_remedy_direction_forbidden")
         for warning in output.critic.warnings
     )
 

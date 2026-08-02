@@ -280,6 +280,19 @@ _MIXED_LANGUAGE_PHRASE_RE = re.compile(
 _LOADED_EDITORIAL_LABEL_RE = re.compile(
     r"(?:灰色扣费|霸王条款|割韭菜|黑幕|套路|暴雷|收割|血汗|天价|封神|炸裂)"
 )
+_INDUSTRY_FUNDS_REMEDY_SOURCE_RE = re.compile(
+    r"(?:退还|返还).{0,32}(?:储备金|保证金|押金|经营资金)|"
+    r"(?:储备金|保证金|押金|经营资金).{0,32}(?:退还|返还)"
+)
+_INDUSTRY_FUNDS_REMEDY_REFRAME_RE = re.compile(
+    r"(?:免单|优惠|折扣|促销|价格带|分位|均价|流量|复购|获客|转化|供给安排)"
+)
+_INDUSTRY_FUNDS_REMEDY_REVERSED_RE = re.compile(
+    r"(?:回款|结算).{0,10}(?:变紧|收紧|压缩)|"
+    r"(?:账期|现金流|资金).{0,10}(?:压力|变紧|收紧|更早占用|占用增加)|"
+    r"(?:议价|报价|排期).{0,12}(?:空间|缓冲).{0,8}(?:变窄|更窄|压缩)|"
+    r"(?:更紧的?结算|更窄的?议价|承受资金占用)"
+)
 _URL_RE = re.compile(r"(?:https?://|www\.)", re.IGNORECASE)
 _TITLE_ENTITY_RE = re.compile(
     r"(?:[\u4e00-\u9fffA-Za-z0-9·.\-]{2,28}"
@@ -1297,6 +1310,14 @@ def _safe_candidate_blocks(
             return None, "source_restatement_forbidden"
         if _LOADED_EDITORIAL_LABEL_RE.search(text):
             return None, "loaded_editorial_label_forbidden"
+        if (
+            role is OperatorRole.INDUSTRY
+            and _INDUSTRY_FUNDS_REMEDY_SOURCE_RE.search(approved_source_text)
+        ):
+            if _INDUSTRY_FUNDS_REMEDY_REFRAME_RE.search(text):
+                return None, "industry_funds_remedy_reframing_forbidden"
+            if _INDUSTRY_FUNDS_REMEDY_REVERSED_RE.search(text):
+                return None, "industry_funds_remedy_direction_forbidden"
         if re.search(r"[\u4e00-\u9fff]", text) and any(
             match.group(0).lower() not in approved_source_text
             for match in _MIXED_LANGUAGE_PHRASE_RE.finditer(text)
@@ -2341,6 +2362,56 @@ def content_request_payload(
         for claim in public_claims
         if str(claim.get("text") or "").strip()
     ][:12]
+    approved_fact_text = "\n".join(
+        block.text
+        for block in model_blocks
+        if _value(block.kind) == ContentBlockKind.FACT.value
+    )
+    industry_editorial_guard: Dict[str, Any] = {}
+    if (
+        role is OperatorRole.INDUSTRY
+        and _INDUSTRY_FUNDS_REMEDY_SOURCE_RE.search(approved_fact_text)
+    ):
+        affected_party = next(
+            (
+                term
+                for term in ("酒店经营者", "平台经营者", "商家", "经营者")
+                if term in approved_fact_text
+            ),
+            "来源中被要求退还资金的经营者",
+        )
+        fund_term = next(
+            (
+                term
+                for term in ("订单储备金", "储备金", "保证金", "押金", "经营资金")
+                if term in approved_fact_text
+            ),
+            "被扣留的经营资金",
+        )
+        industry_editorial_guard = {
+            "event_type": "regulatory_return_of_withheld_business_funds",
+            "affected_party": affected_party,
+            "fund_or_rule": fund_term,
+            "required_direction": (
+                f"Explain how returning {fund_term} limits platform fund occupation or "
+                f"changes {affected_party}'s cash availability, settlement terms, contract "
+                "boundary, or bargaining position. The remedy releases/returns funds; never "
+                "reverse it into tighter cash flow or earlier fund occupation."
+            ),
+            "forbidden_reframes": [
+                "consumer free orders or waived payment",
+                "discounts or promotions",
+                "price bands, percentiles, or average price",
+                "traffic, conversion, acquisition, or repeat purchase",
+                "tighter merchant cash flow, earlier fund occupation, or narrower bargaining space",
+            ],
+            "positive_thesis_seed": (
+                f"Use {affected_party} as the subject. Connect the return of {fund_term} to "
+                "merchant-controlled operating funds, settlement clauses, and the limit on "
+                "rules imposed by the platform. Write this naturally in the source language; "
+                "do not copy these instructions or use a rhetorical contrast."
+            ),
+        }
 
     # Do not forward the raw objective/topic/audience/constraints or the raw
     # approved proposal to a third-party model.  Those fields can contain a
@@ -2492,6 +2563,7 @@ def content_request_payload(
                 ),
             }[role.value],
         },
+        "industry_editorial_guard": industry_editorial_guard,
         "platform_editorial_briefs": {
             channel: platform_briefs[channel]
             for channel in request.channels
