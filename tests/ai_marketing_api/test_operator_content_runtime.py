@@ -172,6 +172,39 @@ def test_compose_forwards_only_matching_non_account_preferences_as_style_guidanc
     assert "not evidence" in " ".join(payload["preference_usage_contract"])
 
 
+def test_industry_compose_replaces_internal_review_angle_with_reader_facing_thesis():
+    fact = "监管要求平台退还被扣留的经营资金并公开整改措施。"
+    source = _context(
+        "source-review-angle",
+        "industry",
+        "industry",
+        "source_item",
+        content=fact,
+        source_tier="official",
+    )
+    request = _request(
+        [source],
+        [_claim(fact, "fact", [source.record_id])],
+        channels=["wechat_mp"],
+    )
+    request.approved_proposal.angle = (
+        "区分已核验事实与编辑观点，解释变化的业务影响及后续观察项。"
+    )
+    registry = OperatorRegistry()
+    authorized = registry.authorize(
+        OperatorRole.INDUSTRY, request.authorized_context, request.as_of
+    )
+
+    payload = content_request_payload(OperatorRole.INDUSTRY, request, authorized)
+    angle = payload["approved_editorial_brief"]["angle"]
+
+    assert "区分" not in angle
+    assert "事实" not in angle
+    assert "观点" not in angle
+    assert "cash flow" in angle
+    assert "clear industry thesis" in angle
+
+
 def _candidate_from_required_refs(
     payload: dict,
     channels: list[str],

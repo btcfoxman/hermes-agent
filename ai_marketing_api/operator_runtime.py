@@ -701,16 +701,20 @@ def _industry_fallback(
                 "当前为非一手单源，不能把其陈述直接推进为终稿事实。",
             )
         )
+    evidence_title = _evidence_title(
+        request,
+        industry_sources,
+        role=OperatorRole.INDUSTRY,
+    )
     return {
         "status": status.value,
         "proposal": {
-            "title": _evidence_title(
-                request,
-                industry_sources,
-                role=OperatorRole.INDUSTRY,
+            "title": evidence_title,
+            "angle": (
+                f"围绕“{evidence_title}”中的已核验行动，分析它如何改变直接相关方的资金、"
+                "合同、成本、选择或议价位置，并形成一个明确的行业判断。"
             ),
-            "angle": "区分已核验事实与编辑观点，解释变化的业务影响及后续观察项。",
-            "audience_value": request.audience.strip() or "帮助读者理解事件影响，而不是重复新闻摘要。",
+            "audience_value": request.audience.strip() or "帮助读者看清已核验行动对相关方实际经营决策的影响。",
             "key_points": [claim.text for claim in claims[:4]],
             "suggested_formats": _formats(request),
             "cta": None,

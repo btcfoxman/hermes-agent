@@ -288,7 +288,9 @@ def test_industry_single_non_primary_source_is_blocked_without_manifest_editoria
     fact = output.claims[0]
     assert fact.evidence_ids == ["source-1"]
     assert output.proposal is not None
-    assert "编辑观点" in output.proposal.angle
+    assert "明确的行业判断" in output.proposal.angle
+    assert "事实" not in output.proposal.angle
+    assert "观点" not in output.proposal.angle
     assert "missing_fact_opinion_separation" not in {
         risk.code for risk in output.risk_flags
     }

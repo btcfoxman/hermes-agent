@@ -268,6 +268,12 @@ _INDUSTRY_CONTRAST_CLICHE_RE = re.compile(
     r"整改.{0,8}才是(?:重点|关键)"
     r")"
 )
+_INTERNAL_EDITORIAL_DIRECTION_RE = re.compile(
+    r"(?:区分.{0,24}事实.{0,24}(?:观点|判断)|"
+    r"事实.{0,24}(?:观点|判断).{0,24}(?:分开|区分)|"
+    r"后续观察项|审稿|编辑说明|事实部分|观点部分)",
+    re.IGNORECASE,
+)
 _MIXED_LANGUAGE_PHRASE_RE = re.compile(
     r"\b[A-Za-z][A-Za-z'’-]{2,}(?:\s+[A-Za-z][A-Za-z'’-]{2,})+\b"
 )
@@ -2332,9 +2338,18 @@ def content_request_payload(
     # after the underlying evidence record has been removed.  The composer
     # needs only the public, currently authorized claims and channel plan.
     approved_direction = request.approved_proposal
+    industry_angle = approved_direction.angle
+    if _INTERNAL_EDITORIAL_DIRECTION_RE.search(industry_angle):
+        industry_angle = (
+            "Use the approved public claims to explain how the verified action or remedy "
+            "changes the directly affected party's cash flow, settlement terms, contract "
+            "boundary, operating cost, available choice, incentive, or bargaining position. "
+            "Select only a mechanism actually supported by the approved claim and state one "
+            "clear industry thesis."
+        )
     editorial_brief = (
         {
-            "angle": approved_direction.angle,
+            "angle": industry_angle,
             "audience_value": approved_direction.audience_value,
             "cta": approved_direction.cta,
         }
