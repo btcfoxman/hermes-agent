@@ -367,6 +367,7 @@ def test_compose_retries_shallow_model_copy_once(monkeypatch):
     assert "master is a required surface" in calls[1]["quality_retry"]["instruction"]
     assert "server-template block_ref" in calls[1]["quality_retry"]["instruction"]
     assert "put no Arabic number or Chinese counted quantity" in calls[1]["quality_retry"]["instruction"]
+    assert "真正改变的是" in calls[1]["quality_retry"]["instruction"]
     assert "evidence_ids to []" in calls[1]["quality_retry"]["block_binding_rule"]
     assert any(
         diagnostic.endswith(":evidence_forbidden")

@@ -506,6 +506,8 @@ async def _llm_json(
     openai_api_key: Optional[str] = None,
     model_name: Optional[str] = None,
     timeout_seconds: Optional[str] = None,
+    *,
+    temperature: float = 0.3,
 ) -> Dict[str, Any]:
     requested_base_url = str(openai_base_url or "").strip()
     requested_api_key = str(openai_api_key or "").strip()
@@ -533,7 +535,7 @@ async def _llm_json(
     model = (model_name or os.getenv("HERMES_MODEL", "gpt-4.1-mini")).strip() or "gpt-4.1-mini"
     request = {
         "model": model,
-        "temperature": 0.3,
+        "temperature": max(0.0, min(float(temperature), 1.0)),
         "response_format": {"type": "json_object"},
         "messages": [
             {"role": "system", "content": system},
@@ -735,10 +737,10 @@ async def _run_compose(
         candidate.get("_model") or candidate.get("model") or "fallback"
     ).strip().lower()
     # A multi-platform response often has five good surfaces and one bad
-    # short-feed variant. Give the model three bounded repair attempts while
+    # short-feed variant. Give the model five bounded, low-temperature repair attempts while
     # whole-surface aggregation keeps every independently valid draft. This is
     # still fail-closed: no partial or template surface leaves this endpoint.
-    for retry_number in range(1, 4):
+    for retry_number in range(1, 6):
         if (
             output.status != ContentStatus.QUALITY_INSUFFICIENT.value
             or candidate_model == "fallback"
@@ -889,7 +891,8 @@ async def _run_compose(
                     "'not only ... but also' "
                     "wrapper. For Chinese industry copy, never use 最直接的变化, "
                     "最直接感受到, 接下来要看/盯, 后面要看, 后续看点, "
-                    "or 这类事件/处罚落到业务上. Do not use event-reporting verbs "
+                    "这类事件/处罚落到业务上, 真正改变的是, 真正要变的是, "
+                    "规则被推到台前, or 规则会被重新审视. Do not use event-reporting verbs "
                     "such as 已经, 宣布, 发布, 推出, 发生, 据悉, or 消息称 in an "
                     "authored block; the canonical evidence block owns those facts. "
                     "During repair, put no Arabic number or Chinese counted quantity "
@@ -942,6 +945,7 @@ async def _run_compose(
             openai_api_key,
             model_name,
             timeout_seconds,
+            temperature=0.1,
         )
         normalized = normalize_content_output(
             OPERATOR_REGISTRY,
