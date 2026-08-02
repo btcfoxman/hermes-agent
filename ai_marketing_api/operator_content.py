@@ -2597,7 +2597,12 @@ def _curated_human_review_surface_candidate(
     has_human_final_review = "终审" in public_text and any(
         term in public_text for term in ("人工", "负责人")
     )
-    if not has_human_final_review or not any(
+    has_personal_confirm_and_replay = (
+        role is OperatorRole.PERSONAL_IP
+        and "负责人再确认" in public_text
+        and "失败可以回放" in public_text
+    )
+    if not (has_human_final_review or has_personal_confirm_and_replay) or not any(
         term in public_text for term in ("自动发布", "模型生成", "退回", "证据")
     ):
         return None
@@ -2660,18 +2665,18 @@ def _curated_human_review_surface_candidate(
     }
     personal_copy: Dict[str, tuple[str, List[str]]] = {
         "master": (
-            "从自动发布到人工终审，我更看重补救成本",
+            "从自动发布到人工确认：补救成本的取舍",
             [
                 "现在做自动化，我更在意的，是判断出错后能不能及时停下来。",
                 "我的判断是：越接近对外，越要把最终确认留给人。效率当然重要，但补救成本更能决定一套系统是否值得长期使用。",
             ],
         ),
         "wechat_moments": (
-            "自动发布再快，也要保留人工终审",
+            "自动发布再快，也要保留人工确认",
             ["现在做自动化，我更在意出错后的补救。能在内容对外前停下来，比少点几次按钮更让我安心。"],
         ),
         "wechat_mp": (
-            "自动发布为何改回人工终审",
+            "自动发布为何改回人工确认",
             [
                 "现在回头看，我更在意自动化有没有把最后判断留给人。",
                 "我的判断是：效率可以交给系统，对外前的确认和出错后的补救仍要有人负责。",
@@ -2686,22 +2691,22 @@ def _curated_human_review_surface_candidate(
             ["我更在意的不是自动化有多快，而是出错后能不能马上停、马上改。"],
         ),
         "kuaishou": (
-            "自动发布也要留一道人工终审",
+            "自动发布也要留一道人工确认",
             ["现在看自动化，我会先看它有没有刹车，再看它能省多少步骤。"],
         ),
         "xiaohongshu": (
-            "把自动发布改回人工终审之后",
+            "把自动发布改回人工确认之后",
             ["我的原则是：越接近对外，越要保留人工确认。能退回、能修改，才有继续自动化的底气。"],
         ),
         "toutiao": (
-            "从自动发布到人工终审：关于补救成本的取舍",
+            "从自动发布到人工确认：补救成本的取舍",
             [
                 "现在做自动化，我会先问出错后怎么补救，再问它能省多少时间。",
                 "我的判断是：内容越接近外部用户，最终确认越应该留给人，这也是我衡量自动化能否长期运行的边界。",
             ],
         ),
         "weitoutiao": (
-            "人工终审之外，我更看重出错后的补救",
+            "自动发布之外，更要看出错后的补救",
             ["我现在更看重出错后的补救：能停、能改、能重新确认，才算真正可用的自动化。"],
         ),
     }

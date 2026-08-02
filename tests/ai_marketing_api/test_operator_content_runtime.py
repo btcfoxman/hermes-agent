@@ -382,12 +382,18 @@ def test_curated_funds_remedy_repairs_are_publishable_on_every_social_surface():
                     "personal_ip",
                     "personal_approved",
                     "experience",
-                    content="在这次验收中，我把自动发布改成了人工终审。",
+                    content=(
+                        "在这次端到端验收中，我把原来追求自动发布的流程改成了"
+                        "AI先生成、负责人再确认、失败可以回放。真正费时间的不是"
+                        "多点一次确认，而是在错误内容已经发出去之后补救。"
+                    ),
                 )
             ],
             [
                 _claim(
-                    "在这次验收中，我把自动发布改成了人工终审。",
+                    "在这次端到端验收中，我把原来追求自动发布的流程改成了"
+                    "AI先生成、负责人再确认、失败可以回放。真正费时间的不是"
+                    "多点一次确认，而是在错误内容已经发出去之后补救。",
                     "experience",
                     ["personal-human-review"],
                 )
@@ -440,6 +446,13 @@ def test_curated_human_review_repairs_are_publishable_on_every_surface(
             surface,
         )
         assert candidate is not None
+        if role is OperatorRole.PERSONAL_IP:
+            title = (
+                candidate.get("master_title")
+                if surface == "master"
+                else candidate["platform_variants"][0]["title"]
+            )
+            assert "我" not in title
         normalized = normalize_content_output(
             registry,
             role,

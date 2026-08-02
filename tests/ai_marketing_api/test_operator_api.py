@@ -704,6 +704,86 @@ def test_compose_uses_commercial_human_review_policy_only_after_model_attempt(
     assert "先把事实和判断分开" not in data["master_content"]
 
 
+def test_compose_uses_personal_confirm_and_replay_policy_after_model_attempt(
+    monkeypatch,
+):
+    experience = (
+        "在这次端到端验收中，我把原来追求自动发布的流程改成了AI先生成、"
+        "负责人再确认、失败可以回放。真正费时间的不是多点一次确认，而是在"
+        "错误内容已经发出去之后补救。"
+    )
+    channels = ["wechat_moments", "wechat_mp", "douyin"]
+    payload = {
+        "objective": "形成一篇关于自动发布与补救成本的个人内容",
+        "topic": "从自动发布改成人工确认",
+        "audience": "关注 AI 内容工作流的团队负责人",
+        "channels": channels,
+        "as_of": "2026-08-02T00:00:00Z",
+        "approved_proposal": {
+            "title": "从自动发布改成人工确认",
+            "angle": "结合已批准经历说明为什么保留人工确认和失败回放。",
+            "audience_value": "帮助团队理解自动化内容的补救成本。",
+            "key_points": [experience],
+            "suggested_formats": channels,
+            "cta": None,
+            "first_person": True,
+        },
+        "claims": [
+            {
+                "text": experience,
+                "kind": "experience",
+                "evidence_ids": ["personal-confirm-replay"],
+                "verification_status": "verified",
+            }
+        ],
+        "authorized_context": [
+            {
+                "record_id": "personal-confirm-replay",
+                "space": "personal_approved",
+                "record_type": "experience",
+                "title": "人工确认与失败回放",
+                "content": experience,
+                "structured_data": {},
+                "status": "approved",
+                "authorized_roles": ["personal_ip"],
+                "valid_from": "2026-01-01T00:00:00Z",
+                "valid_until": "2027-01-01T00:00:00Z",
+                "source_uri": None,
+                "source_tier": "primary",
+            }
+        ],
+    }
+    calls: list[dict] = []
+
+    async def fake_llm(system, model_payload, fallback, *args, **kwargs):
+        calls.append(model_payload)
+        return {
+            **fallback,
+            "_error": "upstream timeout after request started",
+            "_llm_attempted": True,
+        }
+
+    monkeypatch.setattr(marketing_api, "_llm_json", fake_llm)
+
+    response = _request(
+        "POST",
+        "/api/v1/operators/personal_ip/compose",
+        json=payload,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert calls
+    assert data["status"] == "content_ready", data["critic"]["errors"]
+    assert data["master_title"] == "从自动发布到人工确认：补救成本的取舍"
+    assert all("我" not in variant["title"] for variant in data["platform_variants"])
+    assert any(
+        check["code"] == "curated_personal_ip_policy_repair"
+        and check["passed"] is True
+        for check in data["critic"]["checks"]
+    )
+
+
 def test_compose_uses_the_same_byte_stable_role_prompt(monkeypatch):
     prompts: list[str] = []
 
