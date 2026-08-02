@@ -366,6 +366,7 @@ def test_compose_retries_shallow_model_copy_once(monkeypatch):
     assert "Do not describe the review process" in calls[1]["quality_retry"]["instruction"]
     assert "master is a required surface" in calls[1]["quality_retry"]["instruction"]
     assert "server-template block_ref" in calls[1]["quality_retry"]["instruction"]
+    assert "put no Arabic number or Chinese counted quantity" in calls[1]["quality_retry"]["instruction"]
     assert "evidence_ids to []" in calls[1]["quality_retry"]["block_binding_rule"]
     assert any(
         diagnostic.endswith(":evidence_forbidden")
@@ -403,6 +404,10 @@ def test_compose_keeps_good_surfaces_while_retry_fills_other_platforms(monkeypat
             assert model_payload["quality_retry"]["requested_channels"] == [
                 "xiaohongshu"
             ]
+            references = model_payload["quality_retry"]["validated_reference_copy"]
+            assert references[0]["surface"] == "master"
+            assert references[0]["authored_blocks"]
+            assert all("block_ref" not in item for item in references)
         return candidate
 
     monkeypatch.setattr(marketing_api, "_llm_json", fake_llm)

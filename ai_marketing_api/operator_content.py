@@ -2174,6 +2174,65 @@ def missing_publishable_surfaces(
     return missing
 
 
+def publishable_editorial_references(
+    outputs: Sequence[OperatorContentOutput],
+    *,
+    max_surfaces: int = 4,
+) -> List[Dict[str, Any]]:
+    """Expose a few already-valid authored blocks to targeted retries.
+
+    The retry model should preserve the concrete thesis that worked instead
+    of rediscovering a new generic wrapper for every remaining channel.  Only
+    model-authored editorial from a whole surface that passes the terminal
+    gate is returned; canonical evidence and server templates are excluded.
+    """
+
+    references: List[Dict[str, Any]] = []
+    seen_surfaces: set[str] = set()
+
+    def add(surface: str, title: str, blocks: Sequence[ContentBlock]) -> None:
+        if surface in seen_surfaces or len(references) >= max_surfaces:
+            return
+        if _social_surface_quality_errors(blocks, surface=surface):
+            return
+        authored = [
+            block.text
+            for block in blocks
+            if _value(block.origin) == ContentBlockOrigin.MODEL_EDITORIAL.value
+            and _value(block.kind) in {
+                ContentBlockKind.OPINION.value,
+                ContentBlockKind.TRANSITION.value,
+                ContentBlockKind.CTA.value,
+            }
+        ]
+        if not authored:
+            return
+        references.append(
+            {
+                "surface": surface,
+                "title": title,
+                "authored_blocks": authored,
+            }
+        )
+        seen_surfaces.add(surface)
+
+    ready = [
+        output
+        for output in outputs
+        if _value(output.status) == ContentStatus.CONTENT_READY.value
+        and not output.critic.errors
+    ]
+    for output in ready:
+        if output.master_title:
+            add("master", output.master_title, output.blocks)
+    for output in ready:
+        for variant in output.platform_variants:
+            add(variant.platform, variant.title, variant.blocks)
+            if len(references) >= max_surfaces:
+                return references
+    return references
+
+
 def _sanitized_context(context: AuthorizedContext) -> Dict[str, Any]:
     data = _dump(context)
     if context.record_type == "business_offer":

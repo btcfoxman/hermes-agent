@@ -24,6 +24,7 @@ from ai_marketing_api.operator_content import (
     enforce_social_publishability,
     missing_publishable_surfaces,
     normalize_content_output,
+    publishable_editorial_references,
 )
 from ai_marketing_api.operator_runtime import (
     CONTENT_SCHEMA_VERSION,
@@ -799,6 +800,9 @@ async def _run_compose(
                     "Do not restate the source paragraph in an authored block; the canonical evidence block already renders the approved facts.",
                 ],
             }
+        validated_reference_copy = publishable_editorial_references(
+            normalized_attempts,
+        )
         retry_payload = {
             **compose_payload,
             "channels": list(retry_channels),
@@ -809,10 +813,11 @@ async def _run_compose(
                 "failed_surfaces": failed_surfaces,
                 "requested_surfaces": list(failed_surfaces),
                 "requested_channels": list(retry_channels),
+                "validated_reference_copy": validated_reference_copy,
                 "instruction": (
                     "Return a compact repair for every failed surface named below; "
                     "master is a required surface even though it is not a channel. The "
-                    "previous draft was safe but not publishable social copy. First "
+                    "previous normalized draft still failed the social-copy gate. First "
                     "choose one concrete "
                     "reader-facing thesis from the approved facts and state it as "
                     "a direct subject-action-consequence declaration, then return "
@@ -820,13 +825,24 @@ async def _run_compose(
                     "Do not describe the review process, label facts/opinions, "
                     "repeat a generic 'worth watching', 'not ... but', or "
                     "'not only ... but also' "
-                    "wrapper, mix untranslated English into Chinese prose, or end "
+                    "wrapper. For Chinese industry copy, never use 最直接的变化, "
+                    "最直接感受到, 接下来要看/盯, 后面要看, 后续看点, "
+                    "or 这类事件/处罚落到业务上. Do not use event-reporting verbs "
+                    "such as 已经, 宣布, 发布, 推出, 发生, 据悉, or 消息称 in an "
+                    "authored block; the canonical evidence block owns those facts. "
+                    "During repair, put no Arabic number or Chinese counted quantity "
+                    "in authored blocks; approved numbers remain visible in the title "
+                    "and canonical evidence. Do not mix untranslated English into "
+                    "Chinese prose, or end "
                     "with an automatic observation list. Do not invent loaded labels "
                     "such as grey fees, black-box practices, rip-offs, or scandals. "
                     "Never select a server-template block_ref; the registry contains "
                     "approved evidence refs only. Write only the failed surfaces listed "
                     "in this repair request; "
-                    "other valid surfaces are retained independently by the server."
+                    "other valid surfaces are retained independently by the server. "
+                    "When validated_reference_copy is present, preserve its concrete "
+                    "thesis and mechanism while changing the wording and rhythm for "
+                    "the requested platform; never copy it verbatim or repeat the source."
                 ),
                 "surface_contracts": surface_contracts,
                 "required_shape": [
