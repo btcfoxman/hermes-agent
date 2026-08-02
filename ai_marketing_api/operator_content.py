@@ -1793,6 +1793,8 @@ def normalize_content_output(
     }
     for platform in channels:
         raw = by_platform.get(platform) or {}
+        if platform not in by_platform:
+            warnings.append(f"model_platform_variant_missing:{platform}")
         base_variant_blocks = [
             ContentBlock(**block)
             for block in (fallback_variants.get(platform) or {}).get("blocks") or []
@@ -1800,6 +1802,8 @@ def normalize_content_output(
         if not base_variant_blocks:
             base_variant_blocks = _platform_blocks(platform, base_blocks)
         raw_variant_blocks = raw.get("blocks")
+        if platform in by_platform and raw_variant_blocks is None:
+            warnings.append(f"model_platform_blocks_missing:{platform}")
         variant_selection, variant_errors, variant_warnings = _safe_candidate_blocks(
             role,
             raw_variant_blocks,

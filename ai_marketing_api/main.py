@@ -803,11 +803,73 @@ async def _run_compose(
         validated_reference_copy = publishable_editorial_references(
             normalized_attempts,
         )
+        required_block_refs = [
+            {"block_ref": block.get("block_ref")}
+            for block in compose_payload.get("canonical_block_registry", [])
+            if isinstance(block, dict)
+            and block.get("required")
+            and block.get("block_ref")
+        ]
+
+        def repair_blocks(surface: str) -> List[Any]:
+            hook = {
+                "kind": "transition|opinion",
+                "text": (
+                    "original platform-native hook; no number, source restatement, "
+                    "event-reporting verb, or banned wrapper"
+                ),
+                "evidence_ids": [],
+            }
+            blocks: List[Any] = [hook, *required_block_refs]
+            if surface == "master" or surface in {"wechat_mp", "toutiao"}:
+                blocks.append(
+                    {
+                        "kind": "opinion|transition",
+                        "text": (
+                            "distinct mechanism or reader-impact analysis; no number, "
+                            "source restatement, future-watch ending, or banned wrapper"
+                        ),
+                        "evidence_ids": [],
+                    }
+                )
+            return blocks
+
+        repair_response_contract = {
+            "return_only_these_top_level_keys": [
+                "master_title",
+                "blocks",
+                "platform_variants",
+            ],
+            "master_title": (
+                "required distinct string"
+                if "master" in failed_surfaces
+                else "may reuse the validated reference title"
+            ),
+            "blocks": (
+                repair_blocks("master")
+                if "master" in failed_surfaces
+                else "may reuse the validated master blocks or omit authored repair"
+            ),
+            "exact_platform_variant_count": len(retry_channels),
+            "platform_variants": [
+                {
+                    "platform": channel,
+                    "title": f"required distinct title for {channel}",
+                    "blocks": repair_blocks(channel),
+                }
+                for channel in retry_channels
+            ],
+            "hard_rule": (
+                "Return every platform listed above exactly once. Do not replace "
+                "platform_variants with variants, channels, a schema, prose, or one example."
+            ),
+        }
         retry_payload = {
             **compose_payload,
             "channels": list(retry_channels),
             "approved_proposal": approved_proposal,
             "platform_editorial_briefs": retry_platform_briefs,
+            "response_contract": repair_response_contract,
             "quality_retry": {
                 "attempt": retry_number,
                 "failed_surfaces": failed_surfaces,
@@ -862,7 +924,13 @@ async def _run_compose(
                 "discarded_block_diagnostics": [
                     warning
                     for warning in output.critic.warnings
-                    if warning.startswith("discarded_unsafe_model_editorial:")
+                    if warning.startswith(
+                        (
+                            "discarded_unsafe_model_editorial:",
+                            "model_platform_variant_missing:",
+                            "model_platform_blocks_missing:",
+                        )
+                    )
                 ],
             },
         }

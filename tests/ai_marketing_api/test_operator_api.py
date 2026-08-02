@@ -408,6 +408,16 @@ def test_compose_keeps_good_surfaces_while_retry_fills_other_platforms(monkeypat
             assert references[0]["surface"] == "master"
             assert references[0]["authored_blocks"]
             assert all("block_ref" not in item for item in references)
+            contract = model_payload["response_contract"]
+            assert contract["exact_platform_variant_count"] == 1
+            assert [item["platform"] for item in contract["platform_variants"]] == [
+                "xiaohongshu"
+            ]
+            assert contract["platform_variants"][0]["blocks"][0]["evidence_ids"] == []
+            assert any(
+                "block_ref" in item
+                for item in contract["platform_variants"][0]["blocks"]
+            )
         return candidate
 
     monkeypatch.setattr(marketing_api, "_llm_json", fake_llm)
