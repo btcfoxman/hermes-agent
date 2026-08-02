@@ -1644,7 +1644,7 @@ def test_editorial_type_and_content_field_aliases_are_safely_normalized():
     assert block.origin == "model_editorial"
 
 
-def test_long_verified_fact_is_rendered_as_readable_bullets_without_rewriting_binding():
+def test_long_verified_fact_is_rendered_as_platform_native_excerpt_without_rewriting_binding():
     fact = (
         "中国国家市场监督管理总局通报，依据相关规定，对某平台作出行政处罚，"
         "没收违法所得16.58亿元，并处以罚款35.21亿元，罚没款合计51.79亿元。"
@@ -1669,13 +1669,17 @@ def test_long_verified_fact_is_rendered_as_readable_bullets_without_rewriting_bi
     exact = next(block for block in output.blocks if block.source_exact)
     assert exact.text == fact
     assert exact.evidence_ids == [source.record_id]
-    assert "- 中国国家市场监督管理总局通报" in output.master_content
+    assert "中国国家市场监督管理总局通报；" in output.master_content
     assert "依据相关规定" not in output.master_content
-    assert (
-        "\n- 没收违法所得16.58亿元；并处以罚款35.21亿元；"
-        "罚没款合计51.79亿元"
-    ) in output.master_content
-    assert "\n- 责令其退还相关款项" in output.master_content
+    assert "；没收违法所得16.58亿元；并处以罚款35.21亿元；罚没款合计51.79亿元；" in output.master_content
+    assert "；责令其退还相关款项；" in output.master_content
+    short = next(
+        variant for variant in output.platform_variants
+        if variant.platform == "xiaohongshu"
+    )
+    assert "对某平台作出行政处罚；" in short.body
+    assert "中国国家市场监督管理总局通报" not in short.body
+    assert "要求企业全面整改并公开整改措施" not in short.body
 
 
 def test_industry_model_can_supply_grounded_social_titles_per_platform():
@@ -1948,6 +1952,10 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
     later_watch = "后面要看的是平台会不会调整合同条款。"
     followup_point = "后续看点是平台规则能否变得透明。"
     business_landing = "这类处罚真正落到业务上，会改变平台与酒店的议价关系。"
+    truly_changes = "携程这次被罚没，真正改变的是平台与酒店经营者之间的议价边界。"
+    truly_must_change = "对酒店经营者而言，真正要变的是资金占用和结算方式。"
+    pushed_to_front = "平台和酒店之间的规则边界被推到台前。"
+    reexamined = "平台对酒店经营者的规则定价权会被重新审视。"
     mixed_language = "这会迫使相关参与者重新评估 bargaining position。"
     loaded_label = "平台不能再把灰色扣费当成默认规则。"
     invented = "52亿元罚没款之后，更关键的问题是整改能否真正改变相关规则。"
@@ -1975,6 +1983,10 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
             {"kind": "opinion", "text": later_watch, "evidence_ids": []},
             {"kind": "opinion", "text": followup_point, "evidence_ids": []},
             {"kind": "opinion", "text": business_landing, "evidence_ids": []},
+            {"kind": "opinion", "text": truly_changes, "evidence_ids": []},
+            {"kind": "opinion", "text": truly_must_change, "evidence_ids": []},
+            {"kind": "opinion", "text": pushed_to_front, "evidence_ids": []},
+            {"kind": "opinion", "text": reexamined, "evidence_ids": []},
             {"kind": "opinion", "text": mixed_language, "evidence_ids": []},
             {"kind": "opinion", "text": loaded_label, "evidence_ids": []},
             {"kind": "transition", "text": invented, "evidence_ids": []},
@@ -2018,6 +2030,10 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
     assert later_watch not in output.master_content
     assert followup_point not in output.master_content
     assert business_landing not in output.master_content
+    assert truly_changes not in output.master_content
+    assert truly_must_change not in output.master_content
+    assert pushed_to_front not in output.master_content
+    assert reexamined not in output.master_content
     assert mixed_language not in output.master_content
     assert loaded_label not in output.master_content
     assert invented not in output.master_content
@@ -2025,7 +2041,7 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
     assert sum(
         warning.endswith(":generic_meta_copy_forbidden")
         for warning in output.critic.warnings
-    ) == 20
+    ) == 24
     assert output.master_title != candidate["master_title"]
     assert any(
         warning.endswith(":mixed_language_phrase_forbidden")

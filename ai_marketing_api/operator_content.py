@@ -262,6 +262,8 @@ _INDUSTRY_CONTRAST_CLICHE_RE = re.compile(
     r"后续看点|"
     r"最该(?:看|关注|盯)|"
     r"这类(?:处罚|事件|案例).{0,16}(?:落到业务|影响|变化)|"
+    r"真正(?:改变|要变)的?是|"
+    r"(?:规则|问题|边界).{0,12}(?:推到台前|被重新审视)|"
     r"(?:真正(?:的)?落点|核心影响).{0,6}(?:是|在于)|"
     r"整改.{0,8}才是(?:重点|关键)"
     r")"
@@ -368,8 +370,11 @@ def _restates_approved_source(value: str, approved_fact_texts: Sequence[str]) ->
     )
 
 
-def _fact_display_text(block: ContentBlock) -> str:
-    """Project a long immutable fact into source-exact, readable fact beats.
+_LONG_FACT_SURFACES = frozenset({"master", "wechat_mp", "toutiao"})
+
+
+def _fact_display_text(block: ContentBlock, *, surface: str = "master") -> str:
+    """Project a long immutable fact into platform-native source excerpts.
 
     The underlying block text and evidence binding remain byte-for-byte
     unchanged.  The public projection may omit legal boilerplate and add only
@@ -410,7 +415,28 @@ def _fact_display_text(block: ContentBlock) -> str:
         segments.append(part)
     if len(segments) < 2:
         return text
-    return "\n".join(f"- {segment}" for segment in segments)
+    if surface in _LONG_FACT_SURFACES:
+        selected = segments
+    else:
+        selected = []
+        for pattern in (
+            r"(?:作出行政处罚|受到行政处罚|行政处罚)",
+            r"(?:罚没款合计|没收违法所得|并处以罚款)",
+            r"(?:责令.{0,80}退还|全额退还)",
+        ):
+            match = next(
+                (
+                    segment
+                    for segment in segments
+                    if segment not in selected and re.search(pattern, segment)
+                ),
+                None,
+            )
+            if match:
+                selected.append(match)
+        if len(selected) < 2:
+            selected = segments[:3]
+    return f"{'；'.join(selected).rstrip('。')}。"
 
 
 def _stamp_block(
@@ -875,9 +901,15 @@ def _reindex(blocks: Sequence[ContentBlock], prefix: str = "block") -> List[Cont
     return result
 
 
-def _render(blocks: Sequence[ContentBlock]) -> str:
+def _render(
+    blocks: Sequence[ContentBlock],
+    *,
+    surface: str = "master",
+) -> str:
     return "\n\n".join(
-        _fact_display_text(block) if block.source_exact else block.text.strip()
+        _fact_display_text(block, surface=surface)
+        if block.source_exact
+        else block.text.strip()
         for block in blocks
         if block.text.strip()
     )
@@ -1828,7 +1860,7 @@ def normalize_content_output(
                 variant_blocks,
                 lead_with_transition=True,
             )
-        body = _render(variant_blocks)
+        body = _render(variant_blocks, surface=platform)
         if body:
             variant_title = _safe_master_title(
                 request,
@@ -1901,7 +1933,7 @@ def normalize_content_output(
             model=model,
         )
 
-    master_content = _render(blocks)
+    master_content = _render(blocks, surface="master")
     return OperatorContentOutput(
         role_id=role,
         status=ContentStatus.CONTENT_READY,
@@ -2114,7 +2146,7 @@ def combine_publishable_surfaces(
     data = _dump(master)
     data.update(
         {
-            "master_content": _render(master.blocks),
+            "master_content": _render(master.blocks, surface="master"),
             "blocks": [_dump(block) for block in master.blocks],
             "platform_variants": [
                 _dump(variant) for variant in selected_variants
