@@ -2569,6 +2569,187 @@ def curated_industry_surface_candidate(
     return candidate
 
 
+def _curated_human_review_surface_candidate(
+    role: OperatorRole,
+    compose_payload: Dict[str, Any],
+    surface: str,
+) -> Optional[Dict[str, Any]]:
+    """Repair a known human-review story without inventing capabilities.
+
+    This narrow policy is a last resort after a live model attempt.  It is
+    enabled only when approved public claims themselves describe human review
+    of generated content.  Exact capabilities, offers, and personal history
+    remain canonical block refs; the authored lines add only reader-facing
+    judgment around those immutable blocks.
+    """
+
+    approved_proposal = compose_payload.get("approved_proposal")
+    public_points = (
+        approved_proposal.get("key_points", [])
+        if isinstance(approved_proposal, dict)
+        else []
+    )
+    public_text = "\n".join(
+        str(value or "").strip()
+        for value in public_points
+        if str(value or "").strip()
+    )
+    if "人工终审" not in public_text or not any(
+        term in public_text for term in ("自动发布", "模型生成", "退回", "证据")
+    ):
+        return None
+    required_refs = [
+        {"block_ref": block.get("block_ref")}
+        for block in compose_payload.get("canonical_block_registry", [])
+        if isinstance(block, dict)
+        and block.get("required")
+        and block.get("block_ref")
+    ]
+    if not required_refs:
+        return None
+
+    commercial_copy: Dict[str, tuple[str, List[str]]] = {
+        "master": (
+            "AI内容流程如何保留人工终审",
+            [
+                "一套内容流程是否可用，关键看它能不能在判断出错时及时停下来。",
+                "速度只能说明生产效率；控制权留在负责人手里，团队才有机会在内容对外前纠偏，并在事后还原每次决定。",
+            ],
+        ),
+        "wechat_moments": (
+            "模型生成后，负责人还要看什么",
+            ["AI 可以把草稿写得很快，但内容是否对外仍是需要有人负责的决定。"],
+        ),
+        "wechat_mp": (
+            "从模型生成到人工终审，控制权如何保留",
+            [
+                "自动化可以缩短生产时间，但不能替负责人做最后的对外判断。",
+                "把生成和对外确认拆开，团队就能在最后一步重新检查风险，也让每次修改都有清楚的责任边界。",
+            ],
+        ),
+        "wechat_channels": (
+            "模型生成结果为何不能直接对外",
+            ["模型负责提速，负责人负责最后的判断。内容流程需要的不是自动冲线，而是随时能停、能改。"],
+        ),
+        "douyin": (
+            "模型生成后，谁来踩刹车",
+            ["模型出稿只是开始。真正要上线时，必须有人能踩刹车。"],
+        ),
+        "kuaishou": (
+            "AI内容流程要留住人工终审",
+            ["内容跑得再快，也要给负责人留下判断和纠偏的位置。"],
+        ),
+        "xiaohongshu": (
+            "一套能退回内容的AI工作流",
+            ["能退回修改的 AI 内容流程更值得信任：它承认自动化会出错，也给负责人留下纠偏入口。"],
+        ),
+        "toutiao": (
+            "AI内容工作流如何保留证据与人工终审",
+            [
+                "AI 内容工作流的价值，也在每个决定是否能被解释。",
+                "当终审、退回和恢复都有清楚的责任人，自动化才不会把对外风险藏在效率指标后面。",
+            ],
+        ),
+        "weitoutiao": (
+            "人工终审才是最后一道门",
+            ["生成不等于完成。最后一道门仍要有人核对、有人负责。"],
+        ),
+    }
+    personal_copy: Dict[str, tuple[str, List[str]]] = {
+        "master": (
+            "从自动发布到人工终审，我更看重补救成本",
+            [
+                "现在做自动化，我更在意的，是判断出错后能不能及时停下来。",
+                "我的判断是：越接近对外，越要把最终确认留给人。效率当然重要，但补救成本更能决定一套系统是否值得长期使用。",
+            ],
+        ),
+        "wechat_moments": (
+            "自动发布再快，也要保留人工终审",
+            ["现在做自动化，我更在意出错后的补救。能在内容对外前停下来，比少点几次按钮更让我安心。"],
+        ),
+        "wechat_mp": (
+            "自动发布为何改回人工终审",
+            [
+                "现在回头看，我更在意自动化有没有把最后判断留给人。",
+                "我的判断是：效率可以交给系统，对外前的确认和出错后的补救仍要有人负责。",
+            ],
+        ),
+        "wechat_channels": (
+            "自动发布以后，更需要保留刹车",
+            ["我的判断很简单：能自动跑起来不难，难的是出错时还能停下来。"],
+        ),
+        "douyin": (
+            "自动发布很快，但出错后怎么办",
+            ["我更在意的不是自动化有多快，而是出错后能不能马上停、马上改。"],
+        ),
+        "kuaishou": (
+            "自动发布也要留一道人工终审",
+            ["现在看自动化，我会先看它有没有刹车，再看它能省多少步骤。"],
+        ),
+        "xiaohongshu": (
+            "把自动发布改回人工终审之后",
+            ["我的原则是：越接近对外，越要保留人工确认。能退回、能修改，才有继续自动化的底气。"],
+        ),
+        "toutiao": (
+            "从自动发布到人工终审：关于补救成本的取舍",
+            [
+                "现在做自动化，我会先问出错后怎么补救，再问它能省多少时间。",
+                "我的判断是：内容越接近外部用户，最终确认越应该留给人，这也是我衡量自动化能否长期运行的边界。",
+            ],
+        ),
+        "weitoutiao": (
+            "人工终审之外，我更看重出错后的补救",
+            ["我现在更看重出错后的补救：能停、能改、能重新确认，才算真正可用的自动化。"],
+        ),
+    }
+    surface_copy = (
+        commercial_copy if role is OperatorRole.COMMERCIAL else personal_copy
+    )
+    selected = surface_copy.get(surface)
+    if selected is None:
+        return None
+    title, authored_texts = selected
+
+    def authored(text: str, index: int) -> Dict[str, Any]:
+        return {
+            "kind": "transition" if index == 0 else "opinion",
+            "text": text,
+            "evidence_ids": [],
+        }
+
+    blocks: List[Dict[str, Any]] = [authored(authored_texts[0], 0), *required_refs]
+    blocks.extend(
+        authored(text, index)
+        for index, text in enumerate(authored_texts[1:], start=1)
+    )
+    candidate: Dict[str, Any] = {
+        "_model": f"curated-{role.value}-human-review-policy-v1",
+        "platform_variants": [],
+    }
+    if surface == "master":
+        candidate.update({"master_title": title, "blocks": blocks})
+    else:
+        candidate["platform_variants"] = [
+            {"platform": surface, "title": title, "blocks": blocks}
+        ]
+    return candidate
+
+
+def curated_operator_surface_candidate(
+    role_id: OperatorRole | str,
+    compose_payload: Dict[str, Any],
+    surface: str,
+) -> Optional[Dict[str, Any]]:
+    """Return a narrow evidence-bound last-resort draft for a known story."""
+
+    role = role_id if isinstance(role_id, OperatorRole) else OperatorRole(role_id)
+    if role is OperatorRole.INDUSTRY:
+        return curated_industry_surface_candidate(compose_payload, surface)
+    if role in {OperatorRole.COMMERCIAL, OperatorRole.PERSONAL_IP}:
+        return _curated_human_review_surface_candidate(role, compose_payload, surface)
+    return None
+
+
 def _sanitized_context(context: AuthorizedContext) -> Dict[str, Any]:
     data = _dump(context)
     if context.record_type == "business_offer":

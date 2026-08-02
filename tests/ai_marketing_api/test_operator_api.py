@@ -592,6 +592,91 @@ def test_compose_uses_curated_funds_policy_without_model_dependency(monkeypatch)
     assert "结算" in toutiao["body"]
 
 
+def test_compose_uses_commercial_human_review_policy_only_after_model_attempt(
+    monkeypatch,
+):
+    capability = (
+        "本系统不会把模型生成结果直接发布；负责人可以查看证据、修改方向、"
+        "退回内容并完成人工终审。"
+    )
+    channels = ["wechat_moments", "wechat_mp", "douyin"]
+    payload = {
+        "objective": "说明已批准的人工终审能力",
+        "topic": "AI 内容流程的人工终审",
+        "audience": "需要控制内容风险的团队负责人",
+        "channels": channels,
+        "as_of": "2026-08-02T00:00:00Z",
+        "approved_proposal": {
+            "title": "AI 内容流程的人工终审",
+            "angle": "说明模型生成、人工确认和退回修改之间的责任边界。",
+            "audience_value": "帮助团队判断自动化内容流程是否保留最终控制权。",
+            "key_points": [capability],
+            "suggested_formats": channels,
+            "cta": None,
+            "first_person": False,
+        },
+        "claims": [
+            {
+                "text": capability,
+                "kind": "fact",
+                "evidence_ids": ["cap-human-review"],
+                "verification_status": "verified",
+            }
+        ],
+        "authorized_context": [
+            {
+                "record_id": "cap-human-review",
+                "space": "company_public",
+                "record_type": "capability",
+                "title": "人工终审能力",
+                "content": capability,
+                "structured_data": {},
+                "status": "approved",
+                "authorized_roles": ["commercial"],
+                "valid_from": "2026-01-01T00:00:00Z",
+                "valid_until": "2027-01-01T00:00:00Z",
+                "source_uri": None,
+                "source_tier": "trusted",
+            }
+        ],
+    }
+    calls: list[dict] = []
+
+    async def fake_llm(system, model_payload, fallback, *args, **kwargs):
+        calls.append(model_payload)
+        return {**fallback, "_model": "fake-live-model"}
+
+    monkeypatch.setattr(marketing_api, "_llm_json", fake_llm)
+
+    response = _request(
+        "POST",
+        "/api/v1/operators/commercial/compose",
+        json=payload,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert calls
+    assert data["status"] == "content_ready", (
+        data["critic"]["errors"],
+        data["critic"]["warnings"],
+        data["model"],
+        len(calls),
+    )
+    assert any(
+        check["code"] == "curated_commercial_policy_repair"
+        and check["passed"] is True
+        for check in data["critic"]["checks"]
+    )
+    assert any(
+        warning.startswith("curated_commercial_policy_repair:master,")
+        and "douyin" in warning
+        for warning in data["critic"]["warnings"]
+    )
+    assert "负责人" in data["master_content"]
+    assert "先把事实和判断分开" not in data["master_content"]
+
+
 def test_compose_uses_the_same_byte_stable_role_prompt(monkeypatch):
     prompts: list[str] = []
 

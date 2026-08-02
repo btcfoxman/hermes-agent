@@ -22,6 +22,7 @@ from ai_marketing_api.operator_content import (
     combine_publishable_surfaces,
     content_request_payload,
     curated_industry_surface_candidate,
+    curated_operator_surface_candidate,
     enforce_social_publishability,
     missing_publishable_surfaces,
     normalize_content_output,
@@ -675,12 +676,15 @@ async def _run_operator(
     )
 
 
-def _annotate_curated_industry_output(
+def _annotate_curated_operator_output(
     output: OperatorContentOutput,
     surfaces: List[str],
+    role_id: OperatorRole = OperatorRole.INDUSTRY,
 ) -> OperatorContentOutput:
     data = output.model_dump()
-    warning = "curated_industry_policy_repair:" + ",".join(surfaces)
+    role_value = role_id.value
+    repair_code = f"curated_{role_value}_policy_repair"
+    warning = repair_code + ":" + ",".join(surfaces)
     warnings = list(
         dict.fromkeys([warning, *data["critic"]["warnings"]])
     )[:50]
@@ -690,10 +694,10 @@ def _annotate_curated_industry_output(
         "checks": [
             *data["critic"]["checks"],
             {
-                "code": "curated_industry_policy_repair",
+                "code": repair_code,
                 "passed": True,
                 "message": (
-                    "A known evidence-bound industry event policy supplied "
+                    f"A known evidence-bound {role_value} story policy supplied "
                     "the listed social surfaces without introducing new facts."
                 ),
             },
@@ -701,7 +705,7 @@ def _annotate_curated_industry_output(
     }
     data["risk_flags"] = [
         {
-            "code": "curated_industry_policy_repair",
+            "code": repair_code,
             "message": warning,
             "blocking": False,
         },
@@ -786,9 +790,10 @@ async def _run_compose(
                     curated_attempts
                 )
                 if curated_combined is not None:
-                    return _annotate_curated_industry_output(
+                    return _annotate_curated_operator_output(
                         curated_combined,
                         curated_surfaces,
+                        role_id,
                     )
         candidate = await _llm_json(
             profile.system_prompt,
@@ -1190,9 +1195,10 @@ async def _run_compose(
         normalized_attempts,
         compose_payload.get("channels", []),
     )
-    if live_model_attempted and role_id is OperatorRole.INDUSTRY:
+    if live_model_attempted:
         for surface in remaining_surfaces:
-            curated_candidate = curated_industry_surface_candidate(
+            curated_candidate = curated_operator_surface_candidate(
+                role_id,
                 compose_payload,
                 surface,
             )
@@ -1218,9 +1224,10 @@ async def _run_compose(
     if curated_surfaces:
         combined = combine_publishable_surfaces(normalized_attempts)
         if combined is not None:
-            output = _annotate_curated_industry_output(
+            output = _annotate_curated_operator_output(
                 combined,
                 curated_surfaces,
+                role_id,
             )
     return output
 

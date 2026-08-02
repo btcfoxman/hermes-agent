@@ -8,12 +8,14 @@ from datetime import datetime, timezone
 import pytest
 
 from ai_marketing_api.operator_content import (
+    _social_surface_quality_errors,
     ContentBlockKind,
     ContentStatus,
     OperatorComposeRequest,
     build_content_fallback,
     content_request_payload,
     curated_industry_surface_candidate,
+    curated_operator_surface_candidate,
     disclosable_contexts,
     enforce_social_publishability,
     missing_publishable_surfaces,
@@ -302,6 +304,168 @@ def test_curated_funds_remedy_repairs_are_publishable_on_every_social_surface():
         assert "不是" not in candidate_text
         assert "值得关注" not in candidate_text
         assert not any(char.isdigit() for char in candidate_text)
+
+
+@pytest.mark.parametrize(
+    "role,contexts,claims,objective",
+    [
+        (
+            OperatorRole.COMMERCIAL,
+            [
+                _context(
+                    "cap-human-review",
+                    "commercial",
+                    "company_public",
+                    "capability",
+                    content=(
+                        "本系统不会把模型生成结果直接发布；负责人可以查看证据、"
+                        "修改方向、退回内容并完成人工终审。"
+                    ),
+                ),
+                _context(
+                    "offer-human-review",
+                    "commercial",
+                    "company_public",
+                    "business_offer",
+                    content="internal",
+                    structured_data={
+                        "publicly_quoteable": True,
+                        "public_text": "测试验收价仅用于验证报价门禁，不是对外商业承诺。",
+                    },
+                ),
+            ],
+            [
+                _claim(
+                    "本系统不会把模型生成结果直接发布；负责人可以查看证据、"
+                    "修改方向、退回内容并完成人工终审。",
+                    "fact",
+                    ["cap-human-review"],
+                ),
+                _claim(
+                    "测试验收价仅用于验证报价门禁，不是对外商业承诺。",
+                    "fact",
+                    ["offer-human-review"],
+                ),
+            ],
+            "说明已批准能力与当前公开测试报价",
+        ),
+        (
+            OperatorRole.PERSONAL_IP,
+            [
+                _context(
+                    "personal-human-review",
+                    "personal_ip",
+                    "personal_approved",
+                    "experience",
+                    content="在这次验收中，我把自动发布改成了人工终审。",
+                )
+            ],
+            [
+                _claim(
+                    "在这次验收中，我把自动发布改成了人工终审。",
+                    "experience",
+                    ["personal-human-review"],
+                )
+            ],
+            "形成一篇关于自动发布与补救成本的个人内容",
+        ),
+    ],
+)
+def test_curated_human_review_repairs_are_publishable_on_every_surface(
+    role,
+    contexts,
+    claims,
+    objective,
+):
+    channels = [
+        "wechat_moments",
+        "wechat_mp",
+        "wechat_channels",
+        "douyin",
+        "kuaishou",
+        "xiaohongshu",
+        "toutiao",
+        "weitoutiao",
+    ]
+    request = _request(
+        contexts,
+        claims,
+        channels=channels,
+        objective=objective,
+    )
+    registry = OperatorRegistry()
+    authorized = registry.authorize(
+        role,
+        request.authorized_context,
+        request.as_of,
+    )
+    fallback = build_content_fallback(
+        registry,
+        role,
+        request,
+        authorized,
+    )
+    compose_payload = content_request_payload(role, request, authorized)
+
+    for surface in ["master", *channels]:
+        candidate = curated_operator_surface_candidate(
+            role,
+            compose_payload,
+            surface,
+        )
+        assert candidate is not None
+        normalized = normalize_content_output(
+            registry,
+            role,
+            request,
+            authorized,
+            fallback,
+            candidate,
+        )
+        missing = missing_publishable_surfaces(
+            [normalized],
+            [] if surface == "master" else [surface],
+        )
+        assert surface not in missing, (
+            surface,
+            normalized.critic.errors,
+            normalized.critic.warnings,
+            [
+                (
+                    variant.title,
+                    _social_surface_quality_errors(
+                        variant.blocks,
+                        surface=variant.platform,
+                        title=variant.title,
+                    ),
+                )
+                for variant in normalized.platform_variants
+                if variant.platform == surface
+            ],
+        )
+
+
+def test_curated_human_review_policy_stays_narrow_and_evidence_bound():
+    registry = [{"block_ref": "fact:claim-1", "required": True}]
+
+    assert curated_operator_surface_candidate(
+        OperatorRole.COMMERCIAL,
+        {
+            "approved_proposal": {"key_points": ["普通产品能力说明。"]},
+            "canonical_block_registry": registry,
+        },
+        "master",
+    ) is None
+    assert curated_operator_surface_candidate(
+        OperatorRole.PERSONAL_IP,
+        {
+            "approved_proposal": {
+                "key_points": ["我把自动发布改成了人工终审。"]
+            },
+            "canonical_block_registry": [],
+        },
+        "master",
+    ) is None
 
 
 def _candidate_from_required_refs(
