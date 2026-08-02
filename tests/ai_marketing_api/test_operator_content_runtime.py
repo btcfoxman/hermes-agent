@@ -1981,6 +1981,7 @@ def test_industry_editorial_keeps_all_numbers_in_canonical_blocks_and_drops_meta
     pressure = "压力不只在账面金额，更在平台与经营者之间的谈判位置。"
     not_in_but_in = "最有分量的变化不在表态，而在后续规则如何执行。"
     cannot_only_watch = "判断整改效果不能只看公开表态，还要看执行结果。"
+    dont_only_watch = "以后看这类治理，别只看处罚金额，先看钱有没有回到经营者手里。"
     paired_if = "如果整改停在纸面，约束有限；如果进入日常执行，议价关系不同。"
     worth_noticing = "最值得注意的是平台与经营者之间的议价关系。"
     next_watch = "接下来最值得关注的是整改措施如何落地。"
@@ -2012,6 +2013,7 @@ def test_industry_editorial_keeps_all_numbers_in_canonical_blocks_and_drops_meta
             {"kind": "opinion", "text": pressure, "evidence_ids": []},
             {"kind": "opinion", "text": not_in_but_in, "evidence_ids": []},
             {"kind": "opinion", "text": cannot_only_watch, "evidence_ids": []},
+            {"kind": "opinion", "text": dont_only_watch, "evidence_ids": []},
             {"kind": "opinion", "text": paired_if, "evidence_ids": []},
             {"kind": "opinion", "text": worth_noticing, "evidence_ids": []},
             {"kind": "opinion", "text": next_watch, "evidence_ids": []},
@@ -2059,6 +2061,7 @@ def test_industry_editorial_keeps_all_numbers_in_canonical_blocks_and_drops_meta
     assert pressure not in output.master_content
     assert not_in_but_in not in output.master_content
     assert cannot_only_watch not in output.master_content
+    assert dont_only_watch not in output.master_content
     assert paired_if not in output.master_content
     assert worth_noticing not in output.master_content
     assert next_watch not in output.master_content
@@ -2081,7 +2084,7 @@ def test_industry_editorial_keeps_all_numbers_in_canonical_blocks_and_drops_meta
     assert sum(
         warning.endswith(":generic_meta_copy_forbidden")
         for warning in output.critic.warnings
-    ) == 24
+    ) == 25
     assert output.master_title != candidate["master_title"]
     assert any(
         warning.endswith(":mixed_language_phrase_forbidden")
