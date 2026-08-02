@@ -327,6 +327,7 @@ def test_compose_retries_shallow_model_copy_once(monkeypatch):
     assert len(calls) == 2
     assert "quality_retry" not in calls[0]
     assert calls[1]["quality_retry"]["critic_errors"]
+    assert calls[1]["quality_retry"]["failed_surfaces"]
     assert calls[1]["quality_retry"]["required_shape"]
     assert any(
         "analytical block" in item

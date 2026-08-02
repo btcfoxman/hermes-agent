@@ -726,7 +726,11 @@ async def _run_compose(
     candidate_model = str(
         candidate.get("_model") or candidate.get("model") or "fallback"
     ).strip().lower()
-    for retry_number in range(1, 3):
+    # A multi-platform response often has five good surfaces and one bad
+    # short-feed variant. Give the model three bounded repair attempts while
+    # whole-surface aggregation keeps every independently valid draft. This is
+    # still fail-closed: no partial or template surface leaves this endpoint.
+    for retry_number in range(1, 4):
         if (
             output.status != ContentStatus.QUALITY_INSUFFICIENT.value
             or candidate_model == "fallback"
@@ -737,6 +741,14 @@ async def _run_compose(
             **compose_payload,
             "quality_retry": {
                 "attempt": retry_number,
+                "failed_surfaces": sorted(
+                    {
+                        error.split(":", 2)[1]
+                        for error in output.critic.errors
+                        if error.startswith("social_editorial_")
+                        and len(error.split(":", 2)) > 1
+                    }
+                ),
                 "instruction": (
                     "Rewrite this attempt from scratch. The previous draft was safe "
                     "but not publishable social copy. First choose one concrete "
@@ -745,7 +757,9 @@ async def _run_compose(
                     "Do not describe the review process, label facts/opinions, "
                     "repeat a generic 'worth watching' or 'not only ... but also' "
                     "wrapper, mix untranslated English into Chinese prose, or end "
-                    "with an automatic observation list."
+                    "with an automatic observation list. Concentrate on the failed "
+                    "surfaces listed in this repair request; other valid surfaces "
+                    "will be retained independently by the server."
                 ),
                 "required_shape": [
                     "one platform-native authored hook anchored to a concrete actor, amount, rule, constraint, or consequence from approved claims",
