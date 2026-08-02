@@ -273,6 +273,7 @@ _INDUSTRY_CONTRAST_CLICHE_RE = re.compile(
 _INTERNAL_EDITORIAL_DIRECTION_RE = re.compile(
     r"(?:区分.{0,24}事实.{0,24}(?:观点|判断)|"
     r"事实.{0,24}(?:观点|判断).{0,24}(?:分开|区分)|"
+    r"帮助读者理解事件影响|重复新闻摘要|"
     r"后续观察项|审稿|编辑说明|事实部分|观点部分)",
     re.IGNORECASE,
 )
@@ -2437,10 +2438,17 @@ def content_request_payload(
             "Select only a mechanism actually supported by the approved claim and state one "
             "clear industry thesis."
         )
+    industry_audience_value = approved_direction.audience_value
+    if _INTERNAL_EDITORIAL_DIRECTION_RE.search(industry_audience_value):
+        industry_audience_value = (
+            "Give readers a concrete understanding of how the verified action changes "
+            "the affected party's operating decision, cash flow, settlement terms, contract "
+            "boundary, cost, available choice, incentive, or bargaining position."
+        )
     editorial_brief = (
         {
             "angle": industry_angle,
-            "audience_value": approved_direction.audience_value,
+            "audience_value": industry_audience_value,
             "cta": approved_direction.cta,
         }
         if role is OperatorRole.INDUSTRY

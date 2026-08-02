@@ -190,6 +190,9 @@ def test_industry_compose_replaces_internal_review_angle_with_reader_facing_thes
     request.approved_proposal.angle = (
         "区分已核验事实与编辑观点，解释变化的业务影响及后续观察项。"
     )
+    request.approved_proposal.audience_value = (
+        "帮助读者理解事件影响，而不是重复新闻摘要。"
+    )
     registry = OperatorRegistry()
     authorized = registry.authorize(
         OperatorRole.INDUSTRY, request.authorized_context, request.as_of
@@ -203,6 +206,9 @@ def test_industry_compose_replaces_internal_review_angle_with_reader_facing_thes
     assert "观点" not in angle
     assert "cash flow" in angle
     assert "clear industry thesis" in angle
+    audience_value = payload["approved_editorial_brief"]["audience_value"]
+    assert "重复新闻摘要" not in audience_value
+    assert "operating decision" in audience_value
     guard = payload["industry_editorial_guard"]
     assert guard["event_type"] == "regulatory_return_of_withheld_business_funds"
     assert guard["fund_or_rule"] == "经营资金"
