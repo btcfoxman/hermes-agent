@@ -1956,9 +1956,18 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
     contrast = "这次处罚真正改变的，不只是一个数字，而是平台与经营者之间的规则。"
     not_but = "这次处罚真正改变的，不是一个数字，而是平台与经营者之间的规则。"
     vague = "这次最该被看见的，不只是51.79亿元，而是后续执行。"
+    pressure = "压力不只在账面金额，更在平台与经营者之间的谈判位置。"
+    not_in_but_in = "最有分量的变化不在表态，而在后续规则如何执行。"
+    cannot_only_watch = "判断整改效果不能只看公开表态，还要看执行结果。"
+    paired_if = "如果整改停在纸面，约束有限；如果进入日常执行，议价关系不同。"
+    worth_noticing = "最值得注意的是平台与经营者之间的议价关系。"
+    next_watch = "接下来最值得关注的是整改措施如何落地。"
+    real_landing = "真正落点是平台与经营者之间的规则。"
+    core_impact = "核心影响是在平台与经营者之间重新分配谈判空间。"
     mixed_language = "这会迫使相关参与者重新评估 bargaining position。"
     loaded_label = "平台不能再把灰色扣费当成默认规则。"
     invented = "52亿元罚没款之后，更关键的问题是整改能否真正改变相关规则。"
+    invented_chinese_quantity = "企业将落实十九项整改措施。"
     candidate["blocks"].extend(
         [
             {"kind": "transition", "text": grounded, "evidence_ids": []},
@@ -1968,9 +1977,22 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
             {"kind": "opinion", "text": contrast, "evidence_ids": []},
             {"kind": "opinion", "text": not_but, "evidence_ids": []},
             {"kind": "opinion", "text": vague, "evidence_ids": []},
+            {"kind": "opinion", "text": pressure, "evidence_ids": []},
+            {"kind": "opinion", "text": not_in_but_in, "evidence_ids": []},
+            {"kind": "opinion", "text": cannot_only_watch, "evidence_ids": []},
+            {"kind": "opinion", "text": paired_if, "evidence_ids": []},
+            {"kind": "opinion", "text": worth_noticing, "evidence_ids": []},
+            {"kind": "opinion", "text": next_watch, "evidence_ids": []},
+            {"kind": "opinion", "text": real_landing, "evidence_ids": []},
+            {"kind": "opinion", "text": core_impact, "evidence_ids": []},
             {"kind": "opinion", "text": mixed_language, "evidence_ids": []},
             {"kind": "opinion", "text": loaded_label, "evidence_ids": []},
             {"kind": "transition", "text": invented, "evidence_ids": []},
+            {
+                "kind": "opinion",
+                "text": invented_chinese_quantity,
+                "evidence_ids": [],
+            },
         ]
     )
     candidate["master_title"] = "51.79亿元罚没之后，不只是金额"
@@ -1992,13 +2014,22 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
     assert contrast not in output.master_content
     assert not_but not in output.master_content
     assert vague not in output.master_content
+    assert pressure not in output.master_content
+    assert not_in_but_in not in output.master_content
+    assert cannot_only_watch not in output.master_content
+    assert paired_if not in output.master_content
+    assert worth_noticing not in output.master_content
+    assert next_watch not in output.master_content
+    assert real_landing not in output.master_content
+    assert core_impact not in output.master_content
     assert mixed_language not in output.master_content
     assert loaded_label not in output.master_content
     assert invented not in output.master_content
+    assert invented_chinese_quantity not in output.master_content
     assert sum(
         warning.endswith(":generic_meta_copy_forbidden")
         for warning in output.critic.warnings
-    ) == 6
+    ) == 14
     assert output.master_title != candidate["master_title"]
     assert any(
         warning.endswith(":mixed_language_phrase_forbidden")

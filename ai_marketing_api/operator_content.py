@@ -179,7 +179,11 @@ _SAFE_PERSONAL_JUDGMENT_RE = re.compile(
 )
 _HTML_RE = re.compile(r"<\s*/?\s*[a-z][^>]*>", re.IGNORECASE)
 _NUMBER_RE = re.compile(
-    r"(?<![A-Za-z0-9])\d+(?:\.\d+)?(?:%|年|月|日|天|小时|分钟|万|亿)?"
+    r"(?<![A-Za-z0-9])(?:"
+    r"\d+(?:\.\d+)?(?:%|年|月|日|天|小时|分钟|万|亿)?|"
+    r"[零〇一二两三四五六七八九十百千万亿]+"
+    r"(?:项|条|家|名|次|轮|倍|年|月|日|天|小时|分钟)"
+    r")"
 )
 _EDITORIAL_TRANSITION_RE = re.compile(
     r"(?:"
@@ -244,7 +248,17 @@ _GENERIC_EDITORIAL_META_RE = re.compile(
     re.IGNORECASE,
 )
 _INDUSTRY_CONTRAST_CLICHE_RE = re.compile(
-    r"(?:不(?:只|仅)?是|并非|未必是|只是(?:结果|表面|数字|开始|第一步))"
+    r"(?:"
+    r"不(?:只|仅)?是|并非|未必是|只是(?:结果|表面|数字|开始|第一步)|"
+    r"不(?:只|仅)?在.{0,48}(?:更在|而在)|"
+    r"不在.{0,48}而在|"
+    r"不(?:能|该|应)?只(?:看|盯|关注)|"
+    r"(?:如果|若).{1,100}[；;](?:如果|若)|"
+    r"(?:接下来|后续).{0,12}(?:最|更)?值得(?:看|关注|观察|盯)|"
+    r"最值得注意的?是|"
+    r"(?:真正(?:的)?落点|核心影响).{0,6}(?:是|在于)|"
+    r"整改.{0,8}才是(?:重点|关键)"
+    r")"
 )
 _MIXED_LANGUAGE_PHRASE_RE = re.compile(
     r"\b[A-Za-z][A-Za-z'’-]{2,}(?:\s+[A-Za-z][A-Za-z'’-]{2,})+\b"
@@ -2439,7 +2453,8 @@ def content_request_payload(
             "Every authored opinion, transition, or CTA object must set evidence_ids to [] and omit claim_id and block_ref. Evidence binding belongs only to canonical registry blocks selected by block_ref.",
             "A verified number or date may appear in editorial framing only when copied exactly from the supplied public claims; never calculate, round, compare, or combine numbers.",
             "Do not use audit/meta copy such as '先把事实和判断分开', '以下分析', '编辑说明', '编辑观点', '事实部分', '公开信息只是起点', or '接下来可以继续观察'. The draft must read as publishable copy, not an internal review note.",
-            "For industry copy, never use 不只是, 不仅是, 不是, 并非, 未必是, or '只是结果/表面/数字/开始/第一步' as a contrast wrapper, even when the comparison is split across sentences. For every role, avoid phrases such as '对关注某领域的人来说', '从行业视角看', '这类案例的价值在于', '真正值得关注', or '重点在于'. State the concrete actor-action-consequence relationship directly. Every analytical block must advance a thesis tied to this event.",
+            "For industry copy, never use formulaic wrappers such as 不只是/不仅是/不是, 不只在X更在Y, 不在X而在Y, 不能只看X, paired 如果X；如果Y, 最值得注意的是, 接下来最值得关注, 真正落点是, or 核心影响是. For every role, avoid phrases such as '对关注某领域的人来说', '从行业视角看', '这类案例的价值在于', '真正值得关注', or '重点在于'. State the concrete actor-action-consequence relationship directly. Every analytical block must advance a thesis tied to this event.",
+            "Treat Chinese counted quantities such as '十九项', '三家', or '两轮' exactly like Arabic numbers: use them only when the identical quantity appears in an approved factual block.",
             "When the approved source and target audience are Chinese, keep reader-facing prose in natural Chinese. Do not insert an untranslated multi-word English phrase unless that phrase already appears in an approved public claim.",
             "Keep the tone professional. Do not upgrade legal or business facts into loaded labels such as '灰色扣费', '霸王条款', '割韭菜', '黑幕', '套路', or '暴雷'.",
             "Build the thesis as a direct subject-action-consequence relationship already present in the approved facts. Name the affected actor, changed rule or incentive, and observable consequence instead of using a rhetorical contrast or merely saying the event is important.",
