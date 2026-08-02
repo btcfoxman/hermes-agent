@@ -2217,9 +2217,9 @@ def content_request_payload(
         "publication_brief": {
             **publication_brief,
             "thesis_contract": [
-                "Choose one event-specific thesis before writing. Do not merely summarize the source or announce that facts and opinions are separate.",
-                "Build the thesis around a concrete relationship already visible in the approved claims: actor versus affected party, penalty versus remedy, capability versus customer constraint, or action versus observable consequence.",
-                "Make every editorial block earn its place: hook with the tension, explain the mechanism or reader impact, then land on a useful judgment. Do not add an automatic observation list or engagement question.",
+                "Choose one event-specific thesis before writing. State it as a direct declaration, not as a correction such as 'not X but Y'. Do not merely summarize the source or announce that facts and opinions are separate.",
+                "Build the thesis by connecting one approved actor, action, rule, amount, or remedy to one affected party and one concrete cost, choice, boundary, or observable consequence. Do not frame the relationship as 'versus'.",
+                "Make every editorial block earn its place: open with the actor and concrete consequence, explain the mechanism or reader impact, then land on a useful judgment. Do not add an automatic observation list or engagement question.",
                 "Use factual nouns, actors, rules, and exact grounded numbers from the approved claims as anchors. Avoid abstract paragraphs that could be pasted under an unrelated news item.",
             ],
             "role_thesis": {
@@ -2364,7 +2364,7 @@ def content_request_payload(
             "For industry copy, avoid interchangeable contrast filler built from '不只是/不仅是/不是……而是/更是'. For every role, avoid phrases such as '对关注某领域的人来说', '从行业视角看', '这类案例的价值在于', '真正值得关注', or '重点在于'. State the concrete relationship directly. Every analytical block must advance a thesis tied to this event.",
             "When the approved source and target audience are Chinese, keep reader-facing prose in natural Chinese. Do not insert an untranslated multi-word English phrase unless that phrase already appears in an approved public claim.",
             "Keep the tone professional. Do not upgrade legal or business facts into loaded labels such as '灰色扣费', '霸王条款', '割韭菜', '黑幕', '套路', or '暴雷'.",
-            "Build the thesis from a concrete contrast or relationship already present in the approved facts (for example penalty versus restitution, announcement versus enforceable action, or platform versus affected participant). Name the affected actor, changed rule/incentive, or observable consequence instead of merely saying the event is important.",
+            "Build the thesis as a direct subject-action-consequence relationship already present in the approved facts. Name the affected actor, changed rule or incentive, and observable consequence instead of using a rhetorical contrast or merely saying the event is important.",
             "Keep fact/opinion separation in block metadata, never as reader-facing wording. The published copy should not explain its own editorial process.",
             "Do not force a question, invitation, disclaimer, or CTA when a firm closing judgment is more natural.",
             "The server keeps required factual blocks verbatim for audit and renders long ones as concise source-exact fact beats. Do not repeat the full announcement in editorial prose.",

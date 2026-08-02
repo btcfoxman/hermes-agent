@@ -752,7 +752,8 @@ async def _run_compose(
                 "instruction": (
                     "Rewrite this attempt from scratch. The previous draft was safe "
                     "but not publishable social copy. First choose one concrete "
-                    "reader-facing thesis from the approved facts, then return "
+                    "reader-facing thesis from the approved facts and state it as "
+                    "a direct subject-action-consequence declaration, then return "
                     "original, event-specific editorial blocks for every surface. "
                     "Do not describe the review process, label facts/opinions, "
                     "repeat a generic 'worth watching', 'not ... but', or "

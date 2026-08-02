@@ -355,6 +355,9 @@ def test_content_request_exposes_server_owned_canonical_block_refs():
     assert "same block may satisfy both jobs" in editorial_shape["short_form"]
     assert "Reading order is mandatory" in editorial_shape["classification_rule"]
     assert "our company" in payload["publication_brief"]["authored_block_rule"]
+    thesis_contract = " ".join(payload["publication_brief"]["thesis_contract"])
+    assert "connecting one approved actor" in thesis_contract
+    assert "not as a correction" in thesis_contract
 
 
 def test_commercial_internal_context_is_readable_but_never_publishable_or_model_visible():
