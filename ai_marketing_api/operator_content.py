@@ -2454,7 +2454,7 @@ def curated_industry_surface_candidate(
             ],
         ),
         "toutiao": (
-            f"{affected_party}与平台的资金边界变清楚了",
+            f"{fund_term}退回后，经营者如何重谈资金条款",
             [
                 master_hook,
                 (

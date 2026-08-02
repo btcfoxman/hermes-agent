@@ -269,6 +269,10 @@ def test_curated_funds_remedy_repairs_are_publishable_on_every_social_surface():
     for surface in ["master", *channels]:
         candidate = curated_industry_surface_candidate(compose_payload, surface)
         assert candidate is not None
+        if surface == "toutiao":
+            assert candidate["platform_variants"][0]["title"] == (
+                "订单储备金退回后，经营者如何重谈资金条款"
+            )
         normalized = normalize_content_output(
             registry,
             OperatorRole.INDUSTRY,
