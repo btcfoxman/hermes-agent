@@ -207,6 +207,9 @@ def test_industry_compose_replaces_internal_review_angle_with_reader_facing_thes
     assert guard["event_type"] == "regulatory_return_of_withheld_business_funds"
     assert guard["fund_or_rule"] == "经营资金"
     assert "discounts or promotions" in guard["forbidden_reframes"]
+    assert "经营资金不应继续被平台内部规则强制占用" in guard[
+        "positive_thesis_seed"
+    ][0]
 
 
 def _candidate_from_required_refs(
@@ -2197,6 +2200,42 @@ def test_industry_funds_remedy_cannot_be_reframed_as_promotion_or_reversed_cash_
         warning.endswith(":industry_funds_remedy_direction_forbidden")
         for warning in output.critic.warnings
     )
+
+
+def test_model_shape_errors_are_quality_failures_that_can_be_retried():
+    fact = "监管部门发布了经批准的行业规则。"
+    source = _context(
+        "official-model-shape",
+        "industry",
+        "industry",
+        "source_item",
+        content=fact,
+        source_uri="https://official.example/model-shape",
+        source_tier="official",
+    )
+    request = _request([source], [_claim(fact, "fact", [source.record_id])])
+    registry = OperatorRegistry()
+    authorized = registry.authorize(OperatorRole.INDUSTRY, [source], AS_OF)
+    fallback = build_content_fallback(
+        registry, OperatorRole.INDUSTRY, request, authorized
+    )
+    payload = content_request_payload(OperatorRole.INDUSTRY, request, authorized)
+    candidate = _candidate_from_required_refs(payload, request.channels)
+    candidate["platform_variants"].append(
+        {"platform": None, "blocks": candidate["blocks"]}
+    )
+
+    output = normalize_content_output(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+        fallback,
+        candidate,
+    )
+
+    assert output.status == ContentStatus.QUALITY_INSUFFICIENT.value
+    assert "model_returned_unrequested_platform" in output.critic.errors
 
 
 def test_industry_editorial_cannot_restate_the_approved_source_paragraph():

@@ -288,7 +288,7 @@ _INDUSTRY_FUNDS_REMEDY_REFRAME_RE = re.compile(
     r"(?:免单|优惠|折扣|促销|价格带|分位|均价|流量|复购|获客|转化|供给安排)"
 )
 _INDUSTRY_FUNDS_REMEDY_REVERSED_RE = re.compile(
-    r"(?:回款|结算).{0,10}(?:变紧|收紧|压缩)|"
+    r"(?:回款|结算).{0,10}(?:一紧|变紧|收紧|压缩)|"
     r"(?:账期|现金流|资金).{0,10}(?:压力|变紧|收紧|更早占用|占用增加)|"
     r"(?:议价|报价|排期).{0,12}(?:空间|缓冲).{0,8}(?:变窄|更窄|压缩)|"
     r"(?:更紧的?结算|更窄的?议价|承受资金占用)"
@@ -1611,6 +1611,7 @@ def _blocked_status(role: OperatorRole, errors: Sequence[str]) -> ContentStatus:
         "model_generation_required",
         "social_editorial_",
         "platform_editorial_variants_not_distinct",
+        "model_returned_unrequested_platform",
     )
     if any(error.startswith(quality_codes) for error in errors):
         return ContentStatus.QUALITY_INSUFFICIENT
@@ -2405,11 +2406,17 @@ def content_request_payload(
                 "traffic, conversion, acquisition, or repeat purchase",
                 "tighter merchant cash flow, earlier fund occupation, or narrower bargaining space",
             ],
-            "positive_thesis_seed": (
-                f"Use {affected_party} as the subject. Connect the return of {fund_term} to "
-                "merchant-controlled operating funds, settlement clauses, and the limit on "
-                "rules imposed by the platform. Write this naturally in the source language; "
-                "do not copy these instructions or use a rhetorical contrast."
+            "positive_thesis_seed": [
+                f"{affected_party}的经营资金不应继续被平台内部规则强制占用。",
+                (
+                    f"{fund_term}被要求退还后，影响会落到经营现金流与结算条款："
+                    "类似资金安排需要接受更严格的外部审查，经营者也获得更明确的谈判依据。"
+                ),
+            ],
+            "seed_usage": (
+                "Use the Chinese thesis seed as semantic ground truth. You may adapt its "
+                "rhythm for the requested platform, but never reverse the return of funds "
+                "into tighter merchant cash flow and never use a not-X-but-Y contrast."
             ),
         }
 

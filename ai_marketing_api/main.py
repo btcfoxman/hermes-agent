@@ -910,8 +910,16 @@ async def _run_compose(
                 for channel in retry_channels
             ],
             "hard_rule": (
-                "Return every platform listed above exactly once. Do not replace "
-                "platform_variants with variants, channels, a schema, prose, or one example."
+                (
+                    "For a master repair, platform_variants must be exactly [] and top-level "
+                    "blocks must follow the listed master contract. Never return a null, "
+                    "empty, placeholder, or invented platform item."
+                )
+                if retry_surface == "master"
+                else (
+                    "Return the one platform listed above exactly once. Do not replace "
+                    "platform_variants with variants, channels, a schema, prose, or one example."
+                )
             ),
         }
         retry_payload = {
@@ -993,6 +1001,8 @@ async def _run_compose(
                     "previous_rejected_authored_text. Write only focus_surface in this "
                     "repair request; "
                     "other valid surfaces are retained independently by the server. "
+                    "When industry_editorial_guard contains a positive_thesis_seed, treat "
+                    "that seed as semantic ground truth and never reverse its direction. "
                     "When validated_reference_copy is present, preserve its concrete "
                     "thesis and mechanism while changing the wording and rhythm for "
                     "the requested platform; never copy it verbatim or repeat the source."
