@@ -181,12 +181,24 @@ def _publishable_model_candidate(payload: dict) -> dict:
             },
         ]
 
+    platform_titles = {
+        "wechat_moments": "version 2 moments note",
+        "wechat_mp": "version 2 wechat article",
+        "wechat_channels": "version 2 channel script",
+        "douyin": "version 2 douyin script",
+        "kuaishou": "version 2 kuaishou script",
+        "xiaohongshu": "version 2 xiaohongshu note",
+        "toutiao": "version 2 toutiao article",
+        "weitoutiao": "version 2 short headline",
+    }
     return {
         "_model": "publishable-test-model",
+        "master_title": "vendor released version 2",
         "blocks": [*required, *editorial("the master story")],
         "platform_variants": [
             {
                 "platform": channel,
+                "title": platform_titles.get(channel, f"version 2 {channel} note"),
                 "blocks": [*required, *editorial(channel)],
             }
             for channel in payload["channels"]

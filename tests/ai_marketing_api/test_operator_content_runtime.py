@@ -1801,10 +1801,19 @@ def test_long_verified_fact_is_rendered_as_platform_native_excerpt_without_rewri
     exact = next(block for block in output.blocks if block.source_exact)
     assert exact.text == fact
     assert exact.evidence_ids == [source.record_id]
-    assert "中国国家市场监督管理总局通报；" in output.master_content
+    assert "对某平台作出行政处罚；" in output.master_content
+    assert "中国国家市场监督管理总局通报" not in output.master_content
     assert "依据相关规定" not in output.master_content
-    assert "；没收违法所得16.58亿元；并处以罚款35.21亿元；罚没款合计51.79亿元；" in output.master_content
-    assert "；责令其退还相关款项；" in output.master_content
+    assert "没收违法所得16.58亿元" not in output.master_content
+    assert "并处以罚款35.21亿元" not in output.master_content
+    assert "；罚没款合计51.79亿元；" in output.master_content
+    assert "；责令其退还相关款项。" in output.master_content
+    assert "要求企业全面整改并公开整改措施" not in output.master_content
+    long = next(
+        variant for variant in output.platform_variants
+        if variant.platform == "wechat_mp"
+    )
+    assert "要求企业全面整改并公开整改措施" in long.body
     short = next(
         variant for variant in output.platform_variants
         if variant.platform == "xiaohongshu"
@@ -1867,6 +1876,24 @@ def test_industry_model_can_supply_grounded_social_titles_per_platform():
         "wechat_mp": "51.79亿元之后，整改如何落地",
         "xiaohongshu": "51.79亿元罚没后，整改要看执行动作",
     }
+
+    duplicated = output.model_copy(
+        update={
+            "platform_variants": [
+                item.model_copy(update={"title": "51.79亿元之后，整改如何落地"})
+                for item in output.platform_variants
+            ]
+        }
+    )
+    duplicate_blocked = enforce_social_publishability(duplicated)
+    assert "platform_titles_not_distinct" in duplicate_blocked.critic.errors
+
+    source_title = output.model_copy(update={"master_title": fact.rstrip("。")})
+    source_title_blocked = enforce_social_publishability(source_title)
+    assert any(
+        error.startswith("social_title_source_excerpt_forbidden:master")
+        for error in source_title_blocked.critic.errors
+    )
 
 
 def test_safe_approved_proposal_title_beats_a_legalistic_source_excerpt():
@@ -2618,10 +2645,16 @@ def test_terminal_social_gate_accepts_deep_distinct_model_editorial():
 
     candidate = {
         "_model": "publishable-test-model",
+        "master_title": "approved platform rule update",
         "blocks": [*deepcopy(required), *editorial("the master story", 2)],
         "platform_variants": [
             {
                 "platform": channel,
+                "title": (
+                    "approved platform rule update"
+                    if channel == "wechat_mp"
+                    else "published platform rule update"
+                ),
                 "blocks": [
                     *deepcopy(required),
                     *editorial(

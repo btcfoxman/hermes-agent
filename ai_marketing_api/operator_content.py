@@ -416,7 +416,7 @@ def _restates_approved_source(value: str, approved_fact_texts: Sequence[str]) ->
     )
 
 
-_LONG_FACT_SURFACES = frozenset({"master", "wechat_mp", "toutiao"})
+_LONG_FACT_SURFACES = frozenset({"wechat_mp", "toutiao"})
 
 
 def _fact_display_text(block: ContentBlock, *, surface: str = "master") -> str:
@@ -451,37 +451,36 @@ def _fact_display_text(block: ContentBlock, *, surface: str = "master") -> str:
             and re.match(r"^(?:依据|根据).{0,100}(?:规定|法律|办法|条例)$", part)
         ):
             continue
-        if (
-            segments
-            and re.match(r"^(?:并处|罚没)", part)
-            and re.search(r"(?:没收|罚款|罚没)", segments[-1])
-        ):
-            segments[-1] = f"{segments[-1]}；{part}"
-            continue
         segments.append(part)
     if len(segments) < 2:
         return text
-    if surface in _LONG_FACT_SURFACES:
-        selected = segments
-    else:
-        selected = []
-        for pattern in (
-            r"(?:作出行政处罚|受到行政处罚|行政处罚)",
-            r"(?:罚没款合计|没收违法所得|并处以罚款)",
-            r"(?:责令.{0,80}退还|全额退还)",
-        ):
-            match = next(
-                (
-                    segment
-                    for segment in segments
-                    if segment not in selected and re.search(pattern, segment)
-                ),
-                None,
-            )
-            if match:
-                selected.append(match)
-        if len(selected) < 2:
-            selected = segments[:3]
+    # Evidence remains complete in ``block.text`` for audit, but the public
+    # body must not become a pasted press release.  Prefer one event action,
+    # the aggregate outcome, the reader-relevant remedy, and (for long-form
+    # channels only) one implementation requirement.  Every retained segment
+    # is still a contiguous source excerpt; this is omission, not paraphrase.
+    preferred_patterns = (
+        r"(?:作出行政处罚|受到行政处罚|行政处罚|宣布|发布|推出|签署|达成)",
+        r"(?:罚没款合计|合计.{0,24}(?:亿元|万元|元|美元)|总计)",
+        r"(?:责令.{0,80}退还|全额退还|停止.{0,40}行为|取消.{0,40}限制)",
+        r"(?:全面整改|公开整改措施|限期整改|落实整改)",
+    )
+    selected_indexes: List[int] = []
+    for pattern in preferred_patterns:
+        match_index = next(
+            (
+                index
+                for index, segment in enumerate(segments)
+                if index not in selected_indexes and re.search(pattern, segment)
+            ),
+            None,
+        )
+        if match_index is not None:
+            selected_indexes.append(match_index)
+    limit = 4 if surface in _LONG_FACT_SURFACES else 3
+    if len(selected_indexes) < 2:
+        selected_indexes = list(range(min(limit, len(segments))))
+    selected = [segments[index] for index in sorted(selected_indexes)[:limit]]
     return f"{'；'.join(selected).rstrip('。')}。"
 
 
@@ -1728,13 +1727,29 @@ def _questions(role: OperatorRole, errors: Sequence[str]) -> List[OperatorQuesti
 _LONG_FORM_SURFACES = frozenset({"wechat_mp", "toutiao"})
 
 
-def _social_title_quality_errors(title: str, *, surface: str) -> List[str]:
+def _social_title_quality_errors(
+    title: str,
+    *,
+    surface: str,
+    source_texts: Sequence[str] = (),
+) -> List[str]:
     value = str(title or "").strip()
     errors: List[str] = []
-    if not 8 <= len(value) <= 48:
+    maximum = 40 if surface == "master" else 36
+    if not 8 <= len(value) <= maximum:
         errors.append(f"social_title_length_invalid:{surface}:{len(value)}")
     if len(_number_tokens(value)) > 2:
         errors.append(f"social_title_number_overload:{surface}")
+    compact_value = re.sub(r"[\s，,；;。！？!?：:、‘’“”\"']+", "", value)
+    if len(compact_value) > 28 and any(
+        compact_value
+        and compact_value
+        in re.sub(r"[\s，,；;。！？!?：:、‘’“”\"']+", "", source)
+        for source in source_texts
+    ):
+        errors.append(f"social_title_source_excerpt_forbidden:{surface}")
+    if _GENERIC_EDITORIAL_META_RE.search(value):
+        errors.append(f"social_title_meta_copy_forbidden:{surface}")
     if re.search(
         r"(?:中国国家市场监督管理总局.{0,20}通报|"
         r"滥用市场支配地位实施垄断行为作出行政处罚|"
@@ -1804,7 +1819,11 @@ def _social_surface_quality_errors(
             ContentBlockKind.OPINION.value,
         }
     ]
-    errors: List[str] = _social_title_quality_errors(title, surface=surface)
+    errors: List[str] = _social_title_quality_errors(
+        title,
+        surface=surface,
+        source_texts=[block.text for block in blocks if block.source_exact],
+    )
     if any(
         _value(block.origin) == ContentBlockOrigin.SERVER_TEMPLATE.value
         for block in blocks
@@ -2078,6 +2097,12 @@ def enforce_social_publishability(
         ]
         if len(set(signatures)) != len(signatures):
             errors.append("platform_editorial_variants_not_distinct")
+        titles = [
+            re.sub(r"[\s，,；;。！？!?：:、‘’“”\"']+", "", variant.title).lower()
+            for variant in output.platform_variants
+        ]
+        if len(set(titles)) != len(titles):
+            errors.append("platform_titles_not_distinct")
     errors = list(dict.fromkeys(errors))[:50]
     checks = list(_dump(output.critic).get("checks", []))
     checks.append(
@@ -2187,6 +2212,7 @@ def combine_publishable_surfaces(
     platform_order = [variant.platform for variant in ready[0].platform_variants]
     selected_variants: List[PlatformVariant] = []
     used_signatures: set[tuple[str, ...]] = set()
+    used_titles: set[str] = set()
     for platform in platform_order:
         options = [
             variant
@@ -2204,6 +2230,12 @@ def combine_publishable_surfaces(
                 variant
                 for variant in options
                 if _editorial_signature(variant.blocks) not in used_signatures
+                and re.sub(
+                    r"[\s，,；;。！？!?：:、‘’“”\"']+",
+                    "",
+                    variant.title,
+                ).lower()
+                not in used_titles
             ),
             None,
         )
@@ -2211,6 +2243,13 @@ def combine_publishable_surfaces(
             return None
         selected_variants.append(selected)
         used_signatures.add(_editorial_signature(selected.blocks))
+        used_titles.add(
+            re.sub(
+                r"[\s，,；;。！？!?：:、‘’“”\"']+",
+                "",
+                selected.title,
+            ).lower()
+        )
 
     warnings = list(
         dict.fromkeys(
@@ -2305,6 +2344,20 @@ def missing_publishable_surfaces(
                 surface=platform,
                 title=variant.title,
             )
+            and sum(
+                re.sub(
+                    r"[\s，,；;。！？!?：:、‘’“”\"']+",
+                    "",
+                    candidate.title,
+                ).lower()
+                == re.sub(
+                    r"[\s，,；;。！？!?：:、‘’“”\"']+",
+                    "",
+                    variant.title,
+                ).lower()
+                for candidate in output.platform_variants
+            )
+            == 1
             for output in ready
             for variant in output.platform_variants
         ):
