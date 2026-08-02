@@ -596,8 +596,8 @@ def test_compose_uses_commercial_human_review_policy_only_after_model_attempt(
     monkeypatch,
 ):
     capability = (
-        "本系统不会把模型生成结果直接发布；负责人可以查看证据、修改方向、"
-        "退回内容并完成人工终审。"
+        "本测试系统不会把模型生成结果直接发布；负责人可以查看证据、修改方向、"
+        "退回内容并完成终审，批准、驳回和恢复动作都会记录到同一条工作流中。"
     )
     channels = ["wechat_moments", "wechat_mp", "douyin"]
     payload = {

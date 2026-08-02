@@ -2594,7 +2594,10 @@ def _curated_human_review_surface_candidate(
         for value in public_points
         if str(value or "").strip()
     )
-    if "人工终审" not in public_text or not any(
+    has_human_final_review = "终审" in public_text and any(
+        term in public_text for term in ("人工", "负责人")
+    )
+    if not has_human_final_review or not any(
         term in public_text for term in ("自动发布", "模型生成", "退回", "证据")
     ):
         return None
@@ -2610,7 +2613,7 @@ def _curated_human_review_surface_candidate(
 
     commercial_copy: Dict[str, tuple[str, List[str]]] = {
         "master": (
-            "AI内容流程如何保留人工终审",
+            "模型生成结果如何保留负责人终审",
             [
                 "一套内容流程是否可用，关键看它能不能在判断出错时及时停下来。",
                 "速度只能说明生产效率；控制权留在负责人手里，团队才有机会在内容对外前纠偏，并在事后还原每次决定。",
@@ -2621,7 +2624,7 @@ def _curated_human_review_surface_candidate(
             ["AI 可以把草稿写得很快，但内容是否对外仍是需要有人负责的决定。"],
         ),
         "wechat_mp": (
-            "从模型生成到人工终审，控制权如何保留",
+            "从模型生成到负责人终审，控制权如何保留",
             [
                 "自动化可以缩短生产时间，但不能替负责人做最后的对外判断。",
                 "把生成和对外确认拆开，团队就能在最后一步重新检查风险，也让每次修改都有清楚的责任边界。",
@@ -2636,7 +2639,7 @@ def _curated_human_review_surface_candidate(
             ["模型出稿只是开始。真正要上线时，必须有人能踩刹车。"],
         ),
         "kuaishou": (
-            "AI内容流程要留住人工终审",
+            "AI内容流程要保留退回内容入口",
             ["内容跑得再快，也要给负责人留下判断和纠偏的位置。"],
         ),
         "xiaohongshu": (
@@ -2644,14 +2647,14 @@ def _curated_human_review_surface_candidate(
             ["能退回修改的 AI 内容流程更值得信任：它承认自动化会出错，也给负责人留下纠偏入口。"],
         ),
         "toutiao": (
-            "AI内容工作流如何保留证据与人工终审",
+            "AI工作流如何保留查看证据与退回内容",
             [
                 "AI 内容工作流的价值，也在每个决定是否能被解释。",
                 "当终审、退回和恢复都有清楚的责任人，自动化才不会把对外风险藏在效率指标后面。",
             ],
         ),
         "weitoutiao": (
-            "人工终审才是最后一道门",
+            "完成终审才是最后一道门",
             ["生成不等于完成。最后一道门仍要有人核对、有人负责。"],
         ),
     }

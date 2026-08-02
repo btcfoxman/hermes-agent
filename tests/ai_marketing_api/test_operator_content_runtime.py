@@ -318,8 +318,9 @@ def test_curated_funds_remedy_repairs_are_publishable_on_every_social_surface():
                     "company_public",
                     "capability",
                     content=(
-                        "本系统不会把模型生成结果直接发布；负责人可以查看证据、"
-                        "修改方向、退回内容并完成人工终审。"
+                        "本测试系统不会把模型生成结果直接发布；负责人可以查看证据、"
+                        "修改方向、退回内容并完成终审，批准、驳回和恢复动作都会记录"
+                        "到同一条工作流中。"
                     ),
                 ),
                 _context(
@@ -336,8 +337,9 @@ def test_curated_funds_remedy_repairs_are_publishable_on_every_social_surface():
             ],
             [
                 _claim(
-                    "本系统不会把模型生成结果直接发布；负责人可以查看证据、"
-                    "修改方向、退回内容并完成人工终审。",
+                    "本测试系统不会把模型生成结果直接发布；负责人可以查看证据、"
+                    "修改方向、退回内容并完成终审，批准、驳回和恢复动作都会记录"
+                    "到同一条工作流中。",
                     "fact",
                     ["cap-human-review"],
                 ),
