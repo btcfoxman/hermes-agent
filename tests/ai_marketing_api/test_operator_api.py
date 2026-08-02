@@ -303,7 +303,7 @@ def test_compose_endpoint_blocks_fallback_for_each_role_profile(role, monkeypatc
     assert data["blocks"] == []
 
 
-def test_compose_retries_shallow_model_copy_once(monkeypatch):
+def test_compose_repairs_each_shallow_surface_with_a_focused_request(monkeypatch):
     payload = _compose_payload()
     payload["channels"] = ["wechat_mp", "xiaohongshu"]
     calls: list[dict] = []
@@ -348,11 +348,17 @@ def test_compose_retries_shallow_model_copy_once(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["status"] == "content_ready"
-    assert len(calls) == 2
+    assert len(calls) == 4
     assert "quality_retry" not in calls[0]
     assert calls[1]["quality_retry"]["critic_errors"]
     assert calls[1]["quality_retry"]["failed_surfaces"]
-    assert calls[1]["quality_retry"]["requested_surfaces"] == calls[1]["quality_retry"]["failed_surfaces"]
+    assert calls[1]["quality_retry"]["requested_surfaces"] == ["master"]
+    assert calls[1]["quality_retry"]["focus_surface"] == "master"
+    assert calls[1]["channels"] == []
+    assert calls[2]["quality_retry"]["requested_surfaces"] == ["wechat_mp"]
+    assert calls[2]["channels"] == ["wechat_mp"]
+    assert calls[3]["quality_retry"]["requested_surfaces"] == ["xiaohongshu"]
+    assert calls[3]["channels"] == ["xiaohongshu"]
     assert calls[1]["quality_retry"]["requested_channels"] == calls[1]["channels"]
     assert "master" in calls[1]["quality_retry"]["surface_contracts"]
     assert calls[1]["quality_retry"]["surface_contracts"]["master"][
@@ -364,10 +370,11 @@ def test_compose_retries_shallow_model_copy_once(monkeypatch):
         for item in calls[1]["quality_retry"]["required_shape"]
     )
     assert "Do not describe the review process" in calls[1]["quality_retry"]["instruction"]
-    assert "master is a required surface" in calls[1]["quality_retry"]["instruction"]
+    assert "focus_surface is master" in calls[1]["quality_retry"]["instruction"]
     assert "server-template block_ref" in calls[1]["quality_retry"]["instruction"]
     assert "put no Arabic number or Chinese counted quantity" in calls[1]["quality_retry"]["instruction"]
     assert "真正改变的是" in calls[1]["quality_retry"]["instruction"]
+    assert calls[1]["quality_retry"]["positive_pattern"]["hook"]
     assert "evidence_ids to []" in calls[1]["quality_retry"]["block_binding_rule"]
     assert any(
         diagnostic.endswith(":evidence_forbidden")
@@ -465,14 +472,11 @@ def test_compose_targeted_retries_only_request_the_remaining_surface(monkeypatch
                     if variant["platform"] == platform
                 )["blocks"] = required
         elif len(calls) == 2:
-            assert model_payload["channels"] == ["wechat_mp", "wechat_channels"]
-            next(
-                variant
-                for variant in candidate["platform_variants"]
-                if variant["platform"] == "wechat_channels"
-            )["blocks"] = required
+            assert model_payload["channels"] == ["wechat_mp"]
+            assert model_payload["quality_retry"]["focus_surface"] == "wechat_mp"
         else:
             assert model_payload["channels"] == ["wechat_channels"]
+            assert model_payload["quality_retry"]["focus_surface"] == "wechat_channels"
         return candidate
 
     monkeypatch.setattr(marketing_api, "_llm_json", fake_llm)

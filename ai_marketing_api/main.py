@@ -737,10 +737,14 @@ async def _run_compose(
         candidate.get("_model") or candidate.get("model") or "fallback"
     ).strip().lower()
     # A multi-platform response often has five good surfaces and one bad
-    # short-feed variant. Give the model five bounded, low-temperature repair attempts while
-    # whole-surface aggregation keeps every independently valid draft. This is
-    # still fail-closed: no partial or template surface leaves this endpoint.
-    for retry_number in range(1, 6):
+    # short-feed variant. Repair one surface at a time so a small model can
+    # concentrate on a real hook and mechanism instead of reproducing the
+    # whole eight-channel JSON contract on every retry. Whole-surface
+    # aggregation keeps every independently valid draft. The repair budget is
+    # capped globally and per surface, and remains fail closed: no partial or
+    # template surface leaves this endpoint.
+    surface_attempts: Dict[str, int] = {}
+    for retry_number in range(1, 19):
         if (
             output.status != ContentStatus.QUALITY_INSUFFICIENT.value
             or candidate_model == "fallback"
@@ -751,19 +755,28 @@ async def _run_compose(
             normalized_attempts,
             compose_payload.get("channels", []),
         )
-        failed_channels = [
-            channel
-            for channel in compose_payload.get("channels", [])
-            if channel in failed_surfaces
+        if not failed_surfaces:
+            break
+        eligible_surfaces = [
+            surface
+            for surface in failed_surfaces
+            if surface_attempts.get(surface, 0) < 3
         ]
-        # Once the first response has established safe copy for most
-        # surfaces, asking a small model to rewrite all eight channels again
-        # wastes its attention and frequently regresses the two variants that
-        # still need repair.  The normalizer continues to validate against the
-        # original request, and ``combine_publishable_surfaces`` only retains
-        # whole independently passing surfaces, so narrowing the model's
-        # requested output cannot bypass completeness or safety gates.
-        retry_channels = failed_channels or list(compose_payload.get("channels", []))
+        if not eligible_surfaces:
+            break
+        # Rotate across remaining failures before giving any one surface a
+        # second attempt. This prevents a stubborn master draft from starving
+        # otherwise repairable platform variants.
+        retry_surface = min(
+            eligible_surfaces,
+            key=lambda surface: (
+                surface_attempts.get(surface, 0),
+                eligible_surfaces.index(surface),
+            ),
+        )
+        surface_attempts[retry_surface] = surface_attempts.get(retry_surface, 0) + 1
+        requested_surfaces = [retry_surface]
+        retry_channels = [] if retry_surface == "master" else [retry_surface]
         retry_platform_briefs = compose_payload.get("platform_editorial_briefs")
         if isinstance(retry_platform_briefs, dict):
             retry_platform_briefs = {
@@ -778,7 +791,7 @@ async def _run_compose(
                 "suggested_formats": list(retry_channels),
             }
         surface_contracts: Dict[str, Any] = {}
-        for surface in failed_surfaces:
+        for surface in requested_surfaces:
             is_long = surface == "master" or surface in {"wechat_mp", "toutiao"}
             surface_contracts[surface] = {
                 "authored_blocks_required": 2 if is_long else 1,
@@ -795,8 +808,8 @@ async def _run_compose(
                     ]
                 ),
                 "positive_writing_recipe": [
-                    "Open with the approved actor and one concrete approved action, amount, remedy, or rule.",
-                    "Name the directly affected party and explain one operating mechanism: cash occupation, settlement, contract boundary, workflow, cost, bargaining position, or available choice.",
+                    "Open from the directly affected party's concrete constraint, choice, cost, or bargaining position; the canonical evidence block will report the event and numbers.",
+                    "Explain one operating mechanism: cash occupation, settlement, contract boundary, workflow, cost, bargaining position, or available choice.",
                     "Use short declarative sentences in the source language. Mark uncertain future effects with may, depends on, or an equivalent cautious phrase.",
                     "End on one observable operating consequence, not on the importance of the story or a list of things to watch.",
                     "Do not restate the source paragraph in an authored block; the canonical evidence block already renders the approved facts.",
@@ -836,6 +849,33 @@ async def _run_compose(
                 )
             return blocks
 
+        def prior_rejected_text(surface: str) -> List[str]:
+            """Return only public model prose from the immediately failed surface."""
+
+            raw_blocks: Any = candidate.get("blocks")
+            if surface != "master":
+                variants = candidate.get("platform_variants")
+                raw_blocks = None
+                if isinstance(variants, list):
+                    raw_blocks = next(
+                        (
+                            item.get("blocks")
+                            for item in variants
+                            if isinstance(item, dict)
+                            and str(item.get("platform") or "") == surface
+                        ),
+                        None,
+                    )
+            if not isinstance(raw_blocks, list):
+                return []
+            return [
+                str(item.get("text") or "").strip()[:320]
+                for item in raw_blocks
+                if isinstance(item, dict)
+                and not item.get("block_ref")
+                and str(item.get("text") or "").strip()
+            ][:6]
+
         repair_response_contract = {
             "return_only_these_top_level_keys": [
                 "master_title",
@@ -844,13 +884,13 @@ async def _run_compose(
             ],
             "master_title": (
                 "required distinct string"
-                if "master" in failed_surfaces
-                else "may reuse the validated reference title"
+                if retry_surface == "master"
+                else "omit this key; the server retains the validated master title"
             ),
             "blocks": (
                 repair_blocks("master")
-                if "master" in failed_surfaces
-                else "may reuse the validated master blocks or omit authored repair"
+                if retry_surface == "master"
+                else "omit this key; the server retains the validated master blocks"
             ),
             "exact_platform_variant_count": len(retry_channels),
             "platform_variants": [
@@ -875,17 +915,24 @@ async def _run_compose(
             "quality_retry": {
                 "attempt": retry_number,
                 "failed_surfaces": failed_surfaces,
-                "requested_surfaces": list(failed_surfaces),
+                "requested_surfaces": requested_surfaces,
                 "requested_channels": list(retry_channels),
+                "focus_surface": retry_surface,
+                "surface_attempt": surface_attempts[retry_surface],
+                "previous_rejected_authored_text": prior_rejected_text(retry_surface),
                 "validated_reference_copy": validated_reference_copy,
                 "instruction": (
-                    "Return a compact repair for every failed surface named below; "
-                    "master is a required surface even though it is not a channel. The "
+                    "Return a compact repair only for focus_surface. If focus_surface is "
+                    "master, repair the top-level blocks; otherwise return exactly one "
+                    "platform_variants item for that channel and omit top-level blocks. The "
                     "previous normalized draft still failed the social-copy gate. First "
-                    "choose one concrete "
-                    "reader-facing thesis from the approved facts and state it as "
-                    "a direct subject-action-consequence declaration, then return "
-                    "original, event-specific editorial blocks for each requested surface. "
+                    "choose one concrete reader-facing thesis from the approved facts. Do "
+                    "not write another news lead: let the canonical evidence block report "
+                    "the event, action, and amount. Start the authored hook from the affected "
+                    "party's operating constraint, choice, cost, cash flow, contract term, or "
+                    "bargaining position, then explain why the approved remedy changes that "
+                    "mechanism. Use a direct subject-consequence declaration and return "
+                    "original, event-specific editorial blocks for the requested surface. "
                     "Do not describe the review process, label facts/opinions, "
                     "repeat a generic 'worth watching', 'not ... but', or "
                     "'not only ... but also' "
@@ -896,22 +943,41 @@ async def _run_compose(
                     "such as 已经, 宣布, 发布, 推出, 发生, 据悉, or 消息称 in an "
                     "authored block; the canonical evidence block owns those facts. "
                     "During repair, put no Arabic number or Chinese counted quantity "
-                    "in authored blocks; approved numbers remain visible in the title "
-                    "and canonical evidence. Do not mix untranslated English into "
+                    "in authored blocks; approved numbers remain visible in the canonical "
+                    "evidence. Do not mix untranslated English into "
                     "Chinese prose, or end "
                     "with an automatic observation list. Do not invent loaded labels "
                     "such as grey fees, black-box practices, rip-offs, or scandals. "
                     "Never select a server-template block_ref; the registry contains "
-                    "approved evidence refs only. Write only the failed surfaces listed "
-                    "in this repair request; "
+                    "approved evidence refs only. Do not reuse any phrase in "
+                    "previous_rejected_authored_text. Write only focus_surface in this "
+                    "repair request; "
                     "other valid surfaces are retained independently by the server. "
                     "When validated_reference_copy is present, preserve its concrete "
                     "thesis and mechanism while changing the wording and rhythm for "
                     "the requested platform; never copy it verbatim or repeat the source."
                 ),
                 "surface_contracts": surface_contracts,
+                "positive_pattern": {
+                    "do_not_copy_literal_placeholders": True,
+                    "hook": (
+                        "[directly affected party] + [specific operating constraint or choice] "
+                        "+ [clear consequence of the approved remedy]"
+                    ),
+                    "analysis": (
+                        "[name one cash-flow, settlement, contract, workflow, cost, incentive, "
+                        "or bargaining mechanism] + [explain how the approved rule/remedy "
+                        "changes that mechanism] + [firm useful judgment]"
+                    ),
+                    "bad_shapes": [
+                        "retelling who announced what and how much",
+                        "saying the important point is not X but Y",
+                        "calling the event worth watching without explaining a mechanism",
+                        "ending with a generic list of future observations",
+                    ],
+                },
                 "required_shape": [
-                    "one platform-native authored hook anchored to a concrete actor, amount, rule, constraint, or consequence from approved claims",
+                    "one platform-native authored hook anchored to an affected party, rule, constraint, choice, cost, or consequence from approved claims; leave event reporting and numbers to the canonical block",
                     "for master: at least one distinct authored analytical block after the hook that explains mechanism or reader impact without inventing facts",
                     "for wechat_mp and toutiao: at least one authored analytical block after the hook",
                     "for every shorter platform: one authored block may combine the hook and one concrete implication; do not pad it with a generic second paragraph",
@@ -945,7 +1011,9 @@ async def _run_compose(
             openai_api_key,
             model_name,
             timeout_seconds,
-            temperature=0.1,
+            # Keep repair output steady while allowing a rejected stock phrase
+            # to escape the exact same low-temperature completion.
+            temperature=0.3,
         )
         normalized = normalize_content_output(
             OPERATOR_REGISTRY,
