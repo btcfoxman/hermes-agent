@@ -13,8 +13,10 @@ from ai_marketing_api.operator_content import (
     OperatorComposeRequest,
     build_content_fallback,
     content_request_payload,
+    curated_industry_surface_candidate,
     disclosable_contexts,
     enforce_social_publishability,
+    missing_publishable_surfaces,
     normalize_content_output,
 )
 from ai_marketing_api.operator_runtime import (
@@ -216,6 +218,86 @@ def test_industry_compose_replaces_internal_review_angle_with_reader_facing_thes
     assert "经营资金不应继续被平台内部规则强制占用" in guard[
         "positive_thesis_seed"
     ][0]
+
+
+def test_curated_funds_remedy_repairs_are_publishable_on_every_social_surface():
+    fact = (
+        "监管部门要求平台全额退还强制扣除酒店经营者的订单储备金，"
+        "并要求企业全面整改及公开整改措施。"
+    )
+    channels = [
+        "wechat_moments",
+        "wechat_mp",
+        "wechat_channels",
+        "douyin",
+        "kuaishou",
+        "xiaohongshu",
+        "toutiao",
+        "weitoutiao",
+    ]
+    context = _context(
+        "source-funds-remedy",
+        "industry",
+        "industry",
+        "source_item",
+        content=fact,
+        source_tier="official",
+    )
+    request = _request(
+        [context],
+        [_claim(fact, "fact", [context.record_id])],
+        channels=channels,
+    )
+    registry = OperatorRegistry()
+    authorized = registry.authorize(
+        OperatorRole.INDUSTRY,
+        request.authorized_context,
+        request.as_of,
+    )
+    fallback = build_content_fallback(
+        registry,
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+    compose_payload = content_request_payload(
+        OperatorRole.INDUSTRY,
+        request,
+        authorized,
+    )
+
+    for surface in ["master", *channels]:
+        candidate = curated_industry_surface_candidate(compose_payload, surface)
+        assert candidate is not None
+        normalized = normalize_content_output(
+            registry,
+            OperatorRole.INDUSTRY,
+            request,
+            authorized,
+            fallback,
+            candidate,
+        )
+        missing = missing_publishable_surfaces(
+            [normalized],
+            [] if surface == "master" else [surface],
+        )
+        assert surface not in missing, normalized.critic.warnings
+        candidate_text = "\n".join(
+            str(block.get("text") or "")
+            for block in [
+                *(candidate.get("blocks") or []),
+                *(
+                    block
+                    for variant in candidate.get("platform_variants") or []
+                    for block in variant.get("blocks") or []
+                ),
+            ]
+            if isinstance(block, dict) and not block.get("block_ref")
+        )
+        assert "先把" not in candidate_text
+        assert "不是" not in candidate_text
+        assert "值得关注" not in candidate_text
+        assert not any(char.isdigit() for char in candidate_text)
 
 
 def _candidate_from_required_refs(

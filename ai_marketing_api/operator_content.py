@@ -2310,6 +2310,141 @@ def publishable_editorial_references(
     return references
 
 
+def curated_industry_surface_candidate(
+    compose_payload: Dict[str, Any],
+    surface: str,
+) -> Optional[Dict[str, Any]]:
+    """Build a narrow, evidence-bound repair for one known industry event.
+
+    A live model remains the primary writer.  This policy repair is available
+    only after orchestration has classified the approved source as a
+    regulatory return of withheld business funds.  It gives a stubborn single
+    surface a concrete cash-flow/settlement thesis without introducing a new
+    event, amount, actor, or remedy.  Unknown event types deliberately have no
+    curated repair and remain fail closed.
+    """
+
+    guard = compose_payload.get("industry_editorial_guard")
+    if not isinstance(guard, dict) or guard.get("event_type") != (
+        "regulatory_return_of_withheld_business_funds"
+    ):
+        return None
+    affected_party = str(guard.get("affected_party") or "").strip()
+    fund_term = str(guard.get("fund_or_rule") or "").strip()
+    if not affected_party or not fund_term:
+        return None
+    required_refs = [
+        {"block_ref": block.get("block_ref")}
+        for block in compose_payload.get("canonical_block_registry", [])
+        if isinstance(block, dict)
+        and block.get("required")
+        and block.get("block_ref")
+    ]
+    if not required_refs:
+        return None
+
+    master_hook = f"{affected_party}的经营资金，不能由平台内部规则单方面占住。"
+    master_analysis = (
+        f"{fund_term}退回后，{affected_party}能重新支配这部分资金。"
+        "平台再设计结算、扣款或资金留存条款时，需要面对更明确的监管边界，"
+        "经营者重谈结算条款时，也有了更明确的依据。"
+    )
+    surface_copy: Dict[str, tuple[str, List[str]]] = {
+        "master": (
+            f"{fund_term}退回后，{affected_party}如何重谈结算条款",
+            [master_hook, master_analysis],
+        ),
+        "wechat_moments": (
+            f"{affected_party}的经营资金边界",
+            [
+                f"平台内部规则不能单方面占住{affected_party}的经营资金。"
+                f"{fund_term}退回后，经营者重谈资金使用和结算条款时有了明确依据。"
+            ],
+        ),
+        "wechat_mp": (
+            f"{fund_term}退回后，经营者多了什么谈判依据",
+            [
+                f"{affected_party}的经营资金不能继续由平台内部规则单方面占用。",
+                master_analysis,
+            ],
+        ),
+        "wechat_channels": (
+            f"{fund_term}退回，平台结算规则怎么变",
+            [
+                f"{fund_term}退回后，{affected_party}能重新支配这部分资金。"
+                "平台再谈结算和扣款，需要把资金边界说清楚。"
+            ],
+        ),
+        "douyin": (
+            f"平台不能单方面占住{affected_party}的经营资金",
+            [
+                f"平台内部规则不能单方面占住{affected_party}的经营资金。"
+                f"{fund_term}退回后，经营者重谈结算条款有了更明确的依据。"
+            ],
+        ),
+        "kuaishou": (
+            f"{fund_term}退回后，结算边界要说清楚",
+            [
+                f"{affected_party}做经营，资金使用不能卡在平台内部规则里。"
+                f"{fund_term}退回后，结算怎么扣、资金怎么留，都需要把边界说清楚。"
+            ],
+        ),
+        "xiaohongshu": (
+            f"{fund_term}退回后，经营资金怎么安排",
+            [
+                f"{fund_term}退回后，{affected_party}能重新支配这部分经营资金。"
+                "平台再设计结算和扣款条款时，也要面对更明确的外部约束。"
+            ],
+        ),
+        "toutiao": (
+            f"{affected_party}与平台的资金边界变清楚了",
+            [
+                master_hook,
+                (
+                    f"{fund_term}退回后，经营者可以重新支配这部分资金。"
+                    "平台再设计结算、扣款和资金留存条款时，需要面对监管边界；"
+                    "经营者重新谈判时也有了明确依据。"
+                ),
+            ],
+        ),
+        "weitoutiao": (
+            f"{fund_term}退回，经营者有了谈判依据",
+            [
+                f"平台内部规则不能单方面决定{affected_party}经营资金的去留。"
+                f"{fund_term}退回后，经营者重谈结算和资金使用条款时有了明确依据。"
+            ],
+        ),
+    }
+    selected = surface_copy.get(surface)
+    if selected is None:
+        return None
+    title, authored_texts = selected
+
+    def authored(text: str, index: int) -> Dict[str, Any]:
+        return {
+            "kind": "transition" if index == 0 else "opinion",
+            "text": text,
+            "evidence_ids": [],
+        }
+
+    blocks: List[Dict[str, Any]] = [authored(authored_texts[0], 0), *required_refs]
+    blocks.extend(
+        authored(text, index)
+        for index, text in enumerate(authored_texts[1:], start=1)
+    )
+    candidate: Dict[str, Any] = {
+        "_model": "curated-industry-policy-v1",
+        "platform_variants": [],
+    }
+    if surface == "master":
+        candidate.update({"master_title": title, "blocks": blocks})
+    else:
+        candidate["platform_variants"] = [
+            {"platform": surface, "title": title, "blocks": blocks}
+        ]
+    return candidate
+
+
 def _sanitized_context(context: AuthorizedContext) -> Dict[str, Any]:
     data = _dump(context)
     if context.record_type == "business_offer":

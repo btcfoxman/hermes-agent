@@ -21,6 +21,7 @@ from ai_marketing_api.operator_content import (
     build_content_fallback,
     combine_publishable_surfaces,
     content_request_payload,
+    curated_industry_surface_candidate,
     enforce_social_publishability,
     missing_publishable_surfaces,
     normalize_content_output,
@@ -759,18 +760,38 @@ async def _run_compose(
                 )
         if not isinstance(raw_blocks, list):
             return []
-        return [
-            str(item.get("text") or "").strip()[:320]
-            for item in raw_blocks
-            if isinstance(item, dict)
-            and not item.get("block_ref")
-            and str(item.get("text") or "").strip()
-        ][:6]
+        authored: List[str] = []
+        for raw_item in raw_blocks:
+            if not isinstance(raw_item, dict) or raw_item.get("block_ref"):
+                continue
+            item = raw_item.get("one_of")
+            if not isinstance(item, dict):
+                item = raw_item
+            value = str(
+                item.get("text")
+                or item.get("content")
+                or item.get("body")
+                or item.get("value")
+                or ""
+            ).strip()
+            if value:
+                authored.append(value[:320])
+        return authored[:6]
 
     rejected_text_by_surface = {
         surface: candidate_authored_text(candidate, surface)
         for surface in ["master", *compose_payload.get("channels", [])]
     }
+    live_model_attempted = (
+        candidate_model != "fallback" and not candidate.get("_error")
+    )
+
+    def remember_rejected_text(surface: str, values: List[str]) -> None:
+        remembered = rejected_text_by_surface.setdefault(surface, [])
+        for value in values:
+            if value and value not in remembered:
+                remembered.append(value)
+        del remembered[12:]
     # A multi-platform response often has five good surfaces and one bad
     # short-feed variant. Repair one surface at a time so a small model can
     # concentrate on a real hook and mechanism instead of reproducing the
@@ -1066,8 +1087,7 @@ async def _run_compose(
             temperature=0.3,
         )
         latest_rejected_text = candidate_authored_text(candidate, retry_surface)
-        if latest_rejected_text:
-            rejected_text_by_surface[retry_surface] = latest_rejected_text
+        remember_rejected_text(retry_surface, latest_rejected_text)
         normalized = normalize_content_output(
             OPERATOR_REGISTRY,
             role_id,
@@ -1082,6 +1102,68 @@ async def _run_compose(
         candidate_model = str(
             candidate.get("_model") or candidate.get("model") or "fallback"
         ).strip().lower()
+
+    curated_surfaces: List[str] = []
+    remaining_surfaces = missing_publishable_surfaces(
+        normalized_attempts,
+        compose_payload.get("channels", []),
+    )
+    if live_model_attempted and role_id is OperatorRole.INDUSTRY:
+        for surface in remaining_surfaces:
+            curated_candidate = curated_industry_surface_candidate(
+                compose_payload,
+                surface,
+            )
+            if curated_candidate is None:
+                continue
+            curated_normalized = normalize_content_output(
+                OPERATOR_REGISTRY,
+                role_id,
+                payload,
+                contexts,
+                fallback,
+                curated_candidate,
+            )
+            curated_missing = missing_publishable_surfaces(
+                [curated_normalized],
+                [] if surface == "master" else [surface],
+            )
+            if surface in curated_missing:
+                continue
+            normalized_attempts.append(curated_normalized)
+            curated_surfaces.append(surface)
+
+    if curated_surfaces:
+        combined = combine_publishable_surfaces(normalized_attempts)
+        if combined is not None:
+            data = combined.model_dump()
+            warning = (
+                "curated_industry_policy_repair:"
+                + ",".join(curated_surfaces)
+            )
+            warnings = list(dict.fromkeys([warning, *data["critic"]["warnings"]]))[:50]
+            data["critic"] = {
+                **data["critic"],
+                "warnings": warnings,
+                "checks": [
+                    *data["critic"]["checks"],
+                    {
+                        "code": "curated_industry_policy_repair",
+                        "passed": True,
+                        "message": (
+                            "A known evidence-bound industry event policy repaired only "
+                            "the surfaces still rejected after live-model retries."
+                        ),
+                    },
+                ],
+            }
+            data["risk_flags"] = [
+                {"code": "curated_industry_policy_repair", "message": warning, "blocking": False},
+                *data["risk_flags"],
+            ][:50]
+            output = enforce_social_publishability(
+                OperatorContentOutput(**data)
+            )
     return output
 
 
