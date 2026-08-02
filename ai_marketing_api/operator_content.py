@@ -2088,6 +2088,44 @@ def combine_publishable_surfaces(
     return OperatorContentOutput(**data)
 
 
+def missing_publishable_surfaces(
+    outputs: Sequence[OperatorContentOutput],
+    platforms: Sequence[str],
+) -> List[str]:
+    """Return only surfaces that no prior normalized attempt has repaired.
+
+    Targeted retries intentionally omit already-good channels. Their
+    deterministic placeholders must not make a later retry forget the valid
+    whole surfaces retained from earlier attempts.
+    """
+
+    ready = [
+        output
+        for output in outputs
+        if _value(output.status) == ContentStatus.CONTENT_READY.value
+        and not output.critic.errors
+    ]
+    missing: List[str] = []
+    if not any(
+        output.master_content
+        and not _social_surface_quality_errors(output.blocks, surface="master")
+        for output in ready
+    ):
+        missing.append("master")
+    for platform in dict.fromkeys(str(item) for item in platforms):
+        if not any(
+            variant.platform == platform
+            and not _social_surface_quality_errors(
+                variant.blocks,
+                surface=platform,
+            )
+            for output in ready
+            for variant in output.platform_variants
+        ):
+            missing.append(platform)
+    return missing
+
+
 def _sanitized_context(context: AuthorizedContext) -> Dict[str, Any]:
     data = _dump(context)
     if context.record_type == "business_offer":

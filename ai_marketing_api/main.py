@@ -22,6 +22,7 @@ from ai_marketing_api.operator_content import (
     combine_publishable_surfaces,
     content_request_payload,
     enforce_social_publishability,
+    missing_publishable_surfaces,
     normalize_content_output,
 )
 from ai_marketing_api.operator_runtime import (
@@ -743,33 +744,60 @@ async def _run_compose(
             or candidate.get("_error")
         ):
             break
+        failed_surfaces = missing_publishable_surfaces(
+            normalized_attempts,
+            compose_payload.get("channels", []),
+        )
+        failed_channels = [
+            channel
+            for channel in compose_payload.get("channels", [])
+            if channel in failed_surfaces
+        ]
+        # Once the first response has established safe copy for most
+        # surfaces, asking a small model to rewrite all eight channels again
+        # wastes its attention and frequently regresses the two variants that
+        # still need repair.  The normalizer continues to validate against the
+        # original request, and ``combine_publishable_surfaces`` only retains
+        # whole independently passing surfaces, so narrowing the model's
+        # requested output cannot bypass completeness or safety gates.
+        retry_channels = failed_channels or list(compose_payload.get("channels", []))
+        retry_platform_briefs = compose_payload.get("platform_editorial_briefs")
+        if isinstance(retry_platform_briefs, dict):
+            retry_platform_briefs = {
+                channel: brief
+                for channel, brief in retry_platform_briefs.items()
+                if channel in retry_channels
+            }
+        approved_proposal = compose_payload.get("approved_proposal")
+        if isinstance(approved_proposal, dict):
+            approved_proposal = {
+                **approved_proposal,
+                "suggested_formats": list(retry_channels),
+            }
         retry_payload = {
             **compose_payload,
+            "channels": list(retry_channels),
+            "approved_proposal": approved_proposal,
+            "platform_editorial_briefs": retry_platform_briefs,
             "quality_retry": {
                 "attempt": retry_number,
-                "failed_surfaces": sorted(
-                    {
-                        error.split(":", 2)[1]
-                        for error in output.critic.errors
-                        if error.startswith("social_editorial_")
-                        and len(error.split(":", 2)) > 1
-                    }
-                ),
+                "failed_surfaces": failed_surfaces,
+                "requested_channels": list(retry_channels),
                 "instruction": (
-                    "Rewrite this attempt from scratch. The previous draft was safe "
-                    "but not publishable social copy. First choose one concrete "
+                    "Return a compact repair for the requested channels only. The "
+                    "previous draft was safe but not publishable social copy. First "
+                    "choose one concrete "
                     "reader-facing thesis from the approved facts and state it as "
                     "a direct subject-action-consequence declaration, then return "
-                    "original, event-specific editorial blocks for every surface. "
+                    "original, event-specific editorial blocks for each requested surface. "
                     "Do not describe the review process, label facts/opinions, "
                     "repeat a generic 'worth watching', 'not ... but', or "
                     "'not only ... but also' "
                     "wrapper, mix untranslated English into Chinese prose, or end "
                     "with an automatic observation list. Do not invent loaded labels "
                     "such as grey fees, black-box practices, rip-offs, or scandals. "
-                    "Concentrate on the failed "
-                    "surfaces listed in this repair request; other valid surfaces "
-                    "will be retained independently by the server."
+                    "Write only the failed surfaces listed in this repair request; "
+                    "other valid surfaces are retained independently by the server."
                 ),
                 "required_shape": [
                     "one platform-native authored hook anchored to a concrete actor, amount, rule, constraint, or consequence from approved claims",

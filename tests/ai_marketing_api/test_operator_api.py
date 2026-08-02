@@ -352,6 +352,7 @@ def test_compose_retries_shallow_model_copy_once(monkeypatch):
     assert "quality_retry" not in calls[0]
     assert calls[1]["quality_retry"]["critic_errors"]
     assert calls[1]["quality_retry"]["failed_surfaces"]
+    assert calls[1]["quality_retry"]["requested_channels"] == calls[1]["channels"]
     assert calls[1]["quality_retry"]["required_shape"]
     assert any(
         "analytical block" in item
@@ -387,15 +388,14 @@ def test_compose_keeps_good_surfaces_while_retry_fills_other_platforms(monkeypat
                 if variant["platform"] == "xiaohongshu"
             )["blocks"] = required
         else:
-            # The retry repairs Xiaohongshu but regresses surfaces that were
-            # already good. Whole-surface aggregation must retain the earlier
-            # copy instead of making the second response all-or-nothing.
-            candidate["blocks"] = required
-            next(
-                variant
-                for variant in candidate["platform_variants"]
-                if variant["platform"] == "wechat_mp"
-            )["blocks"] = required
+            # The retry is deliberately narrowed to Xiaohongshu. The
+            # normalizer will restore deterministic placeholders for omitted
+            # channels, and whole-surface aggregation must retain the earlier
+            # passing WeChat article without asking the model to rewrite it.
+            assert model_payload["channels"] == ["xiaohongshu"]
+            assert model_payload["quality_retry"]["requested_channels"] == [
+                "xiaohongshu"
+            ]
         return candidate
 
     monkeypatch.setattr(marketing_api, "_llm_json", fake_llm)
@@ -419,6 +419,50 @@ def test_compose_keeps_good_surfaces_while_retry_fills_other_platforms(monkeypat
         for check in data["critic"]["checks"]
         if check["code"] == "social_surface_retry_aggregation"
     )["passed"] is True
+
+
+def test_compose_targeted_retries_only_request_the_remaining_surface(monkeypatch):
+    payload = _compose_payload()
+    payload["channels"] = ["wechat_mp", "wechat_channels", "xiaohongshu"]
+    calls: list[dict] = []
+
+    async def fake_llm(system, model_payload, fallback, *args, **kwargs):
+        calls.append(model_payload)
+        candidate = _publishable_model_candidate(model_payload)
+        required = [
+            {"block_ref": block["block_ref"]}
+            for block in model_payload["canonical_block_registry"]
+            if block["required"]
+        ]
+        if len(calls) == 1:
+            for platform in ("wechat_mp", "wechat_channels"):
+                next(
+                    variant
+                    for variant in candidate["platform_variants"]
+                    if variant["platform"] == platform
+                )["blocks"] = required
+        elif len(calls) == 2:
+            assert model_payload["channels"] == ["wechat_mp", "wechat_channels"]
+            next(
+                variant
+                for variant in candidate["platform_variants"]
+                if variant["platform"] == "wechat_channels"
+            )["blocks"] = required
+        else:
+            assert model_payload["channels"] == ["wechat_channels"]
+        return candidate
+
+    monkeypatch.setattr(marketing_api, "_llm_json", fake_llm)
+
+    response = _request(
+        "POST",
+        "/api/v1/operators/industry/compose",
+        json=payload,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "content_ready"
+    assert len(calls) == 3
 
 
 def test_compose_uses_the_same_byte_stable_role_prompt(monkeypatch):
