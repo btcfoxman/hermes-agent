@@ -1894,8 +1894,10 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
     meta = "先把这条消息里的事实和判断分开。"
     filler = "对关注平台经济和反垄断的人来说，重点不只是金额，更是监管定性与整改要求。"
     contrast = "这次处罚真正改变的，不只是一个数字，而是平台与经营者之间的规则。"
+    not_but = "这次处罚真正改变的，不是一个数字，而是平台与经营者之间的规则。"
     vague = "这次最该被看见的，不只是51.79亿元，而是后续执行。"
     mixed_language = "这会迫使相关参与者重新评估 bargaining position。"
+    loaded_label = "平台不能再把灰色扣费当成默认规则。"
     invented = "52亿元罚没款之后，更关键的问题是整改能否真正改变相关规则。"
     candidate["blocks"].extend(
         [
@@ -1903,8 +1905,10 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
             {"kind": "transition", "text": meta, "evidence_ids": []},
             {"kind": "opinion", "text": filler, "evidence_ids": []},
             {"kind": "opinion", "text": contrast, "evidence_ids": []},
+            {"kind": "opinion", "text": not_but, "evidence_ids": []},
             {"kind": "opinion", "text": vague, "evidence_ids": []},
             {"kind": "opinion", "text": mixed_language, "evidence_ids": []},
+            {"kind": "opinion", "text": loaded_label, "evidence_ids": []},
             {"kind": "transition", "text": invented, "evidence_ids": []},
         ]
     )
@@ -1923,15 +1927,21 @@ def test_industry_editorial_may_repeat_grounded_amount_but_drops_meta_copy_and_n
     assert meta not in output.master_content
     assert filler not in output.master_content
     assert contrast not in output.master_content
+    assert not_but not in output.master_content
     assert vague not in output.master_content
     assert mixed_language not in output.master_content
+    assert loaded_label not in output.master_content
     assert invented not in output.master_content
     assert sum(
         warning.endswith(":generic_meta_copy_forbidden")
         for warning in output.critic.warnings
-    ) == 4
+    ) == 5
     assert any(
         warning.endswith(":mixed_language_phrase_forbidden")
+        for warning in output.critic.warnings
+    )
+    assert any(
+        warning.endswith(":loaded_editorial_label_forbidden")
         for warning in output.critic.warnings
     )
     assert any(

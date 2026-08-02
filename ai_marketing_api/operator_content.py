@@ -243,8 +243,12 @@ _GENERIC_EDITORIAL_META_RE = re.compile(
     r")",
     re.IGNORECASE,
 )
+_INDUSTRY_CONTRAST_CLICHE_RE = re.compile(r"不是.{0,32}而是")
 _MIXED_LANGUAGE_PHRASE_RE = re.compile(
     r"\b[A-Za-z][A-Za-z'’-]{2,}(?:\s+[A-Za-z][A-Za-z'’-]{2,})+\b"
+)
+_LOADED_EDITORIAL_LABEL_RE = re.compile(
+    r"(?:灰色扣费|霸王条款|割韭菜|黑幕|套路|暴雷|收割|血汗|天价|封神|炸裂)"
 )
 _URL_RE = re.compile(r"(?:https?://|www\.)", re.IGNORECASE)
 _TITLE_ENTITY_RE = re.compile(
@@ -1193,6 +1197,10 @@ def _safe_candidate_blocks(
             return None, "assertion_forbidden"
         if _GENERIC_EDITORIAL_META_RE.search(text):
             return None, "generic_meta_copy_forbidden"
+        if role is OperatorRole.INDUSTRY and _INDUSTRY_CONTRAST_CLICHE_RE.search(text):
+            return None, "generic_meta_copy_forbidden"
+        if _LOADED_EDITORIAL_LABEL_RE.search(text):
+            return None, "loaded_editorial_label_forbidden"
         if re.search(r"[\u4e00-\u9fff]", text) and any(
             match.group(0).lower() not in approved_source_text
             for match in _MIXED_LANGUAGE_PHRASE_RE.finditer(text)
@@ -2353,8 +2361,9 @@ def content_request_payload(
             "Every authored opinion, transition, or CTA object must set evidence_ids to [] and omit claim_id and block_ref. Evidence binding belongs only to canonical registry blocks selected by block_ref.",
             "A verified number or date may appear in editorial framing only when copied exactly from the supplied public claims; never calculate, round, compare, or combine numbers.",
             "Do not use audit/meta copy such as '先把事实和判断分开', '以下分析', '编辑说明', '编辑观点', '事实部分', '公开信息只是起点', or '接下来可以继续观察'. The draft must read as publishable copy, not an internal review note.",
-            "Avoid interchangeable contrast filler built from '不只是/不僅是/而是/更是', as well as phrases such as '对关注某领域的人来说', '从行业视角看', '这类案例的价值在于', '真正值得关注', or '重点在于'. State the concrete relationship directly. Every analytical block must advance a thesis tied to this event.",
+            "For industry copy, avoid interchangeable contrast filler built from '不只是/不仅是/不是……而是/更是'. For every role, avoid phrases such as '对关注某领域的人来说', '从行业视角看', '这类案例的价值在于', '真正值得关注', or '重点在于'. State the concrete relationship directly. Every analytical block must advance a thesis tied to this event.",
             "When the approved source and target audience are Chinese, keep reader-facing prose in natural Chinese. Do not insert an untranslated multi-word English phrase unless that phrase already appears in an approved public claim.",
+            "Keep the tone professional. Do not upgrade legal or business facts into loaded labels such as '灰色扣费', '霸王条款', '割韭菜', '黑幕', '套路', or '暴雷'.",
             "Build the thesis from a concrete contrast or relationship already present in the approved facts (for example penalty versus restitution, announcement versus enforceable action, or platform versus affected participant). Name the affected actor, changed rule/incentive, or observable consequence instead of merely saying the event is important.",
             "Keep fact/opinion separation in block metadata, never as reader-facing wording. The published copy should not explain its own editorial process.",
             "Do not force a question, invitation, disclaimer, or CTA when a firm closing judgment is more natural.",
