@@ -1194,20 +1194,33 @@ async def _run_compose(
             candidate.get("_model") or candidate.get("model") or "fallback"
         ).strip().lower()
 
-    curated_surfaces: List[str] = []
     remaining_surfaces = missing_publishable_surfaces(
         normalized_attempts,
         compose_payload.get("channels", []),
     )
-    if live_model_attempted:
-        for surface in remaining_surfaces:
+    if live_model_attempted and remaining_surfaces:
+        # A curated repair is one coherent editorial bundle.  Do not mix a
+        # repaired master with whichever model variants happened to pass (or
+        # vice versa): that can preserve the same audit-style wrapper and
+        # generic filler that triggered the repair in the first place.  Build
+        # every requested surface from the same narrow, evidence-bound policy,
+        # validate each one independently, and replace the result only when the
+        # complete bundle passes the normal terminal gate.
+        curated_surfaces = list(
+            dict.fromkeys(
+                ["master", *compose_payload.get("channels", [])]
+            )
+        )
+        curated_attempts: List[OperatorContentOutput] = []
+        for surface in curated_surfaces:
             curated_candidate = curated_operator_surface_candidate(
                 role_id,
                 compose_payload,
                 surface,
             )
             if curated_candidate is None:
-                continue
+                curated_attempts = []
+                break
             curated_normalized = normalize_content_output(
                 OPERATOR_REGISTRY,
                 role_id,
@@ -1221,18 +1234,18 @@ async def _run_compose(
                 [] if surface == "master" else [surface],
             )
             if surface in curated_missing:
-                continue
-            normalized_attempts.append(curated_normalized)
-            curated_surfaces.append(surface)
+                curated_attempts = []
+                break
+            curated_attempts.append(curated_normalized)
 
-    if curated_surfaces:
-        combined = combine_publishable_surfaces(normalized_attempts)
-        if combined is not None:
-            output = _annotate_curated_operator_output(
-                combined,
-                curated_surfaces,
-                role_id,
-            )
+        if len(curated_attempts) == len(curated_surfaces):
+            curated_combined = combine_publishable_surfaces(curated_attempts)
+            if curated_combined is not None:
+                output = _annotate_curated_operator_output(
+                    curated_combined,
+                    curated_surfaces,
+                    role_id,
+                )
     return output
 
 

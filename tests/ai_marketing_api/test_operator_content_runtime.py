@@ -13,6 +13,7 @@ from ai_marketing_api.operator_content import (
     ContentStatus,
     OperatorComposeRequest,
     build_content_fallback,
+    combine_publishable_surfaces,
     content_request_payload,
     curated_industry_surface_candidate,
     curated_operator_surface_candidate,
@@ -324,6 +325,17 @@ def test_curated_funds_remedy_repairs_are_publishable_on_every_social_surface():
                     ),
                 ),
                 _context(
+                    "cap-test-operations",
+                    "commercial",
+                    "company_public",
+                    "capability",
+                    content=(
+                        "[TEST-20260802] 在 test 环境，团队使用 AI 编排推进商务、行业与"
+                        "个人 IP 三条内容流程，管理员逐项核对方向、事实、终稿与排期。"
+                        "该记录只用于隔离验收。"
+                    ),
+                ),
+                _context(
                     "offer-human-review",
                     "commercial",
                     "company_public",
@@ -331,7 +343,10 @@ def test_curated_funds_remedy_repairs_are_publishable_on_every_social_surface():
                     content="internal",
                     structured_data={
                         "publicly_quoteable": True,
-                        "public_text": "测试验收价仅用于验证报价门禁，不是对外商业承诺。",
+                        "public_text": (
+                            "[TEST-20260802] 测试验收价 1 CNY，仅用于验证系统报价门禁，"
+                            "不是对外报价或商业承诺。"
+                        ),
                     },
                 ),
             ],
@@ -344,7 +359,15 @@ def test_curated_funds_remedy_repairs_are_publishable_on_every_social_surface():
                     ["cap-human-review"],
                 ),
                 _claim(
-                    "测试验收价仅用于验证报价门禁，不是对外商业承诺。",
+                    "[TEST-20260802] 在 test 环境，团队使用 AI 编排推进商务、行业与"
+                    "个人 IP 三条内容流程，管理员逐项核对方向、事实、终稿与排期。"
+                    "该记录只用于隔离验收。",
+                    "fact",
+                    ["cap-test-operations"],
+                ),
+                _claim(
+                    "[TEST-20260802] 测试验收价 1 CNY，仅用于验证系统报价门禁，"
+                    "不是对外报价或商业承诺。",
                     "fact",
                     ["offer-human-review"],
                 ),
@@ -409,6 +432,7 @@ def test_curated_human_review_repairs_are_publishable_on_every_surface(
     )
     compose_payload = content_request_payload(role, request, authorized)
 
+    normalized_attempts = []
     for surface in ["master", *channels]:
         candidate = curated_operator_surface_candidate(
             role,
@@ -424,6 +448,7 @@ def test_curated_human_review_repairs_are_publishable_on_every_surface(
             fallback,
             candidate,
         )
+        normalized_attempts.append(normalized)
         missing = missing_publishable_surfaces(
             [normalized],
             [] if surface == "master" else [surface],
@@ -445,6 +470,12 @@ def test_curated_human_review_repairs_are_publishable_on_every_surface(
                 if variant.platform == surface
             ],
         )
+
+    combined = combine_publishable_surfaces(normalized_attempts)
+    assert combined is not None
+    publishable = enforce_social_publishability(combined)
+    assert publishable.status == ContentStatus.CONTENT_READY
+    assert publishable.critic.errors == []
 
 
 def test_curated_human_review_policy_stays_narrow_and_evidence_bound():

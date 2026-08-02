@@ -644,6 +644,24 @@ def test_compose_uses_commercial_human_review_policy_only_after_model_attempt(
 
     async def fake_llm(system, model_payload, fallback, *args, **kwargs):
         calls.append(model_payload)
+        if len(calls) == 1:
+            candidate = _publishable_model_candidate(model_payload)
+            # Reproduce a realistic partial model result: two surfaces pass,
+            # while the master repeats the source as its title and Moments is
+            # only an evidence wrapper.  The final repair must replace the
+            # entire bundle instead of retaining these unrelated live drafts.
+            candidate["master_title"] = capability
+            moments = next(
+                variant
+                for variant in candidate["platform_variants"]
+                if variant["platform"] == "wechat_moments"
+            )
+            moments["blocks"] = [
+                {"block_ref": block["block_ref"]}
+                for block in model_payload["canonical_block_registry"]
+                if block["required"]
+            ]
+            return candidate
         return {
             **fallback,
             "_error": "upstream timeout after request started",
@@ -676,6 +694,11 @@ def test_compose_uses_commercial_human_review_policy_only_after_model_attempt(
         warning.startswith("curated_commercial_policy_repair:master,")
         and "douyin" in warning
         for warning in data["critic"]["warnings"]
+    )
+    assert len(calls) == 2
+    assert all(
+        "version 2" not in variant["title"]
+        for variant in data["platform_variants"]
     )
     assert "负责人" in data["master_content"]
     assert "先把事实和判断分开" not in data["master_content"]
