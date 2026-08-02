@@ -695,7 +695,10 @@ def test_compose_uses_commercial_human_review_policy_only_after_model_attempt(
         and "douyin" in warning
         for warning in data["critic"]["warnings"]
     )
-    assert len(calls) == 2
+    # One real model attempt is enough to select the narrow evidence-bound
+    # replacement; do not spend the request budget on surface-by-surface
+    # retries before applying the same complete bundle.
+    assert len(calls) == 1
     assert all(
         "version 2" not in variant["title"]
         for variant in data["platform_variants"]
@@ -774,6 +777,7 @@ def test_compose_uses_personal_confirm_and_replay_policy_after_model_attempt(
     assert response.status_code == 200
     data = response.json()
     assert calls
+    assert len(calls) == 1
     assert data["status"] == "content_ready", data["critic"]["errors"]
     assert data["master_title"] == "从自动发布到人工确认：补救成本的取舍"
     assert all("我" not in variant["title"] for variant in data["platform_variants"])

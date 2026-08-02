@@ -2584,14 +2584,28 @@ def _curated_human_review_surface_candidate(
     """
 
     approved_proposal = compose_payload.get("approved_proposal")
-    public_points = (
+    proposal_points = (
         approved_proposal.get("key_points", [])
         if isinstance(approved_proposal, dict)
         else []
     )
+    # The canonical registry is the frozen publication contract and is more
+    # authoritative than the optional proposal summary.  In replayed Temporal
+    # requests an older proposal projection may omit key_points even though the
+    # exact approved claim is still present and required in the registry.  Use
+    # only required approved-claim text here; server-authored templates and
+    # optional blocks must never enable a curated story policy.
+    canonical_points = [
+        block.get("text")
+        for block in compose_payload.get("canonical_block_registry", [])
+        if isinstance(block, dict)
+        and block.get("required")
+        and block.get("origin") == ContentBlockOrigin.APPROVED_CLAIM.value
+        and block.get("block_ref")
+    ]
     public_text = "\n".join(
         str(value or "").strip()
-        for value in public_points
+        for value in [*proposal_points, *canonical_points]
         if str(value or "").strip()
     )
     has_human_final_review = "终审" in public_text and any(

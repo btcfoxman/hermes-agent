@@ -718,6 +718,61 @@ def _annotate_curated_operator_output(
     return enforce_social_publishability(OperatorContentOutput(**data))
 
 
+def _curated_operator_bundle(
+    *,
+    role_id: OperatorRole,
+    payload: OperatorComposeRequest,
+    contexts: List[Any],
+    fallback: Dict[str, Any],
+    compose_payload: Dict[str, Any],
+) -> Optional[OperatorContentOutput]:
+    """Build one coherent evidence-bound replacement for every surface.
+
+    Curated operator policies are deliberately narrow.  When one matches, a
+    complete bundle must pass the same per-surface normalizer and terminal
+    social-copy gate before it can replace a rejected model response.
+    """
+
+    curated_surfaces = list(
+        dict.fromkeys(["master", *compose_payload.get("channels", [])])
+    )
+    curated_attempts: List[OperatorContentOutput] = []
+    for surface in curated_surfaces:
+        curated_candidate = curated_operator_surface_candidate(
+            role_id,
+            compose_payload,
+            surface,
+        )
+        if curated_candidate is None:
+            return None
+        curated_normalized = normalize_content_output(
+            OPERATOR_REGISTRY,
+            role_id,
+            payload,
+            contexts,
+            fallback,
+            curated_candidate,
+        )
+        curated_missing = missing_publishable_surfaces(
+            [curated_normalized],
+            [] if surface == "master" else [surface],
+        )
+        if surface in curated_missing:
+            return None
+        curated_attempts.append(curated_normalized)
+
+    if len(curated_attempts) != len(curated_surfaces):
+        return None
+    curated_combined = combine_publishable_surfaces(curated_attempts)
+    if curated_combined is None:
+        return None
+    return _annotate_curated_operator_output(
+        curated_combined,
+        curated_surfaces,
+        role_id,
+    )
+
+
 async def _run_compose(
     role_id: OperatorRole,
     payload: OperatorComposeRequest,
@@ -869,6 +924,24 @@ async def _run_compose(
     live_model_attempted = bool(candidate.get("_llm_attempted")) or (
         candidate_model != "fallback" and not candidate.get("_error")
     )
+    if live_model_attempted and missing_publishable_surfaces(
+        normalized_attempts,
+        compose_payload.get("channels", []),
+    ):
+        # Once a known evidence-bound story has a complete curated policy,
+        # another sequence of one-surface model repairs cannot improve its
+        # factual grounding.  Replace the rejected response immediately after
+        # the first real model attempt so the caller's request budget is not
+        # consumed by up to eighteen retries before the same full replacement.
+        curated_output = _curated_operator_bundle(
+            role_id=role_id,
+            payload=payload,
+            contexts=contexts,
+            fallback=fallback,
+            compose_payload=compose_payload,
+        )
+        if curated_output is not None:
+            return curated_output
     has_curated_industry_policy = (
         role_id is OperatorRole.INDUSTRY
         and isinstance(compose_payload.get("industry_editorial_guard"), dict)
@@ -1206,46 +1279,15 @@ async def _run_compose(
         # every requested surface from the same narrow, evidence-bound policy,
         # validate each one independently, and replace the result only when the
         # complete bundle passes the normal terminal gate.
-        curated_surfaces = list(
-            dict.fromkeys(
-                ["master", *compose_payload.get("channels", [])]
-            )
+        curated_output = _curated_operator_bundle(
+            role_id=role_id,
+            payload=payload,
+            contexts=contexts,
+            fallback=fallback,
+            compose_payload=compose_payload,
         )
-        curated_attempts: List[OperatorContentOutput] = []
-        for surface in curated_surfaces:
-            curated_candidate = curated_operator_surface_candidate(
-                role_id,
-                compose_payload,
-                surface,
-            )
-            if curated_candidate is None:
-                curated_attempts = []
-                break
-            curated_normalized = normalize_content_output(
-                OPERATOR_REGISTRY,
-                role_id,
-                payload,
-                contexts,
-                fallback,
-                curated_candidate,
-            )
-            curated_missing = missing_publishable_surfaces(
-                [curated_normalized],
-                [] if surface == "master" else [surface],
-            )
-            if surface in curated_missing:
-                curated_attempts = []
-                break
-            curated_attempts.append(curated_normalized)
-
-        if len(curated_attempts) == len(curated_surfaces):
-            curated_combined = combine_publishable_surfaces(curated_attempts)
-            if curated_combined is not None:
-                output = _annotate_curated_operator_output(
-                    curated_combined,
-                    curated_surfaces,
-                    role_id,
-                )
+        if curated_output is not None:
+            output = curated_output
     return output
 
 

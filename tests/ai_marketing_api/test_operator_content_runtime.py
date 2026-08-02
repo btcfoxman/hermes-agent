@@ -514,6 +514,65 @@ def test_curated_human_review_policy_stays_narrow_and_evidence_bound():
     ) is None
 
 
+def test_personal_curated_policy_uses_required_frozen_claim_when_outline_is_stale():
+    experience = (
+        "在这次端到端验收中，我把原来追求自动发布的流程改成了AI先生成、"
+        "负责人再确认、失败可以回放。真正费时间的不是多点一次确认，而是在"
+        "错误内容已经发出去之后补救。"
+    )
+    candidate = curated_operator_surface_candidate(
+        OperatorRole.PERSONAL_IP,
+        {
+            # Replayed packages can carry an older proposal projection whose
+            # summary omitted key_points. The immutable required claim remains
+            # the sole policy-enabling source.
+            "approved_proposal": {
+                "title": "从自动发布改成人工确认",
+                "key_points": [],
+            },
+            "canonical_block_registry": [
+                {
+                    "block_ref": "canonical:experience:claim-1",
+                    "kind": "experience",
+                    "text": experience,
+                    "origin": "approved_claim",
+                    "required": True,
+                }
+            ],
+        },
+        "master",
+    )
+
+    assert candidate is not None
+    assert candidate["master_title"] == "从自动发布到人工确认：补救成本的取舍"
+    assert {block.get("block_ref") for block in candidate["blocks"]} == {
+        None,
+        "canonical:experience:claim-1",
+    }
+
+
+def test_personal_curated_policy_ignores_optional_or_server_authored_text():
+    enabling_text = "自动发布后由负责人再确认，失败可以回放。"
+
+    for origin, required in (("server_template", True), ("approved_claim", False)):
+        assert curated_operator_surface_candidate(
+            OperatorRole.PERSONAL_IP,
+            {
+                "approved_proposal": {"key_points": []},
+                "canonical_block_registry": [
+                    {
+                        "block_ref": "canonical:untrusted-enabler",
+                        "kind": "experience",
+                        "text": enabling_text,
+                        "origin": origin,
+                        "required": required,
+                    }
+                ],
+            },
+            "master",
+        ) is None
+
+
 def _candidate_from_required_refs(
     payload: dict,
     channels: list[str],
