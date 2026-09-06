@@ -3063,6 +3063,15 @@ def content_request_payload(
             "reader_outcome": "The reader gets one specific, useful point of view grounded in the owner's approved experience or viewpoint.",
         },
     }[role.value]
+    if public_brief is not None:
+        publication_brief = {
+            "voice": {
+                "commercial": "A precise business operator helping the brief's audience assess a concrete customer task or selection condition, without assuming an evidenced capability or offer exists.",
+                "industry": "An informed industry operator explaining a concrete reader decision or verification question relevant to the brief, without imposing an event or changed operating outcome.",
+                "personal_ip": "A recognizable personal-IP operator offering an evidence-bounded point of view for the brief's audience; only canonical approved personal cards can supply biography or experience.",
+            }[role.value],
+            "reader_outcome": "The brief's audience understands a relevant selection condition or what to verify for their task; unsupported product capabilities and outcomes remain unknown.",
+        }
     platform_briefs = {
         "wechat_moments": (
             "A concise personal-feed post: lead with a concrete judgment, "
@@ -3100,6 +3109,17 @@ def content_request_payload(
             "verified facts, and one non-generic implication."
         ),
     }
+    if public_brief is not None:
+        platform_briefs = {
+            "wechat_moments": "A concise personal-feed post: open with a brief-specific reader judgment, surface the canonical facts quickly, and land on a useful selection condition; do not force a CTA.",
+            "wechat_mp": "A readable analysis article: a concrete reader-task hook, short paragraphs, canonical evidence and distinct analysis of a selection condition or verification question; sparse evidence can support a concise article.",
+            "wechat_channels": "A spoken script with a clear reader-task opening, short sentences, canonical fact beats and a memorable selection question or supported judgment.",
+            "douyin": "A fast spoken script: open with the audience's concrete task, use compact canonical fact beats and a useful selection condition; avoid formal announcement language.",
+            "kuaishou": "A plainspoken short-video script: a direct reader-task opening, accessible canonical facts and a practical verification question; no bureaucratic tone.",
+            "xiaohongshu": "A scan-friendly note: a specific reader-task hook, compact information-card structure and a useful selection takeaway; no fake personal experience.",
+            "toutiao": "An evidence-led analysis article: open from the brief audience's task, include canonical facts and distinct analysis of a selection condition or verification question, without assuming a news event or result.",
+            "weitoutiao": "A compact reader-facing commentary: a brief-specific selection judgment, essential canonical facts and a useful verification question when evidence is incomplete.",
+        }
     payload: Dict[str, Any] = {
         "objective": public_brief.objective if public_brief else "Compose platform drafts from the approved public claims only.",
         "topic": public_title,
@@ -3124,12 +3144,21 @@ def content_request_payload(
         "publication_brief": {
             **publication_brief,
             "thesis_contract": [
+                "Choose a thesis about the exact audience, purpose and reader task in public_editorial_brief, respecting owner_revision. State a concrete selection condition or verification question, not a generic wrapper or a correction such as 'not X but Y'.",
+                "Anchor the thesis in approved evidence. Do not require an event, action, amount, remedy, capability or result that the evidence does not establish; leave unknown selection conditions as reader questions, not product facts.",
+                "Make each authored block useful: a platform-native reader-task hook, distinct analysis of a supported selection condition or verification question, and a natural ending. Do not invent causal cost/result comparisons, features, experience or guaranteed outcomes.",
+                "Prefer quantity-free reader-task prose. For industry copy, keep every Arabic number, date and Chinese counted quantity in canonical evidence blocks or evidence-checked titles. Use canonical refs for factual reporting, and make the analysis specific to the brief rather than restating the source.",
+            ] if public_brief is not None else [
                 "Choose one event-specific thesis before writing. State it as a direct declaration, not as a correction such as 'not X but Y'. Do not merely summarize the source or announce that facts and opinions are separate.",
                 "Build the thesis by connecting one approved actor, action, rule, amount, or remedy to one affected party and one concrete cost, choice, boundary, or observable consequence. Do not frame the relationship as 'versus'.",
                 "Make every editorial block earn its place: open with the actor and concrete consequence, explain the mechanism or reader impact, then land on a useful judgment. Do not add an automatic observation list or engagement question.",
                 "Use factual nouns, actors, and rules from the approved claims as anchors. For industry copy, leave every number and date in canonical evidence blocks or evidence-checked titles; authored prose must not repeat or reinterpret a numeric token. Avoid abstract paragraphs that could be pasted under an unrelated news item.",
             ],
-            "role_thesis": {
+            "role_thesis": ({
+                "commercial": "Help the brief's audience evaluate a customer task or selection condition using only evidenced facts. Suggest what to verify when a capability or offer is not established; do not imply easier decisions, controlled risk or a business result as product claims.",
+                "industry": "Explain an evidence-supported selection condition or verification question for the industry audience in the brief. Do not assume a regulatory event, changed incentive, operating cost or observed consequence.",
+                "personal_ip": "Offer a personal point of view relevant to the brief's reader task. First-person present-tense judgment is optional; only exact canonical personal-card blocks may carry actions, experience, credentials or results. Do not invent biography to establish authority.",
+            } if public_brief is not None else {
                 "commercial": (
                     "Connect the verified capability and offer to one concrete customer "
                     "constraint: what decision becomes easier, what risk remains under "
@@ -3146,7 +3175,7 @@ def content_request_payload(
                     "such as '我的判断是' are allowed, but do not claim another action, "
                     "event, customer, result, project, credential, or past experience."
                 ),
-            }[role.value],
+            })[role.value],
             "reader_facing_rule": (
                 "Never expose editorial workflow labels such as fact section, "
                 "opinion section, editor's note, review note, evidence note, "
@@ -3161,6 +3190,9 @@ def content_request_payload(
                     "risk, or useful next conversation implied by the canonical facts."
                 ),
                 "industry": (
+                    "Write brief-specific reader-task analysis, a supported selection condition or a verification question. "
+                    "Unknown capabilities and outcomes must remain questions; do not turn them into new factual assertions."
+                    if public_brief is not None else
                     "Write analysis rather than another event assertion: name the changed "
                     "incentive, cost, bargaining position, rule, or observable consequence."
                 ),
@@ -3251,8 +3283,9 @@ def content_request_payload(
             "array of actual block objects; each object must be either "
             '{"block_ref":"<one exact block_ref from canonical_block_registry>"} '
             "or "
-            '{"kind":"opinion|transition|cta","text":"<original editorial '
-            'framing>","evidence_ids":[]}; do not copy this description or '
+            '{"kind":"opinion","text":"<original editorial '
+            'framing>","evidence_ids":[]}; choose a single legal kind from opinion, '
+            'transition, or cta, never pipe-joined names; do not copy this description or '
             "return a one_of/schema wrapper"
         ),
         "platform_variants": [
@@ -3273,11 +3306,17 @@ def content_request_payload(
                 "by at least one distinct authored analysis block"
             ),
             "short_form": (
+                "include at least one authored block whose first sentence is a platform-native reader-task hook "
+                "and whose full text carries a useful selection condition or verification question; the same block may satisfy both jobs"
+                if public_brief is not None else
                 "include at least one authored block whose first sentence is a "
                 "platform-native hook and whose full text carries one concrete "
                 "implication; the same block may satisfy both jobs"
             ),
             "classification_rule": (
+                "kind=transition and kind=opinion are rendering hints. Reading order is mandatory: "
+                "hook first, then distinct analysis of a selection condition, verification question, or evidence-supported judgment."
+                if public_brief is not None else
                 "kind=transition and kind=opinion are rendering hints. Reading order "
                 "is mandatory: hook first, then mechanism, tradeoff, implication, "
                 "reader impact, or concluding judgment."
@@ -3289,7 +3328,8 @@ def content_request_payload(
             "Every platform variant must include every registry block marked required, but may choose its own safe order.",
             "The canonical registry exposed to the model contains approved evidence blocks only. Never invent or request a server-template block_ref; write all editorial prose as original opinion/transition objects.",
             "Write a native social master_title and a distinct title for each platform. Keep each title between 12 and 36 Chinese characters when possible; it may use grounded entity names and numbers from public claims plus a clearly editorial judgment, but no new event assertion.",
-            "For the master, use two to six concise editorial blocks: a concrete hook, at least one distinct analytical step, and an optional natural close. For wechat_mp and toutiao use at least two authored blocks: a hook plus one analytical step. A short-feed or video variant may use one to three authored blocks; its first block must itself contain a concrete event-specific implication, not merely announce the topic.",
+            "For the master, use two to six concise editorial blocks: a concrete hook, at least one distinct analytical step, and an optional natural close. For wechat_mp and toutiao use at least two authored blocks: a hook plus one analytical step. A short-feed or video variant may use one to three authored blocks; its first block must itself contain "
+            + ("a brief-specific reader task, selection condition or verification question, not merely announce the topic." if public_brief is not None else "a concrete event-specific implication, not merely announce the topic."),
             "Editorial blocks may only be opinion, transition, or CTA. They must not add unsupported facts, named-entity claims, quotations, prices, promises, or unapproved first-person attribution.",
             "For personal_ip, authored transition/opinion blocks may use first-person present-tense judgment, but every action, project, customer, result, credential, and experience must remain in an exact canonical personal-card block. Never invent a new biographical or business assertion, and do not use first-person CTA copy.",
             "Every authored opinion, transition, or CTA object must set evidence_ids to [] and omit claim_id and block_ref. Evidence binding belongs only to canonical registry blocks selected by block_ref.",
@@ -3299,15 +3339,17 @@ def content_request_payload(
                 else "A verified number or date may appear in editorial framing only when copied exactly from the supplied public claims; never calculate, round, compare, or combine numbers."
             ),
             "Do not use audit/meta copy such as '先把事实和判断分开', '以下分析', '编辑说明', '编辑观点', '事实部分', '公开信息只是起点', or '接下来可以继续观察'. The draft must read as publishable copy, not an internal review note.",
-            "For industry copy, never use formulaic wrappers such as 不只是/不仅是/不是, 不只在X更在Y, 不在X而在Y, 不能只看X, paired 如果X；如果Y, 最值得注意的是, 接下来最值得关注, 真正改变的是, 真正要变的是, 规则被推到台前, 规则会被重新审视, 真正落点是, or 核心影响是. For every role, avoid phrases such as '对关注某领域的人来说', '从行业视角看', '这类案例的价值在于', '真正值得关注', or '重点在于'. State the concrete actor-action-consequence relationship directly. Every analytical block must advance a thesis tied to this event.",
+            "For industry copy, never use formulaic wrappers such as 不只是/不仅是/不是, 不只在X更在Y, 不在X而在Y, 不能只看X, paired 如果X；如果Y, 最值得注意的是, 接下来最值得关注, 真正改变的是, 真正要变的是, 规则被推到台前, 规则会被重新审视, 真正落点是, or 核心影响是. For every role, avoid phrases such as '对关注某领域的人来说', '从行业视角看', '这类案例的价值在于', '真正值得关注', or '重点在于'. "
+            + ("State a concrete selection condition or verification question directly. Every analytical block must advance a thesis tied to the brief's reader task and approved evidence." if public_brief is not None else "State the concrete actor-action-consequence relationship directly. Every analytical block must advance a thesis tied to this event."),
             "Treat Chinese counted quantities such as '十九项', '三家', or '两轮' exactly like Arabic numbers: use them only when the identical quantity appears in an approved factual block.",
             "When the approved source and target audience are Chinese, keep reader-facing prose in natural Chinese. Do not insert an untranslated multi-word English phrase unless that phrase already appears in an approved public claim.",
             "Keep the tone professional. Do not upgrade legal or business facts into loaded labels such as '灰色扣费', '霸王条款', '割韭菜', '黑幕', '套路', or '暴雷'.",
-            "Build the thesis as a direct subject-action-consequence relationship already present in the approved facts. Name the affected actor, changed rule or incentive, and observable consequence instead of using a rhetorical contrast or merely saying the event is important.",
+            ("Build the thesis around the brief's audience, purpose and a concrete reader task, selection condition or verification question supported by canonical evidence. Do not assume a product capability, causal improvement or result; express what is unknown as a question." if public_brief is not None else "Build the thesis as a direct subject-action-consequence relationship already present in the approved facts. Name the affected actor, changed rule or incentive, and observable consequence instead of using a rhetorical contrast or merely saying the event is important."),
             "Keep fact/opinion separation in block metadata, never as reader-facing wording. The published copy should not explain its own editorial process.",
-            "Do not force a question, invitation, disclaimer, or CTA when a firm closing judgment is more natural.",
+            ("Use a natural, useful selection judgment or verification question as the close. Do not force a CTA, disclaimer, unsupported firm consequence or generic observation list." if public_brief is not None else "Do not force a question, invitation, disclaimer, or CTA when a firm closing judgment is more natural."),
             "The server keeps required factual blocks verbatim for audit and renders long ones as concise source-exact fact beats. Do not repeat the full announcement in editorial prose.",
-            "Do not turn an approved fact into a near-verbatim authored paragraph before or after its canonical block. Editorial prose must add a mechanism, affected party, decision, or consequence instead of repeating the source.",
+            "Do not turn an approved fact into a near-verbatim authored paragraph before or after its canonical block. Editorial prose must add "
+            + ("a useful reader task, selection condition or verification question instead of repeating the source." if public_brief is not None else "a mechanism, affected party, decision, or consequence instead of repeating the source."),
             "Make each requested platform variant meaningfully different in title, rhythm, depth, and reader action while preserving every required factual block reference.",
         ],
     }

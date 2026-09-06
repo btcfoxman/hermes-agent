@@ -804,7 +804,9 @@ def test_content_request_exposes_server_owned_canonical_block_refs():
     assert required[0]["binding_hash"] == expected_hash
     block_contract = payload["response_contract"]["blocks"]
     assert "one exact block_ref from canonical_block_registry" in block_contract
-    assert "opinion|transition|cta" in block_contract
+    assert '{"kind":"opinion"' in block_contract
+    assert "single legal kind from opinion, transition, or cta" in block_contract
+    assert "opinion|transition|cta" not in block_contract
     assert "do not copy this description" in block_contract
     editorial_shape = payload["response_contract"]["editorial_shape"]
     assert "at least one distinct authored analysis block" in editorial_shape["master"]

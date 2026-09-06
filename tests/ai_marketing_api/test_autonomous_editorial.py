@@ -87,6 +87,83 @@ def test_cross_role_brief_is_denied_before_any_model_call(monkeypatch):
     assert response.json()["detail"]["code"] == "editorial_brief_role_denied"
 
 
+@pytest.mark.parametrize("role", ["commercial", "industry", "personal_ip"])
+@pytest.mark.parametrize("fact_mode", ["exact", "grounded_paraphrase"])
+def test_initial_public_brief_contract_is_task_based_and_preserves_safety(role, fact_mode):
+    raw = _role_compose_payload(role)
+    raw["runtime_budget"] = {
+        "max_model_calls": 6, "max_elapsed_seconds": 180, "max_surface_revisions": 2,
+    }
+    raw["channels"] = [
+        "wechat_moments", "wechat_mp", "wechat_channels", "douyin",
+        "kuaishou", "xiaohongshu", "toutiao", "weitoutiao",
+    ]
+    raw["fact_expression_mode"] = fact_mode
+    original = api.OperatorComposeRequest.model_validate(raw)
+    baseline = api.content_request_payload(role, original, original.authorized_context)
+    raw["public_editorial_brief"] = {**_brief(role), "channels": raw["channels"]}
+    request = api.OperatorComposeRequest.model_validate(raw)
+    payload = api.content_request_payload(role, request, request.authorized_context)
+
+    assert payload["public_editorial_brief"]["role_id"] == role
+    assert payload["objective"] == raw["public_editorial_brief"]["objective"]
+    assert payload["audience"] == raw["public_editorial_brief"]["audience"]
+    assert payload["industry_editorial_guard"] == {}
+    assert payload["canonical_block_registry"] == baseline["canonical_block_registry"]
+    assert payload["claims"] == baseline["claims"]
+    assert payload["authorized_context"] == baseline["authorized_context"]
+    assert payload["approved_preferences"] == baseline["approved_preferences"]
+    assert payload["channels"] == baseline["channels"]
+    assert request.runtime_budget == original.runtime_budget
+    assert request.runtime_budget.max_model_calls == 6
+    assert request.runtime_budget.max_elapsed_seconds == 180
+    assert request.runtime_budget.max_surface_revisions == 2
+
+    publication = payload["publication_brief"]
+    writing_rules = json.dumps([
+        publication, payload["platform_editorial_briefs"],
+        payload["response_contract"]["editorial_shape"],
+        payload["response_contract"]["safety"],
+    ])
+    for forced in (
+        "Choose one event-specific thesis", "connecting one approved actor",
+        "open with the actor and concrete consequence", "subject-action-consequence",
+        "actor-action-consequence", "thesis tied to this event", "Explain the changed incentive",
+        "name the changed incentive", "explain the event", "compact news commentary",
+        "Connect the verified capability and offer", "what decision becomes easier",
+    ):
+        assert forced not in writing_rules
+    assert "selection condition" in publication["role_thesis"] or role == "personal_ip"
+    assert "reader task" in " ".join(publication["thesis_contract"])
+    assert "verification question" in " ".join(publication["thesis_contract"])
+    assert "owner_revision" in " ".join(publication["thesis_contract"])
+    assert "unsupported product capabilities and outcomes remain unknown" in publication["reader_outcome"]
+    assert len(set(payload["platform_editorial_briefs"].values())) == len(raw["channels"])
+
+    safety = payload["response_contract"]["safety"]
+    assert len(safety) == len(baseline["response_contract"]["safety"])
+    changed_writing_rules = {5, 11, 15, 17, 19}
+    for index, rule in enumerate(safety):
+        if index not in changed_writing_rules:
+            assert rule == baseline["response_contract"]["safety"][index]
+    assert "two to six concise editorial blocks" in safety[5]
+    assert "at least two authored blocks" in safety[5]
+    assert "one to three authored blocks" in safety[5]
+    assert "最值得注意的是" in safety[11]
+    assert "meaningfully different in title, rhythm, depth, and reader action" in safety[-1]
+    assert "opinion|transition|cta" not in payload["response_contract"]["blocks"]
+    assert '{"kind":"opinion"' in payload["response_contract"]["blocks"]
+    assert "single legal kind" in payload["response_contract"]["blocks"]
+    if fact_mode == "grounded_paraphrase":
+        assert "independent verification" in payload["constraints"][0]
+        assert '"public_text"' in payload["response_contract"]["blocks"]
+    if role == "commercial":
+        assert "our company" in publication["authored_block_rule"]
+    if role == "personal_ip":
+        assert "First-person present-tense judgment is optional" in publication["role_thesis"]
+        assert "canonical personal-card block" in publication["authored_block_rule"]
+
+
 @pytest.mark.parametrize("role,surface", [
     ("industry", "master"), ("industry", "wechat_mp"), ("industry", "wechat_moments"),
     ("commercial", "master"), ("personal_ip", "master"),
