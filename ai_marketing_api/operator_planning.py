@@ -122,6 +122,20 @@ class EditorialSelection(StrictModel):
     history_reason: str = Field(default="", max_length=1000, strict=True)
 
 
+class LearningHypothesis(StrictModel):
+    role_id: OperatorRole
+    question: str = Field(min_length=1, max_length=1000, strict=True)
+    history_refs: list[HistorySignalId] = Field(min_length=1, max_length=10)
+    caveat: str = Field(min_length=1, max_length=500, strict=True)
+
+    @field_validator("history_refs")
+    @classmethod
+    def unique_refs(cls, value):
+        if len(set(value)) != len(value):
+            raise ValueError("learning hypothesis history references must be unique")
+        return value
+
+
 PLANNER_PROMPT = """You are the editorial planner for an independent developer's content operations.
 Rank only the supplied opportunities against the public operating mandate.
 Prefer concrete customer value, primary evidence, meaningful novelty and weekly
@@ -147,6 +161,13 @@ new approved facts or personal experiences. Keep signal IDs, metric values and
 internal analytics reasoning out of reader-facing topic and angle. Optional
 history_refs may cite only supplied signal_id values; explain their limited use
 only in history_reason, an internal field. No history means history_refs=[].
+Optionally suggest at most three learning_hypotheses in this same response, only
+when published performance history is supplied. Each is a question to test, not
+a finding or causal conclusion, and requires nonempty valid history_refs plus a
+specific uncertainty caveat. They are internal weekly-review suggestions only:
+never automatically change positioning, the mandate, frequency or permissions,
+and never write these hypotheses into public topic or angle. If there is no
+history or no useful testable question, return learning_hypotheses=[].
 """
 
 
@@ -160,6 +181,7 @@ async def plan_editorial(
         return {
             "status": "no_opportunities",
             "selections": [],
+            "learning_hypotheses": [],
             "skips": [
                 {
                     "role_id": role.value,
@@ -197,9 +219,20 @@ async def plan_editorial(
                 "reason": "why this role need not produce today",
             }
         ],
+        "learning_hypotheses": [
+            {
+                "role_id": "commercial|industry|personal_ip",
+                "question": "optional internal question to test, not a conclusion; at most 1000 characters",
+                "history_refs": [
+                    "1 to 10 unique exact supplied performance_history signal_id values"
+                ],
+                "caveat": "specific uncertainty or comparability caveat; at most 500 characters",
+            }
+        ],
     }
     result = await run.call(llm, PLANNER_PROMPT, body, {}, *model_args)
     selections: list[EditorialSelection] = []
+    hypotheses: list[LearningHypothesis] = []
     valid = (
         not result.get("_error")
         and bool(result.get("_model"))
@@ -228,8 +261,26 @@ async def plan_editorial(
             selections.append(selection)
         if len(selections) > request.max_packages:
             valid = False
+    raw_hypotheses = result.get("learning_hypotheses", [])
+    if valid:
+        if not isinstance(raw_hypotheses, list) or len(raw_hypotheses) > 3:
+            valid = False
+        elif raw_hypotheses and not history_ids:
+            valid = False
+        else:
+            for raw in raw_hypotheses:
+                try:
+                    hypothesis = LearningHypothesis.model_validate(raw)
+                except (ValueError, TypeError):
+                    valid = False
+                    break
+                if not set(hypothesis.history_refs).issubset(history_ids):
+                    valid = False
+                    break
+                hypotheses.append(hypothesis)
     if not valid:
         selections = []
+        hypotheses = []
     selected_roles = {item.role_id for item in selections}
     raw_skips = result.get("skips") if isinstance(result.get("skips"), list) else []
     reasons = {
@@ -241,6 +292,7 @@ async def plan_editorial(
     return {
         "status": status,
         "selections": [item.model_dump(mode="json") for item in selections],
+        "learning_hypotheses": [item.model_dump(mode="json") for item in hypotheses],
         "skips": [
             {
                 "role_id": role.value,

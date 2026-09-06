@@ -296,3 +296,97 @@ def test_selection_history_explanations_are_bounded(refs, reason, monkeypatch):
     data = _request("POST", "/api/v1/operators/editorial/plan", json=payload).json()
     assert data["status"] == "unavailable"
     assert data["selections"] == []
+
+
+def _hypothesis(**changes):
+    return {
+        "role_id": "commercial",
+        "question": "Would a task-led introduction be clearer for the same audience?",
+        "history_refs": ["signal-api-public-1"],
+        "caveat": "A sparse sample with incomplete engagement coverage does not establish causation.",
+        **changes,
+    }
+
+
+def test_learning_hypothesis_is_an_internal_question_in_the_same_planner_call(
+    monkeypatch,
+):
+    payload = _planner_payload()
+    payload["performance_history"] = [_history()]
+    calls = []
+
+    async def fake(system, body, fallback, *args, **kwargs):
+        calls.append(body)
+        assert body["response_contract"]["learning_hypotheses"]
+        assert "question to test, not" in system
+        assert "never automatically change positioning" in system
+        return {
+            "_model": "test-planner",
+            "selections": [_selection()],
+            "skips": [],
+            "learning_hypotheses": [_hypothesis()],
+        }
+
+    monkeypatch.setattr(api, "_llm_json", fake)
+    data = _request("POST", "/api/v1/operators/editorial/plan", json=payload).json()
+    assert data["status"] == "planned", data
+    assert data["learning_hypotheses"] == [_hypothesis()]
+    assert data["selections"][0]["topic"] == _selection()["topic"]
+    assert len(calls) == data["generation_trace"]["model_calls"] == 1
+
+
+@pytest.mark.parametrize(
+    "with_history,hypotheses",
+    [
+        (False, [_hypothesis()]),
+        (True, [_hypothesis(history_refs=["forged-history"])]),
+        (True, [_hypothesis(history_refs=[])]),
+        (True, [_hypothesis(history_refs=["signal-api-public-1"] * 2)]),
+        (True, [_hypothesis(history_refs=["signal-api-public-1"] * 11)]),
+        (True, [_hypothesis(question="q" * 1001)]),
+        (True, [_hypothesis(caveat="c" * 501)]),
+        (True, [_hypothesis(role_id="invented-role")]),
+        (True, [_hypothesis(account_id="private")]),
+        (True, [_hypothesis()] * 4),
+        (True, {"question": "not a list"}),
+    ],
+)
+def test_invalid_weekly_hypothesis_rejects_the_whole_plan_without_extra_calls(
+    with_history, hypotheses, monkeypatch
+):
+    payload = _planner_payload()
+    if with_history:
+        payload["performance_history"] = [_history()]
+    calls = []
+
+    async def fake(*args, **kwargs):
+        calls.append(True)
+        return {
+            "_model": "test-planner",
+            "selections": [_selection()],
+            "skips": [],
+            "learning_hypotheses": hypotheses,
+        }
+
+    monkeypatch.setattr(api, "_llm_json", fake)
+    data = _request("POST", "/api/v1/operators/editorial/plan", json=payload).json()
+    assert data["status"] == "unavailable"
+    assert data["selections"] == data["learning_hypotheses"] == []
+    assert len(calls) == data["generation_trace"]["model_calls"] == 1
+
+
+@pytest.mark.parametrize("with_history", [False, True])
+def test_legacy_model_without_hypotheses_defaults_to_an_empty_list(
+    with_history, monkeypatch
+):
+    payload = _planner_payload()
+    if with_history:
+        payload["performance_history"] = [_history()]
+
+    async def fake(*args, **kwargs):
+        return {"_model": "test-planner", "selections": [_selection()], "skips": []}
+
+    monkeypatch.setattr(api, "_llm_json", fake)
+    data = _request("POST", "/api/v1/operators/editorial/plan", json=payload).json()
+    assert data["status"] == "planned"
+    assert data["learning_hypotheses"] == []
