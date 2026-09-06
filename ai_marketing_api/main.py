@@ -18,6 +18,7 @@ from ai_marketing_api.operator_content import (
     ContentStatus,
     OperatorComposeRequest,
     OperatorContentOutput,
+    annotate_partial_surface_failure,
     build_content_fallback,
     combine_publishable_surfaces,
     content_request_payload,
@@ -908,7 +909,7 @@ async def _run_compose(
 
         def repair_blocks(surface: str) -> List[Any]:
             hook = {
-                "kind": "transition|opinion",
+                "kind": "transition",
                 "text": (
                     "original platform-native hook; no number, source restatement, "
                     "event-reporting verb, or banned wrapper"
@@ -919,9 +920,12 @@ async def _run_compose(
             if surface == "master" or surface in {"wechat_mp", "toutiao"}:
                 blocks.append(
                     {
-                        "kind": "opinion|transition",
+                        "kind": "opinion",
                         "text": (
-                            "distinct mechanism or reader-impact analysis; no number, "
+                            "distinct audience-relevant selection condition or verification question; "
+                            "no quantity, unsupported capability, cost/result comparison, source restatement, or banned wrapper"
+                            if payload.public_editorial_brief is not None
+                            else "distinct mechanism or reader-impact analysis; no number, "
                             "source restatement, future-watch ending, or banned wrapper"
                         ),
                         "evidence_ids": [],
@@ -946,6 +950,11 @@ async def _run_compose(
                 else "omit this key; the server retains the validated master blocks"
             ),
             "exact_platform_variant_count": len(retry_channels),
+            "authored_kind_rule": (
+                "Use a single legal kind: transition for the hook and opinion for analysis "
+                "as shown; either authored block may instead use the other legal kind. "
+                "Never join kind names with a pipe."
+            ),
             "platform_variants": [
                 {
                     "platform": channel,
@@ -1102,12 +1111,53 @@ async def _run_compose(
             },
         }
         if payload.public_editorial_brief is not None:
-            retry_payload["quality_retry"]["instruction"] = (
+            quality_retry = retry_payload["quality_retry"]
+            for contract in surface_contracts.values():
+                contract["positive_writing_recipe"] = [
+                    "Open with a quantity-free reader task or selection question specific to the audience and purpose in public_editorial_brief, respecting owner_revision.",
+                    "Develop a concrete selection condition or verification question supported by the supplied evidence; frame unknowns as questions, never as product capabilities or promised outcomes.",
+                    "Use short, natural sentences in the source language. Do not invent product functionality, cost/result comparisons, causal improvements, prices, guarantees, or biography.",
+                    "Land on a useful reader decision or verification task, not a firm consequence that the evidence does not establish or a generic future-watch list.",
+                    "Keep every required canonical evidence block_ref unchanged. The canonical blocks own facts and quantities; do not restate their source paragraph in authored prose.",
+                ]
+            quality_retry["positive_pattern"] = {
+                "do_not_copy_literal_placeholders": True,
+                "hook": "[brief audience's concrete task] + [quantity-free selection question anchored to approved evidence]",
+                "analysis": "[evidence-supported selection condition] + [what the reader should verify when the evidence is silent]",
+                "bad_shapes": [
+                    "retelling the source event or its numbers",
+                    "inventing product capabilities, causal cost/result comparisons, or guaranteed outcomes",
+                    "imposing an unrelated regulatory, cash-flow, remedy, or human-review story",
+                    "using a not X but Y wrapper or a generic future-watch list",
+                ],
+            }
+            quality_retry["required_shape"] = [
+                "a platform-native, quantity-free authored hook about the brief audience's task or selection question; leave factual reporting and quantities to canonical blocks",
+                "for master: at least one distinct authored analytical block after the hook, developing a supported selection condition or verification question",
+                "for wechat_mp and toutiao: at least one distinct authored analytical block after the hook",
+                "for shorter platforms: an authored block may combine the reader task and selection condition; do not add generic padding",
+                "a useful reader decision or verification task that respects owner_revision; CTA only if natural for the platform and approved brief",
+            ]
+            quality_retry["instruction"] = (
                 "Repair only focus_surface for the exact audience, product and purpose in public_editorial_brief. "
+                "Respect owner_revision and its restrictions. Return top-level blocks only for master; "
+                "otherwise return exactly the requested platform variant and omit top-level blocks. "
                 "Use critic_errors and rejected text as diagnostics, not as publication copy. "
-                "Explain a concrete decision or task relevant to that audience, using the supplied evidence. "
+                "Explain a quantity-free reader task, selection condition or verification question using the supplied evidence. "
                 "Do not impose a regulatory, cash-flow or human-review story on unrelated subjects. "
-                "Preserve the canonical factual refs; add no new claims, biography, prices or guarantees. "
+                "Preserve every required canonical factual ref unchanged; never select a server-template block_ref. "
+                "Add no new claims, product capabilities, biography, prices, guarantees, or causal cost/result comparisons. "
+                "Frame unsupported selection conditions as reader questions, not product facts or firm consequences. "
+                "During repair, put no Arabic number or Chinese counted quantity in authored blocks; "
+                "approved numbers remain visible in the canonical evidence. "
+                "For authored blocks set evidence_ids to [] and omit claim_id and block_ref. "
+                "Do not restate source paragraphs or use event-reporting verbs such as 已经, 宣布, 发布, 推出, 发生, 据悉, or 消息称. "
+                "Do not describe the review process, label facts/opinions, invent loaded labels, mix untranslated English into Chinese prose, "
+                "or use a generic 'worth watching', 'not ... but', or 'not only ... but also' wrapper. "
+                "Avoid 最直接的变化, 最直接感受到, 接下来要看/盯, 后面要看, 后续看点, 这类事件/处罚落到业务上, "
+                "真正改变的是, 真正要变的是, 规则被推到台前, and 规则会被重新审视. "
+                "Do not reuse previous_rejected_authored_text. Use validated_reference_copy only as an evidence-safe reference, "
+                "adapting the wording to the brief and owner_revision without copying it verbatim. "
                 "Keep already accepted surfaces unchanged. Return the specified compact block contract."
             )
         candidate = await run.call(_llm_json,
@@ -1137,6 +1187,10 @@ async def _run_compose(
         raw_candidates.append(candidate)
         combined = combine_publishable_surfaces(normalized_attempts)
         output = enforce_social_publishability(combined or normalized)
+        if combined is None:
+            output = annotate_partial_surface_failure(
+                output, normalized_attempts, compose_payload.get("channels", [])
+            )
         candidate_model = str(
             candidate.get("_model") or candidate.get("model") or "fallback"
         ).strip().lower()
@@ -1235,6 +1289,14 @@ async def _run_compose(
     )
     if payload.fact_expression_mode == "grounded_paraphrase":
         trace.evidence_mode = "grounded_paraphrase"
+    if output.status != ContentStatus.CONTENT_READY.value:
+        # Internal editorial review/repair needs the candidate copy, but a
+        # failed or unfinished final assessment must never expose a draft as
+        # publishable response fields. Preserve only bounded diagnostics.
+        output = output.model_copy(update={
+            "master_title": None, "master_content": None, "blocks": [],
+            "platform_variants": [], "evidence_refs": [],
+        })
     return output.model_copy(update={"generation_trace": trace})
 
 

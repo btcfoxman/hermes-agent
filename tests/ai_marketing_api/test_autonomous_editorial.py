@@ -87,6 +87,85 @@ def test_cross_role_brief_is_denied_before_any_model_call(monkeypatch):
     assert response.json()["detail"]["code"] == "editorial_brief_role_denied"
 
 
+@pytest.mark.parametrize("role,surface", [
+    ("industry", "master"), ("industry", "wechat_mp"), ("industry", "wechat_moments"),
+    ("commercial", "master"), ("personal_ip", "master"),
+])
+def test_public_brief_focused_repair_has_consistent_safe_reader_task_contract(
+    role, surface, monkeypatch
+):
+    payload = _role_compose_payload(role)
+    payload["channels"] = ["wechat_mp", "wechat_moments"]
+    payload["public_editorial_brief"] = {**_brief(role), "channels": payload["channels"]}
+    payload["runtime_budget"] = {"max_model_calls": 2}
+    calls = []
+
+    async def fake(system, body, fallback, *args, **kwargs):
+        calls.append(body)
+        candidate = _publishable_model_candidate(body)
+        if len(calls) == 1:
+            required = [
+                {"block_ref": block["block_ref"]}
+                for block in body["canonical_block_registry"] if block["required"]
+            ]
+            target = candidate if surface == "master" else next(
+                variant for variant in candidate["platform_variants"]
+                if variant["platform"] == surface
+            )
+            target["blocks"] = required
+        elif surface != "master":
+            candidate.pop("blocks")
+            candidate.pop("master_title")
+        return candidate
+
+    monkeypatch.setattr(api, "_llm_json", fake)
+    response = _request("POST", f"/api/v1/operators/{role}/compose", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert len(calls) == 2
+    retry_body = calls[1]
+    retry = retry_body["quality_retry"]
+    assert retry["focus_surface"] == surface
+    assert retry_body["public_editorial_brief"] == calls[0]["public_editorial_brief"]
+    assert retry_body["canonical_block_registry"] == calls[0]["canonical_block_registry"]
+    assert "put no Arabic number or Chinese counted quantity" in retry["instruction"]
+    assert "evidence_ids to []" in retry["block_binding_rule"]
+    assert "canonical factual ref unchanged" in retry["instruction"]
+    assert "owner_revision" in retry["instruction"]
+    assert "no new claims, product capabilities" in retry["instruction"]
+    assert "causal cost/result comparisons" in retry["instruction"]
+    recipe = retry["surface_contracts"][surface]["positive_writing_recipe"]
+    positive = json.dumps([
+        recipe, retry["positive_pattern"]["hook"],
+        retry["positive_pattern"]["analysis"], retry["required_shape"],
+    ])
+    assert "selection condition" in positive
+    assert "verification question" in positive
+    assert "quantity-free" in positive
+    for legacy in ("cash occupation", "cash-flow", "settlement", "bargaining", "approved remedy", "approved rule/remedy"):
+        assert legacy not in positive
+    contract = retry_body["response_contract"]
+    assert "single legal kind" in contract["authored_kind_rule"]
+    blocks = contract["blocks"] if surface == "master" else contract["platform_variants"][0]["blocks"]
+    authored = [block for block in blocks if "kind" in block]
+    assert authored[0]["kind"] == "transition"
+    assert all(block["kind"] in {"transition", "opinion"} for block in authored)
+    assert all(block["evidence_ids"] == [] for block in authored)
+    assert all("claim_id" not in block and "block_ref" not in block for block in authored)
+    expected_refs = [
+        {"block_ref": block["block_ref"]}
+        for block in retry_body["canonical_block_registry"] if block["required"]
+    ]
+    assert [block for block in blocks if "block_ref" in block] == expected_refs
+    # A successful structural repair cannot self-certify the independent
+    # editor when the unchanged global call budget leaves no review call.
+    assert data["generation_trace"]["model_calls"] == 2
+    assert data["generation_trace"]["editorial_review"] == "not_completed"
+    assert data["status"] == "quality_insufficient"
+    assert data["master_content"] is None
+    assert data["blocks"] == data["platform_variants"] == []
+
+
 @pytest.mark.parametrize("passed", [True, False])
 def test_editorial_review_is_separate_from_safe_structure(passed, monkeypatch):
     payload = _compose_payload()
@@ -114,6 +193,9 @@ def test_editorial_review_is_separate_from_safe_structure(passed, monkeypatch):
     assert data["requires_human_review"] is True
     if not passed:
         assert "editorial_review_failed" in data["critic"]["errors"]
+        assert data["master_title"] is None
+        assert data["master_content"] is None
+        assert data["blocks"] == data["platform_variants"] == data["evidence_refs"] == []
 
 
 def test_model_cannot_self_attest_editorial_pass_in_compose(monkeypatch):
@@ -135,6 +217,8 @@ def test_model_cannot_self_attest_editorial_pass_in_compose(monkeypatch):
     assert data["status"] == "quality_insufficient"
     assert data["generation_trace"]["budget_exhausted"] is True
     assert data["generation_trace"]["editorial_review"] == "not_completed"
+    assert data["master_content"] is None
+    assert data["blocks"] == data["platform_variants"] == data["evidence_refs"] == []
 
 
 def test_global_budget_limits_partial_surface_repair(monkeypatch):
@@ -159,7 +243,9 @@ def test_global_budget_limits_partial_surface_repair(monkeypatch):
 
 def test_elapsed_deadline_cancels_model_and_reports_budget(monkeypatch):
     run = BoundedModelRun(RuntimeBudget(max_elapsed_seconds=1))
-    run.started -= 0.99
+    # Leave enough startup time for Windows' event-loop scheduler; the test
+    # must exercise cancellation during a call, not pre-call exhaustion.
+    run.started -= 0.9
     cancelled = []
 
     async def slow(*args, **kwargs):

@@ -2192,6 +2192,9 @@ def enforce_social_publishability(
     return OperatorContentOutput(**data)
 
 
+_MAX_SOCIAL_SURFACE_SEARCH_NODES = 4096
+
+
 def combine_publishable_surfaces(
     outputs: Sequence[OperatorContentOutput],
 ) -> Optional[OperatorContentOutput]:
@@ -2233,12 +2236,17 @@ def combine_publishable_surfaces(
         return None
 
     platform_order = [variant.platform for variant in ready[0].platform_variants]
-    selected_variants: List[PlatformVariant] = []
-    used_signatures: set[tuple[str, ...]] = set()
-    used_titles: set[str] = set()
-    for platform in platform_order:
-        options = [
-            variant
+    options_by_platform = [
+        [
+            (
+                variant,
+                _editorial_signature(variant.blocks),
+                re.sub(
+                    r"[\s，,；;。！？!?：:、‘’“”\"']+",
+                    "",
+                    variant.title,
+                ).lower(),
+            )
             for output in ready
             for variant in output.platform_variants
             if variant.platform == platform
@@ -2248,31 +2256,41 @@ def combine_publishable_surfaces(
                 title=variant.title,
             )
         ]
-        selected = next(
-            (
-                variant
-                for variant in options
-                if _editorial_signature(variant.blocks) not in used_signatures
-                and re.sub(
-                    r"[\s，,；;。！？!?：:、‘’“”\"']+",
-                    "",
-                    variant.title,
-                ).lower()
-                not in used_titles
-            ),
-            None,
-        )
-        if selected is None:
-            return None
-        selected_variants.append(selected)
-        used_signatures.add(_editorial_signature(selected.blocks))
-        used_titles.add(
-            re.sub(
-                r"[\s，,；;。！？!?：:、‘’“”\"']+",
-                "",
-                selected.title,
-            ).lower()
-        )
+        for platform in platform_order
+    ]
+    if any(not options for options in options_by_platform):
+        return None
+
+    selected_variants: List[PlatformVariant] = []
+    used_signatures: set[tuple[str, ...]] = set()
+    used_titles: set[str] = set()
+    searched_nodes = 0
+
+    def select_variants(platform_index: int) -> bool:
+        nonlocal searched_nodes
+        if platform_index == len(options_by_platform):
+            return True
+        for variant, signature, title in options_by_platform[platform_index]:
+            # Count every considered candidate, including conflicts. A first
+            # choice can block a later platform even when another whole-surface
+            # combination works, but exploring alternatives must stay bounded.
+            if searched_nodes >= _MAX_SOCIAL_SURFACE_SEARCH_NODES:
+                return False
+            searched_nodes += 1
+            if signature in used_signatures or title in used_titles:
+                continue
+            selected_variants.append(variant)
+            used_signatures.add(signature)
+            used_titles.add(title)
+            if select_variants(platform_index + 1):
+                return True
+            selected_variants.pop()
+            used_signatures.remove(signature)
+            used_titles.remove(title)
+        return False
+
+    if not select_variants(0):
+        return None
 
     warnings = list(
         dict.fromkeys(
@@ -2386,6 +2404,72 @@ def missing_publishable_surfaces(
         ):
             missing.append(platform)
     return missing
+
+
+def annotate_partial_surface_failure(
+    output: OperatorContentOutput,
+    attempts: Sequence[OperatorContentOutput],
+    platforms: Sequence[str],
+) -> OperatorContentOutput:
+    """Scope a failed focused repair's diagnostics to retained whole surfaces.
+
+    This is only for the deterministic repair loop when aggregation failed.
+    It neither assembles content nor certifies an editorial review. A narrow
+    attempt's omitted surfaces may be placeholders, even though an earlier
+    valid surface is still retained. Global and evidence-safety blockers must
+    remain, including when every surface passed separately but cannot combine.
+    """
+    if _value(output.status) == ContentStatus.CONTENT_READY.value:
+        return output
+    remaining = missing_publishable_surfaces(attempts, platforms)
+    retained = [
+        surface
+        for surface in dict.fromkeys(["master", *platforms])
+        if surface not in remaining
+    ]
+
+    def retained_social_error(error: str) -> bool:
+        parts = error.split(":", 2)
+        return (
+            len(parts) > 1
+            and parts[0].startswith("social_")
+            and parts[1] in retained
+        )
+
+    data = _dump(output)
+    errors = [error for error in output.critic.errors if not retained_social_error(error)]
+    risks = [
+        risk for risk in data["risk_flags"]
+        if not (
+            risk["blocking"]
+            and risk["code"] == risk["message"].split(":", 1)[0]
+            and retained_social_error(risk["message"])
+        )
+    ]
+    if not errors:
+        # Existing diagnostics may have been capped before retained-surface
+        # placeholders were removed. An empty remaining list is not proof of
+        # cross-surface compatibility, and must never promote this failure.
+        errors = ["focused_repair_package_incomplete"]
+        risks = [{"code": errors[0], "message": errors[0], "blocking": True}, *risks][:50]
+    check = CriticCheck(
+        code="focused_repair_surface_state",
+        passed=False,
+        message=(
+            f"Deterministic surfaces retained: {', '.join(retained) or '(none)'}. "
+            f"Remaining: {', '.join(remaining) or '(none)'}. "
+            "Whole-package validation still failed; retained does not mean editorially certified. "
+            "Omitted surfaces in the latest focused attempt do not replace retained surfaces."
+        ),
+    )
+    data["critic"] = {
+        **data["critic"],
+        "passed": False,
+        "errors": errors,
+        "checks": [*data["critic"]["checks"][:29], _dump(check)],
+    }
+    data["risk_flags"] = risks
+    return OperatorContentOutput(**data)
 
 
 def publishable_editorial_references(

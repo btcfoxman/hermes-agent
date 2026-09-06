@@ -2982,6 +2982,106 @@ def test_terminal_social_gate_accepts_deep_distinct_model_editorial():
     )
 
 
+def _aggregation_retry_attempts(*, collision: str | None = None):
+    from tests.ai_marketing_api.test_operator_api import _publishable_model_candidate
+
+    fact = "The vendor released version 2."
+    source = _context(
+        "official-aggregation",
+        "industry",
+        "industry",
+        "source_item",
+        content=fact,
+        source_tier="official",
+    )
+    request = _request(
+        [source],
+        [_claim(fact, "fact", [source.record_id])],
+        channels=["wechat_mp", "xiaohongshu"],
+    )
+    registry = OperatorRegistry()
+    authorized = registry.authorize(OperatorRole.INDUSTRY, [source], AS_OF)
+    fallback = build_content_fallback(
+        registry, OperatorRole.INDUSTRY, request, authorized,
+    )
+    payload = content_request_payload(OperatorRole.INDUSTRY, request, authorized)
+    first = _publishable_model_candidate(payload)
+    first["platform_variants"][1]["blocks"] = [
+        block for block in first["blocks"] if "block_ref" in block
+    ]
+    second = _publishable_model_candidate(payload)
+    second.pop("blocks")
+    second.pop("master_title")
+    second["platform_variants"][0]["title"] = "version 2 channel script"
+    second["platform_variants"][1]["title"] = first["platform_variants"][0]["title"]
+    if collision == "title":
+        second["platform_variants"][0]["title"] = first["platform_variants"][0]["title"]
+    elif collision == "signature":
+        second["platform_variants"][1]["title"] = "version 2 xiaohongshu note"
+        second["platform_variants"][1]["blocks"] = deepcopy(
+            second["platform_variants"][0]["blocks"]
+        )
+    return [
+        normalize_content_output(
+            registry, OperatorRole.INDUSTRY, request, authorized, fallback, candidate,
+        )
+        for candidate in (first, second)
+    ]
+
+
+@pytest.mark.parametrize("reverse_attempts", [False, True])
+def test_surface_aggregation_backtracks_independently_of_attempt_order(reverse_attempts):
+    attempts = _aggregation_retry_attempts()
+    original = [attempt.model_dump() for attempt in attempts]
+    assert all(attempt.status == ContentStatus.CONTENT_READY.value for attempt in attempts)
+    assert all(not attempt.critic.errors for attempt in attempts)
+    assert all(
+        enforce_social_publishability(attempt).status == ContentStatus.QUALITY_INSUFFICIENT.value
+        for attempt in attempts
+    )
+    assert missing_publishable_surfaces(attempts, ["wechat_mp", "xiaohongshu"]) == []
+
+    combined = combine_publishable_surfaces(
+        list(reversed(attempts)) if reverse_attempts else attempts
+    )
+
+    assert combined is not None
+    assert combined.master_title == attempts[0].master_title
+    assert combined.blocks == attempts[0].blocks
+    # A's first title conflicts with B's only valid title. Keep the later
+    # whole A and B variants, without touching their prose or evidence hashes.
+    assert combined.platform_variants == attempts[1].platform_variants
+    assert enforce_social_publishability(combined).status == ContentStatus.CONTENT_READY.value
+    assert [attempt.model_dump() for attempt in attempts] == original
+
+
+@pytest.mark.parametrize("collision", ["title", "signature"])
+def test_surface_aggregation_returns_none_without_a_distinct_combination(collision):
+    attempts = _aggregation_retry_attempts(collision=collision)
+
+    assert all(attempt.status == ContentStatus.CONTENT_READY.value for attempt in attempts)
+    assert all(not attempt.critic.errors for attempt in attempts)
+    assert combine_publishable_surfaces(attempts) is None
+    assert combine_publishable_surfaces(list(reversed(attempts))) is None
+
+
+@pytest.mark.parametrize("node_limit, succeeds", [(3, False), (4, True)])
+def test_surface_aggregation_search_counts_conflicts_toward_its_bound(
+    monkeypatch, node_limit, succeeds,
+):
+    attempts = _aggregation_retry_attempts()
+    monkeypatch.setattr(
+        "ai_marketing_api.operator_content._MAX_SOCIAL_SURFACE_SEARCH_NODES",
+        node_limit,
+    )
+
+    # Visit A=X, rejected B=X, A=Y, then accepted B=X. Exhausting the
+    # search before the fourth candidate must not expose a partial package.
+    combined = combine_publishable_surfaces(attempts)
+
+    assert (combined is not None) is succeeds
+
+
 def test_personal_background_fact_cannot_replace_an_approved_personal_card():
     industry = _context(
         "industry-1",

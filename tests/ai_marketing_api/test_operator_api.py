@@ -507,6 +507,163 @@ def test_compose_targeted_retries_only_request_the_remaining_surface(monkeypatch
     assert len(calls) == 3
 
 
+@pytest.mark.parametrize("max_calls", [2, 3])
+def test_failed_focused_repair_reports_retained_surfaces_without_body(monkeypatch, max_calls):
+    payload = _compose_payload()
+    payload["channels"] = ["wechat_mp", "wechat_channels", "xiaohongshu"]
+    payload["runtime_budget"] = {"max_model_calls": max_calls}
+    calls = []
+
+    async def fake_llm(system, body, fallback, *args, **kwargs):
+        calls.append(body)
+        candidate = _publishable_model_candidate(body)
+        required = [
+            {"block_ref": block["block_ref"]}
+            for block in body["canonical_block_registry"] if block["required"]
+        ]
+        if len(calls) == 1:
+            for variant in candidate["platform_variants"]:
+                if variant["platform"] != "wechat_mp":
+                    variant["blocks"] = required
+        else:
+            # Follow the compact contract exactly: omit the historical master
+            # and every other channel. Only the middle repair can succeed.
+            candidate.pop("blocks")
+            candidate.pop("master_title")
+            if max_calls == 2 or body["channels"] == ["xiaohongshu"]:
+                candidate["platform_variants"][0]["blocks"] = required
+        return candidate
+
+    monkeypatch.setattr(marketing_api, "_llm_json", fake_llm)
+    response = _request("POST", "/api/v1/operators/industry/compose", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert len(calls) == max_calls
+    assert data["generation_trace"]["model_calls"] == max_calls
+    assert data["generation_trace"]["budget_exhausted"] is True
+    assert data["status"] == "quality_insufficient"
+    assert data["critic"]["passed"] is False
+    assert data["master_title"] is None
+    assert data["master_content"] is None
+    assert data["blocks"] == data["platform_variants"] == data["evidence_refs"] == []
+    retained = ["master", "wechat_mp"]
+    remaining = ["wechat_channels", "xiaohongshu"]
+    if max_calls == 3:
+        retained.append("wechat_channels")
+        remaining.remove("wechat_channels")
+    state = next(
+        check for check in data["critic"]["checks"]
+        if check["code"] == "focused_repair_surface_state"
+    )
+    assert state["passed"] is False
+    assert f"retained: {', '.join(retained)}." in state["message"]
+    assert f"Remaining: {', '.join(remaining)}." in state["message"]
+    assert "not mean editorially certified" in state["message"]
+    for error in data["critic"]["errors"]:
+        if error.startswith("social_"):
+            assert error.split(":", 2)[1] not in retained
+    for risk in data["risk_flags"]:
+        if risk["blocking"] and risk["code"].startswith("social_"):
+            assert risk["message"].split(":", 2)[1] not in retained
+    assert any(
+        error.startswith("social_editorial_depth_insufficient:xiaohongshu:")
+        for error in data["critic"]["errors"]
+    )
+
+
+@pytest.mark.parametrize("global_errors", [
+    [],
+    ["platform_titles_not_distinct", "platform_editorial_variants_not_distinct", "master-1:number_ungrounded"],
+])
+def test_partial_surface_diagnostics_never_clear_global_or_safety_failure(global_errors):
+    payload = marketing_api.OperatorComposeRequest.model_validate(_compose_payload())
+    role = marketing_api.OperatorRole.INDUSTRY
+    contexts = payload.authorized_context
+    fallback = marketing_api.build_content_fallback(marketing_api.OPERATOR_REGISTRY, role, payload, contexts)
+    candidate = _publishable_model_candidate(marketing_api.content_request_payload(role, payload, contexts))
+    normalized = marketing_api.normalize_content_output(
+        marketing_api.OPERATOR_REGISTRY, role, payload, contexts, fallback, candidate,
+    )
+    assert marketing_api.missing_publishable_surfaces([normalized], payload.channels) == []
+    stale_error = "social_editorial_template_forbidden:master"
+    errors = [stale_error, *global_errors]
+    data = normalized.model_dump(mode="json")
+    data.update(status="quality_insufficient", master_title=None, master_content=None,
+                blocks=[], platform_variants=[], evidence_refs=[])
+    data["critic"].update(passed=False, errors=errors)
+    data["risk_flags"] = [
+        {"code": error.split(":", 1)[0], "message": error, "blocking": True}
+        for error in errors
+    ]
+    failed = marketing_api.OperatorContentOutput.model_validate(data)
+    result = marketing_api.annotate_partial_surface_failure(failed, [normalized], payload.channels)
+    assert result.status == "quality_insufficient"
+    assert result.critic.passed is False
+    assert result.master_content is None
+    assert result.blocks == result.platform_variants == []
+    assert stale_error not in result.critic.errors
+    assert all(risk.message != stale_error for risk in result.risk_flags)
+    expected = global_errors or ["focused_repair_package_incomplete"]
+    assert result.critic.errors == expected
+    assert [risk.message for risk in result.risk_flags if risk.blocking] == expected
+    assert result.critic.checks[-1].passed is False
+    assert "Remaining: (none)." in result.critic.checks[-1].message
+    assert "Whole-package validation still failed" in result.critic.checks[-1].message
+
+
+@pytest.mark.parametrize("solvable", [True, False])
+def test_focused_repair_combines_compatible_whole_surfaces_without_more_calls(monkeypatch, solvable):
+    payload = _compose_payload()
+    payload["channels"] = ["wechat_mp", "xiaohongshu"]
+    payload["runtime_budget"] = {"max_model_calls": 6}
+    calls = []
+
+    async def fake_llm(system, body, fallback, *args, **kwargs):
+        calls.append(body)
+        candidate = _publishable_model_candidate({**body, "channels": payload["channels"]})
+        article, note = candidate["platform_variants"]
+        if len(calls) == 1:
+            note["blocks"] = [block for block in note["blocks"] if "block_ref" in block]
+        else:
+            assert body["channels"] == ["xiaohongshu"]
+            candidate.pop("master_title")
+            candidate.pop("blocks")
+            if solvable:
+                note["title"] = article["title"]
+                article["title"] = "version 2 alternative article"
+            else:
+                # Both whole surfaces independently pass but every A/B pair
+                # shares its authored signature. Global uniqueness must hold.
+                note["blocks"] = list(article["blocks"])
+        return candidate
+
+    monkeypatch.setattr(marketing_api, "_llm_json", fake_llm)
+    data = _request("POST", "/api/v1/operators/industry/compose", json=payload).json()
+    assert len(calls) == 2
+    assert data["generation_trace"]["model_calls"] == 2
+    assert data["generation_trace"]["budget_exhausted"] is False
+    if solvable:
+        assert data["status"] == "content_ready"
+        assert [variant["title"] for variant in data["platform_variants"]] == [
+            "version 2 alternative article", "version 2 wechat article",
+        ]
+        assert data["master_content"]
+    else:
+        assert data["status"] == "quality_insufficient"
+        assert data["master_content"] is None
+        assert data["blocks"] == data["platform_variants"] == []
+        assert "platform_editorial_variants_not_distinct" in data["critic"]["errors"]
+        assert any(
+            risk["code"] == "platform_editorial_variants_not_distinct" and risk["blocking"]
+            for risk in data["risk_flags"]
+        )
+        state = next(check for check in data["critic"]["checks"]
+                     if check["code"] == "focused_repair_surface_state")
+        assert "retained: master, wechat_mp, xiaohongshu." in state["message"]
+        assert "Remaining: (none)." in state["message"]
+        assert state["passed"] is False
+
+
 def test_compose_known_funds_story_cannot_bypass_unavailable_model(monkeypatch):
     fact = (
         "监管部门要求平台全额退还强制扣除酒店经营者的订单储备金，"
