@@ -3066,11 +3066,11 @@ def content_request_payload(
     if public_brief is not None:
         publication_brief = {
             "voice": {
-                "commercial": "A precise business operator helping the brief's audience assess a concrete customer task or selection condition, without assuming an evidenced capability or offer exists.",
-                "industry": "An informed industry operator explaining a concrete reader decision or verification question relevant to the brief, without imposing an event or changed operating outcome.",
-                "personal_ip": "A recognizable personal-IP operator offering an evidence-bounded point of view for the brief's audience; only canonical approved personal cards can supply biography or experience.",
+                "commercial": "A precise business operator following the brief's actual genre and purpose: explain the significance or tradeoffs of evidenced capabilities or offers, or help with a customer task when evidence is sparse.",
+                "industry": "An informed industry operator following the brief's actual genre and purpose: interpret established news or changes and their tradeoffs, or help with a reader task when evidence is sparse; never assume an unevidenced event or outcome.",
+                "personal_ip": "A recognizable personal-IP operator following the brief's actual genre and purpose, expressing authorized viewpoints and reflecting on approved experience; only canonical approved personal cards can supply biography or experience.",
             }[role.value],
-            "reader_outcome": "The brief's audience understands a relevant selection condition or what to verify for their task; unsupported product capabilities and outcomes remain unknown.",
+            "reader_outcome": "The audience gains the interpretation, tradeoff or authorized viewpoint called for by the brief's actual genre and purpose. With sparse evidence, a selection condition or verification question is a useful fallback; unsupported product capabilities and outcomes remain unknown.",
         }
     platform_briefs = {
         "wechat_moments": (
@@ -3111,14 +3111,14 @@ def content_request_payload(
     }
     if public_brief is not None:
         platform_briefs = {
-            "wechat_moments": "A concise personal-feed post: open with a brief-specific reader judgment, surface the canonical facts quickly, and land on a useful selection condition; do not force a CTA.",
-            "wechat_mp": "A readable analysis article: a concrete reader-task hook, short paragraphs, canonical evidence and distinct analysis of a selection condition or verification question; sparse evidence can support a concise article.",
-            "wechat_channels": "A spoken script with a clear reader-task opening, short sentences, canonical fact beats and a memorable selection question or supported judgment.",
-            "douyin": "A fast spoken script: open with the audience's concrete task, use compact canonical fact beats and a useful selection condition; avoid formal announcement language.",
-            "kuaishou": "A plainspoken short-video script: a direct reader-task opening, accessible canonical facts and a practical verification question; no bureaucratic tone.",
-            "xiaohongshu": "A scan-friendly note: a specific reader-task hook, compact information-card structure and a useful selection takeaway; no fake personal experience.",
-            "toutiao": "An evidence-led analysis article: open from the brief audience's task, include canonical facts and distinct analysis of a selection condition or verification question, without assuming a news event or result.",
-            "weitoutiao": "A compact reader-facing commentary: a brief-specific selection judgment, essential canonical facts and a useful verification question when evidence is incomplete.",
+            "wechat_moments": "A concise personal-feed post: open with a brief-specific judgment, surface the canonical facts quickly, and land on a useful interpretation or practical takeaway; do not force a CTA.",
+            "wechat_mp": "A readable analysis article: a brief-specific hook, short paragraphs, canonical evidence and distinct analysis of supported implications or tradeoffs; sparse evidence can instead support a concise selection condition or verification question.",
+            "wechat_channels": "A spoken script with a clear brief-specific opening, short sentences, canonical fact beats and a memorable supported interpretation or practical judgment.",
+            "douyin": "A fast spoken script: open with a concrete tension or reader task relevant to the brief, use compact canonical fact beats and a supported takeaway; avoid formal announcement language.",
+            "kuaishou": "A plainspoken short-video script: a direct brief-specific opening, accessible canonical facts and a practical interpretation or reader question; no bureaucratic tone.",
+            "xiaohongshu": "A scan-friendly note: a specific brief-aligned hook, compact information-card structure and a useful takeaway; no fake personal experience.",
+            "toutiao": "An evidence-led analysis article: a brief-specific opening, canonical facts and distinct interpretation of established events or tradeoffs; when evidence is sparse, use a selection condition or verification question instead of assuming a news event or result.",
+            "weitoutiao": "A compact reader-facing commentary: a brief-specific judgment, essential canonical facts and a useful interpretation, with a verification question when evidence is incomplete.",
         }
     payload: Dict[str, Any] = {
         "objective": public_brief.objective if public_brief else "Compose platform drafts from the approved public claims only.",
@@ -3144,10 +3144,10 @@ def content_request_payload(
         "publication_brief": {
             **publication_brief,
             "thesis_contract": [
-                "Choose a thesis about the exact audience, purpose and reader task in public_editorial_brief, respecting owner_revision. State a concrete selection condition or verification question, not a generic wrapper or a correction such as 'not X but Y'.",
-                "Anchor the thesis in approved evidence. Do not require an event, action, amount, remedy, capability or result that the evidence does not establish; leave unknown selection conditions as reader questions, not product facts.",
-                "Make each authored block useful: a platform-native reader-task hook, distinct analysis of a supported selection condition or verification question, and a natural ending. Do not invent causal cost/result comparisons, features, experience or guaranteed outcomes.",
-                "Prefer quantity-free reader-task prose. For industry copy, keep every Arabic number, date and Chinese counted quantity in canonical evidence blocks or evidence-checked titles. Use canonical refs for factual reporting, and make the analysis specific to the brief rather than restating the source.",
+                "Choose a thesis for the actual genre, audience and purpose in public_editorial_brief, respecting owner_revision. With sparse evidence, a reader task, selection condition or verification question is a fallback, not a required genre. Avoid generic wrappers or a correction such as 'not X but Y'.",
+                "Anchor the thesis in approved evidence. When evidence establishes an event, change or approved experience, analyze its meaning or tradeoffs and preserve authorized viewpoints. Signal inference in natural prose rather than asserting it as a new fact. Never require an event, amount, remedy, capability or result absent from the evidence.",
+                "Make each authored block useful: a platform-native brief-specific hook, distinct interpretation or analysis of a supported tradeoff, and a natural ending. When evidence is sparse, use a selection condition or verification question. Do not invent causal cost/result comparisons, features, experience or guaranteed outcomes.",
+                "Prefer quantity-free authored prose. For industry copy, keep every Arabic number, date and Chinese counted quantity in canonical evidence blocks or evidence-checked titles. Use canonical refs for factual reporting, and make the analysis specific to the brief rather than restating the source.",
             ] if public_brief is not None else [
                 "Choose one event-specific thesis before writing. State it as a direct declaration, not as a correction such as 'not X but Y'. Do not merely summarize the source or announce that facts and opinions are separate.",
                 "Build the thesis by connecting one approved actor, action, rule, amount, or remedy to one affected party and one concrete cost, choice, boundary, or observable consequence. Do not frame the relationship as 'versus'.",
@@ -3155,9 +3155,9 @@ def content_request_payload(
                 "Use factual nouns, actors, and rules from the approved claims as anchors. For industry copy, leave every number and date in canonical evidence blocks or evidence-checked titles; authored prose must not repeat or reinterpret a numeric token. Avoid abstract paragraphs that could be pasted under an unrelated news item.",
             ],
             "role_thesis": ({
-                "commercial": "Help the brief's audience evaluate a customer task or selection condition using only evidenced facts. Suggest what to verify when a capability or offer is not established; do not imply easier decisions, controlled risk or a business result as product claims.",
-                "industry": "Explain an evidence-supported selection condition or verification question for the industry audience in the brief. Do not assume a regulatory event, changed incentive, operating cost or observed consequence.",
-                "personal_ip": "Offer a personal point of view relevant to the brief's reader task. First-person present-tense judgment is optional; only exact canonical personal-card blocks may carry actions, experience, credentials or results. Do not invent biography to establish authority.",
+                "commercial": "Follow the brief's business purpose: explain the significance or customer tradeoffs of an evidenced capability or offer, clearly signaling inference without adding product claims. With sparse evidence, use a customer task, selection condition or verification question as a fallback.",
+                "industry": "Follow the brief's news or analysis purpose. When approved evidence establishes an event or change, analyze its meaning or tradeoffs, signaling inference without inventing facts. With sparse evidence, use a selection condition or verification question as a fallback; do not assume a regulatory event or outcome.",
+                "personal_ip": "Follow the brief's purpose and preserve authorized viewpoints or reflections on approved experience. First-person present-tense judgment is optional; only exact canonical personal-card blocks may carry actions, experience, credentials or results. Signal inference without inventing biography; with sparse evidence, a reader task is a fallback rather than a mandatory genre.",
             } if public_brief is not None else {
                 "commercial": (
                     "Connect the verified capability and offer to one concrete customer "
@@ -3190,7 +3190,7 @@ def content_request_payload(
                     "risk, or useful next conversation implied by the canonical facts."
                 ),
                 "industry": (
-                    "Write brief-specific reader-task analysis, a supported selection condition or a verification question. "
+                    "Write interpretation or tradeoff analysis of established facts appropriate to the brief, signaling inference without inventing facts; with sparse evidence, use a selection condition or verification question as a fallback. "
                     "Unknown capabilities and outcomes must remain questions; do not turn them into new factual assertions."
                     if public_brief is not None else
                     "Write analysis rather than another event assertion: name the changed "
@@ -3306,8 +3306,8 @@ def content_request_payload(
                 "by at least one distinct authored analysis block"
             ),
             "short_form": (
-                "include at least one authored block whose first sentence is a platform-native reader-task hook "
-                "and whose full text carries a useful selection condition or verification question; the same block may satisfy both jobs"
+                "include at least one authored block whose first sentence is a platform-native brief-specific hook "
+                "and whose full text carries a supported interpretation or practical takeaway; with sparse evidence, a selection condition or verification question suffices. The same block may satisfy both jobs"
                 if public_brief is not None else
                 "include at least one authored block whose first sentence is a "
                 "platform-native hook and whose full text carries one concrete "
@@ -3315,7 +3315,7 @@ def content_request_payload(
             ),
             "classification_rule": (
                 "kind=transition and kind=opinion are rendering hints. Reading order is mandatory: "
-                "hook first, then distinct analysis of a selection condition, verification question, or evidence-supported judgment."
+                "hook first, then distinct brief-aligned interpretation, tradeoff analysis or authorized viewpoint; with sparse evidence, use a selection condition or verification question as a fallback."
                 if public_brief is not None else
                 "kind=transition and kind=opinion are rendering hints. Reading order "
                 "is mandatory: hook first, then mechanism, tradeoff, implication, "
@@ -3329,7 +3329,7 @@ def content_request_payload(
             "The canonical registry exposed to the model contains approved evidence blocks only. Never invent or request a server-template block_ref; write all editorial prose as original opinion/transition objects.",
             "Write a native social master_title and a distinct title for each platform. Keep each title between 12 and 36 Chinese characters when possible; it may use grounded entity names and numbers from public claims plus a clearly editorial judgment, but no new event assertion.",
             "For the master, use two to six concise editorial blocks: a concrete hook, at least one distinct analytical step, and an optional natural close. For wechat_mp and toutiao use at least two authored blocks: a hook plus one analytical step. A short-feed or video variant may use one to three authored blocks; its first block must itself contain "
-            + ("a brief-specific reader task, selection condition or verification question, not merely announce the topic." if public_brief is not None else "a concrete event-specific implication, not merely announce the topic."),
+            + ("a brief-specific supported interpretation or practical takeaway, not merely announce the topic; a selection condition or verification question is a fallback when evidence is sparse." if public_brief is not None else "a concrete event-specific implication, not merely announce the topic."),
             "Editorial blocks may only be opinion, transition, or CTA. They must not add unsupported facts, named-entity claims, quotations, prices, promises, or unapproved first-person attribution.",
             "For personal_ip, authored transition/opinion blocks may use first-person present-tense judgment, but every action, project, customer, result, credential, and experience must remain in an exact canonical personal-card block. Never invent a new biographical or business assertion, and do not use first-person CTA copy.",
             "Every authored opinion, transition, or CTA object must set evidence_ids to [] and omit claim_id and block_ref. Evidence binding belongs only to canonical registry blocks selected by block_ref.",
@@ -3340,16 +3340,16 @@ def content_request_payload(
             ),
             "Do not use audit/meta copy such as '先把事实和判断分开', '以下分析', '编辑说明', '编辑观点', '事实部分', '公开信息只是起点', or '接下来可以继续观察'. The draft must read as publishable copy, not an internal review note.",
             "For industry copy, never use formulaic wrappers such as 不只是/不仅是/不是, 不只在X更在Y, 不在X而在Y, 不能只看X, paired 如果X；如果Y, 最值得注意的是, 接下来最值得关注, 真正改变的是, 真正要变的是, 规则被推到台前, 规则会被重新审视, 真正落点是, or 核心影响是. For every role, avoid phrases such as '对关注某领域的人来说', '从行业视角看', '这类案例的价值在于', '真正值得关注', or '重点在于'. "
-            + ("State a concrete selection condition or verification question directly. Every analytical block must advance a thesis tied to the brief's reader task and approved evidence." if public_brief is not None else "State the concrete actor-action-consequence relationship directly. Every analytical block must advance a thesis tied to this event."),
+            + ("State a brief-aligned interpretation or judgment directly, signaling inference in natural prose. Every analytical block must advance the brief's purpose using approved evidence; a selection condition or verification question is a fallback when evidence is sparse." if public_brief is not None else "State the concrete actor-action-consequence relationship directly. Every analytical block must advance a thesis tied to this event."),
             "Treat Chinese counted quantities such as '十九项', '三家', or '两轮' exactly like Arabic numbers: use them only when the identical quantity appears in an approved factual block.",
             "When the approved source and target audience are Chinese, keep reader-facing prose in natural Chinese. Do not insert an untranslated multi-word English phrase unless that phrase already appears in an approved public claim.",
             "Keep the tone professional. Do not upgrade legal or business facts into loaded labels such as '灰色扣费', '霸王条款', '割韭菜', '黑幕', '套路', or '暴雷'.",
-            ("Build the thesis around the brief's audience, purpose and a concrete reader task, selection condition or verification question supported by canonical evidence. Do not assume a product capability, causal improvement or result; express what is unknown as a question." if public_brief is not None else "Build the thesis as a direct subject-action-consequence relationship already present in the approved facts. Name the affected actor, changed rule or incentive, and observable consequence instead of using a rhetorical contrast or merely saying the event is important."),
+            ("Build the thesis around the brief's actual genre, audience and purpose. Interpret established events, changes or approved experience without adding facts, and signal inference in natural prose. With sparse evidence, use a selection condition or verification question as a fallback; never assume an unsupported capability, causal improvement or result." if public_brief is not None else "Build the thesis as a direct subject-action-consequence relationship already present in the approved facts. Name the affected actor, changed rule or incentive, and observable consequence instead of using a rhetorical contrast or merely saying the event is important."),
             "Keep fact/opinion separation in block metadata, never as reader-facing wording. The published copy should not explain its own editorial process.",
-            ("Use a natural, useful selection judgment or verification question as the close. Do not force a CTA, disclaimer, unsupported firm consequence or generic observation list." if public_brief is not None else "Do not force a question, invitation, disclaimer, or CTA when a firm closing judgment is more natural."),
+            ("Use a natural, brief-aligned closing judgment or interpretation; with sparse evidence, a practical condition or verification question can close the draft. Do not force a CTA, disclaimer, unsupported firm consequence or generic observation list." if public_brief is not None else "Do not force a question, invitation, disclaimer, or CTA when a firm closing judgment is more natural."),
             "The server keeps required factual blocks verbatim for audit and renders long ones as concise source-exact fact beats. Do not repeat the full announcement in editorial prose.",
             "Do not turn an approved fact into a near-verbatim authored paragraph before or after its canonical block. Editorial prose must add "
-            + ("a useful reader task, selection condition or verification question instead of repeating the source." if public_brief is not None else "a mechanism, affected party, decision, or consequence instead of repeating the source."),
+            + ("a supported interpretation, tradeoff or authorized viewpoint instead of repeating the source; a reader task, selection condition or verification question is a fallback when evidence is sparse." if public_brief is not None else "a mechanism, affected party, decision, or consequence instead of repeating the source."),
             "Make each requested platform variant meaningfully different in title, rhythm, depth, and reader action while preserving every required factual block reference.",
         ],
     }
@@ -3376,7 +3376,7 @@ def content_request_payload(
         payload["evidence_scope_contract"] = [
             "The public brief supplies audience and editing intent, not additional facts. A positioning statement is not independent testing, demonstrated ease of use, or measured performance.",
             "Match depth to the available claims. When evidence is sparse, write a short concrete choice criterion or suggested reader task; do not invent features, interface steps, personal experience, customer results, prices, comparisons, or quantified value to fill an article.",
-            "Even a wechat_mp article may be concise. A useful opening, the evidenced positioning and a distinct practical choice judgment are enough; do not pad it to meet an imagined platform word count.",
+            "Even a wechat_mp article may be concise. Follow the brief's actual genre and purpose: a useful opening, canonical evidence and a distinct interpretation can suffice; with sparse positioning evidence, a practical choice judgment is enough. Do not pad it to meet an imagined platform word count.",
             "Phrase optional reader tasks as suggestions or questions, not assertions about what the product has done or can certainly achieve. A closing judgment is kind=opinion, not kind=cta; include a CTA only for a real invitation, and it is optional.",
         ]
     return payload

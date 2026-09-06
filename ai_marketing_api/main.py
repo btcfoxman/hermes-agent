@@ -922,8 +922,8 @@ async def _run_compose(
                     {
                         "kind": "opinion",
                         "text": (
-                            "distinct audience-relevant selection condition or verification question; "
-                            "no quantity, unsupported capability, cost/result comparison, source restatement, or banned wrapper"
+                            "distinct brief-aligned interpretation or tradeoff analysis; with sparse evidence, a selection condition or verification question; "
+                            "no quantity, unsupported capability, unsupported cost/result comparison, source restatement, or banned wrapper"
                             if payload.public_editorial_brief is not None
                             else "distinct mechanism or reader-impact analysis; no number, "
                             "source restatement, future-watch ending, or banned wrapper"
@@ -1114,16 +1114,16 @@ async def _run_compose(
             quality_retry = retry_payload["quality_retry"]
             for contract in surface_contracts.values():
                 contract["positive_writing_recipe"] = [
-                    "Open with a quantity-free reader task or selection question specific to the audience and purpose in public_editorial_brief, respecting owner_revision.",
-                    "Develop a concrete selection condition or verification question supported by the supplied evidence; frame unknowns as questions, never as product capabilities or promised outcomes.",
+                    "Open with a quantity-free hook matching the actual genre, audience and purpose in public_editorial_brief, respecting owner_revision; a reader task or selection question is a fallback when evidence is sparse.",
+                    "Develop an interpretation or tradeoff grounded in established facts or approved experience, preserving authorized viewpoints and signaling inference in natural prose without adding facts. With sparse evidence, use a selection condition or verification question; never turn unknowns into product capabilities or promised outcomes.",
                     "Use short, natural sentences in the source language. Do not invent product functionality, cost/result comparisons, causal improvements, prices, guarantees, or biography.",
-                    "Land on a useful reader decision or verification task, not a firm consequence that the evidence does not establish or a generic future-watch list.",
+                    "Land on a useful brief-aligned judgment or interpretation; with sparse evidence, a reader decision or verification task can suffice. Do not assert a firm consequence absent from the evidence or use a generic future-watch list.",
                     "Keep every required canonical evidence block_ref unchanged. The canonical blocks own facts and quantities; do not restate their source paragraph in authored prose.",
                 ]
             quality_retry["positive_pattern"] = {
                 "do_not_copy_literal_placeholders": True,
-                "hook": "[brief audience's concrete task] + [quantity-free selection question anchored to approved evidence]",
-                "analysis": "[evidence-supported selection condition] + [what the reader should verify when the evidence is silent]",
+                "hook": "[brief's actual genre and reader purpose] + [quantity-free evidence-anchored judgment or reader task]",
+                "analysis": "[supported interpretation, tradeoff or authorized viewpoint, signaling inference without adding facts] + [selection condition or verification question as a fallback when evidence is sparse]",
                 "bad_shapes": [
                     "retelling the source event or its numbers",
                     "inventing product capabilities, causal cost/result comparisons, or guaranteed outcomes",
@@ -1132,18 +1132,20 @@ async def _run_compose(
                 ],
             }
             quality_retry["required_shape"] = [
-                "a platform-native, quantity-free authored hook about the brief audience's task or selection question; leave factual reporting and quantities to canonical blocks",
-                "for master: at least one distinct authored analytical block after the hook, developing a supported selection condition or verification question",
+                "a platform-native, quantity-free authored hook matching the brief's actual genre and purpose; leave factual reporting and quantities to canonical blocks",
+                "for master: at least one distinct authored analytical block after the hook, developing a supported interpretation or tradeoff; with sparse evidence, a selection condition or verification question is a fallback",
                 "for wechat_mp and toutiao: at least one distinct authored analytical block after the hook",
-                "for shorter platforms: an authored block may combine the reader task and selection condition; do not add generic padding",
-                "a useful reader decision or verification task that respects owner_revision; CTA only if natural for the platform and approved brief",
+                "for shorter platforms: an authored block may combine the hook and a brief-aligned interpretation or practical takeaway; do not add generic padding",
+                "a useful brief-aligned judgment that respects owner_revision; with sparse evidence, a reader decision or verification task can suffice. CTA only if natural for the platform and approved brief",
             ]
             quality_retry["instruction"] = (
-                "Repair only focus_surface for the exact audience, product and purpose in public_editorial_brief. "
+                "Repair only focus_surface for the actual genre, audience and purpose in public_editorial_brief. "
                 "Respect owner_revision and its restrictions. Return top-level blocks only for master; "
                 "otherwise return exactly the requested platform variant and omit top-level blocks. "
                 "Use critic_errors and rejected text as diagnostics, not as publication copy. "
-                "Explain a quantity-free reader task, selection condition or verification question using the supplied evidence. "
+                "Analyze the meaning or tradeoffs of established facts or approved experience, preserving authorized viewpoints. "
+                "Signal inference in natural prose without adding facts. With sparse evidence, a quantity-free reader task, "
+                "selection condition or verification question is a fallback, not a mandatory genre. "
                 "Do not impose a regulatory, cash-flow or human-review story on unrelated subjects. "
                 "Preserve every required canonical factual ref unchanged; never select a server-template block_ref. "
                 "Add no new claims, product capabilities, biography, prices, guarantees, or causal cost/result comparisons. "

@@ -211,6 +211,9 @@ def test_public_brief_focused_repair_has_consistent_safe_reader_task_contract(
     assert "owner_revision" in retry["instruction"]
     assert "no new claims, product capabilities" in retry["instruction"]
     assert "causal cost/result comparisons" in retry["instruction"]
+    assert "actual genre, audience and purpose" in retry["instruction"]
+    assert "Signal inference in natural prose without adding facts" in retry["instruction"]
+    assert "a fallback, not a mandatory genre" in retry["instruction"]
     recipe = retry["surface_contracts"][surface]["positive_writing_recipe"]
     positive = json.dumps([
         recipe, retry["positive_pattern"]["hook"],
@@ -241,6 +244,46 @@ def test_public_brief_focused_repair_has_consistent_safe_reader_task_contract(
     assert data["status"] == "quality_insufficient"
     assert data["master_content"] is None
     assert data["blocks"] == data["platform_variants"] == []
+
+
+@pytest.mark.parametrize("role,objective,role_support", [
+    ("commercial", "Explain the customer tradeoffs of the approved capability", "customer tradeoffs"),
+    ("industry", "Interpret the significance of the verified industry release", "event or change"),
+    ("personal_ip", "Reflect on the owner's approved experience and viewpoint", "preserve authorized viewpoints"),
+])
+def test_public_brief_supports_evidenced_genres_with_sparse_evidence_fallback(
+    role, objective, role_support,
+):
+    raw = _role_compose_payload(role)
+    baseline = api.OperatorComposeRequest.model_validate(raw)
+    baseline_payload = api.content_request_payload(role, baseline, baseline.authorized_context)
+    raw["public_editorial_brief"] = {
+        **_brief(role), "objective": objective, "angle": objective,
+        "channels": raw["channels"],
+    }
+    request = api.OperatorComposeRequest.model_validate(raw)
+    payload = api.content_request_payload(role, request, request.authorized_context)
+    publication = payload["publication_brief"]
+    thesis = " ".join(publication["thesis_contract"])
+
+    assert payload["objective"] == objective
+    assert payload["approved_editorial_brief"]["angle"] == objective
+    assert "actual genre and purpose" in publication["voice"]
+    assert role_support in publication["role_thesis"]
+    assert "a fallback, not a required genre" in thesis
+    assert "When evidence establishes an event, change or approved experience" in thesis
+    assert "Signal inference in natural prose rather than asserting it as a new fact" in thesis
+    assert "preserve authorized viewpoints" in thesis
+    assert "Do not invent causal cost/result comparisons" in thesis
+    assert "sparse evidence" in publication["role_thesis"]
+    assert "fallback" in publication["role_thesis"]
+    assert "interpretation" in payload["response_contract"]["editorial_shape"]["classification_rule"]
+    assert "fallback" in payload["response_contract"]["editorial_shape"]["classification_rule"]
+    assert payload["canonical_block_registry"] == baseline_payload["canonical_block_registry"]
+    assert payload["claims"] == baseline_payload["claims"]
+    assert request.runtime_budget == baseline.runtime_budget
+    assert len(set(payload["platform_editorial_briefs"].values())) == len(raw["channels"])
+    assert "meaningfully different in title, rhythm, depth, and reader action" in payload["response_contract"]["safety"][-1]
 
 
 @pytest.mark.parametrize("passed", [True, False])
