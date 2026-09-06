@@ -16,7 +16,7 @@ def test_test_workflow_targets_the_canonical_lan_service_with_an_immutable_tag()
     assert "environment: test" in workflow
     assert "IMAGE_TAG: test-${{ github.sha }}" in workflow
     assert 'echo "image_sha_tag=test-${GITHUB_SHA}"' in workflow
-    assert "cancel-in-progress: true" in workflow
+    assert "cancel-in-progress: false" in workflow
     assert workflow.count("if: github.ref == 'refs/heads/test'") == 3
     assert "cleanup_auth" in workflow
     assert "trap cleanup_auth EXIT" in workflow
@@ -30,6 +30,18 @@ def test_test_workflow_targets_the_canonical_lan_service_with_an_immutable_tag()
     assert ".venv/bin/python -m pip install" in workflow
     assert "bash scripts/run_tests.sh tests/ai_marketing_api" in workflow
     assert "python -m pytest" not in workflow
+
+
+def test_followup_push_queues_without_canceling_an_active_canonical_deployment():
+    workflow = (REPOSITORY_ROOT / ".github/workflows/deploy-test.yml").read_text(
+        encoding="utf-8"
+    )
+    concurrency = workflow.split("\nconcurrency:\n", 1)[1].split("\n\n", 1)[0]
+    assert concurrency.splitlines() == [
+        "  group: hermes-agent-canonical-test-deploy",
+        "  cancel-in-progress: false",
+    ]
+    assert "cancel-in-progress: true" not in workflow
 
 
 def test_deploy_script_preserves_server_credentials_and_updates_only_canonical_hermes():

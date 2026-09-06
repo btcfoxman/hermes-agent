@@ -8,7 +8,7 @@ on:
 
 concurrency:
   group: hermes-agent-canonical-test-deploy
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
