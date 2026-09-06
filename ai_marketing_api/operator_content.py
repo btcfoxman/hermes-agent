@@ -983,6 +983,8 @@ def _safe_master_title(
     candidate_title: Any = None,
     *,
     role: OperatorRole | str | None = None,
+    diagnostic_warnings: Optional[List[str]] = None,
+    surface: str = "master",
 ) -> str:
     requested = request.approved_proposal.title.strip()
     exact_texts = [block.text for block in approved_blocks if block.source_exact]
@@ -993,7 +995,9 @@ def _safe_master_title(
     source_text = "\n".join(exact_texts)
     role_value = _value(role) if role is not None else ""
 
-    def title_is_safe(value: str) -> bool:
+    def title_rejection_reason(value: str) -> Optional[str]:
+        if not value:
+            return "missing"
         numbers = _number_tokens(value)
         entities = [
             match.group(0) for match in _TITLE_ENTITY_RE.finditer(value)
@@ -1016,40 +1020,61 @@ def _safe_master_title(
                 and not _PERSONAL_EDITORIAL_ASSERTION_RE.search(value)
             )
         )
-        return bool(
-            8 <= len(value) <= 48
-            and not _HTML_RE.search(value)
-            and not _URL_RE.search(value)
-            and not _PROMISE_RE.search(value)
-            and not _GENERIC_EDITORIAL_META_RE.search(value)
-            and not (
+        # Preserve the existing title fence and its evaluation order. Reasons
+        # are fixed codes; rejected text, entities and quantities never enter
+        # diagnostics.
+        rejected = (
+            (not 8 <= len(value) <= 48, "invalid_length"),
+            (bool(_HTML_RE.search(value)), "forbidden_markup"),
+            (bool(_URL_RE.search(value)), "forbidden_url"),
+            (bool(_PROMISE_RE.search(value)), "forbidden_promise"),
+            (bool(_GENERIC_EDITORIAL_META_RE.search(value)), "forbidden_meta"),
+            (
                 role_value == OperatorRole.INDUSTRY.value
-                and _INDUSTRY_CONTRAST_CLICHE_RE.search(value)
-            )
-            and numbers.issubset(approved_numbers)
-            and all(entity in source_text for entity in entities)
-            and bool(numbers or entities or phrase_grounded)
-            and all(assertion in source_text for assertion in assertions)
-            and personal_safe
+                and bool(_INDUSTRY_CONTRAST_CLICHE_RE.search(value)),
+                "forbidden_wrapper",
+            ),
+            (not numbers.issubset(approved_numbers), "ungrounded_number"),
+            (not all(entity in source_text for entity in entities), "ungrounded_entity"),
+            (not bool(numbers or entities or phrase_grounded), "missing_fact_anchor"),
+            (not all(assertion in source_text for assertion in assertions), "ungrounded_assertion"),
+            (not personal_safe, "unsafe_personal_attribution"),
         )
+        return next((reason for failed, reason in rejected if failed), None)
 
-    if title_is_safe(supplied):
+    def title_is_safe(value: str) -> bool:
+        return title_rejection_reason(value) is None
+
+    supplied_reason = title_rejection_reason(supplied)
+    if supplied_reason is None:
         return supplied
+
+    def normalized_title(value: str) -> str:
+        if (
+            diagnostic_warnings is not None
+            and len(diagnostic_warnings) < 50
+            and (not supplied or value != supplied)
+        ):
+            diagnostic_warnings.append(
+                f"model_title_normalized:{surface}:{supplied_reason}"
+            )
+        return value
+
     # The proposal title has already passed owner approval, but it is still
     # editorial direction rather than evidence. Reuse it only through the
     # same deterministic title fence instead of falling back to a legalistic
     # source excerpt whenever the model title drifts.
     if title_is_safe(requested):
-        return requested
+        return normalized_title(requested)
     # A proposal title is an editorial direction, not evidence.  When it is
     # not itself a verbatim approved excerpt, extract a concise contiguous
     # span from the first verified claim instead of turning a whole source
     # paragraph into the headline.
     if not exact_texts:
-        return requested[:300]
+        return normalized_title(requested[:300])
     source = exact_texts[0].strip()
     if len(source) <= 48:
-        return source[:300]
+        return normalized_title(source[:300])
     spans = [
         match.span()
         for match in re.finditer(r"[^，；。！？!?]+[，；。！？!?]?", source)
@@ -1065,7 +1090,7 @@ def _safe_master_title(
             if 12 <= len(candidate) <= 48 and candidate in source:
                 candidates.append(candidate)
     if not candidates:
-        return source[:48]
+        return normalized_title(source[:48])
 
     def title_score(candidate: str) -> tuple[int, int, int, int, int]:
         has_entity = int(bool(_TITLE_ENTITY_RE.search(candidate)))
@@ -1080,7 +1105,7 @@ def _safe_master_title(
             -abs(len(candidate) - 36),
         )
 
-    return max(candidates, key=title_score)[:300]
+    return normalized_title(max(candidates, key=title_score)[:300])
 
 
 def _platform_blocks(
@@ -1946,6 +1971,13 @@ def normalize_content_output(
         approved_blocks,
         candidate.get("master_title"),
         role=role,
+        diagnostic_warnings=(
+            warnings
+            if not allow_legacy_canonical
+            and ("blocks" in candidate or "master_title" in candidate)
+            else None
+        ),
+        surface="master",
     )
     fallback_variants = {
         str(raw.get("platform") or "").strip().lower(): raw
@@ -1996,6 +2028,12 @@ def normalize_content_output(
                 approved_blocks,
                 raw.get("title"),
                 role=role,
+                diagnostic_warnings=(
+                    warnings
+                    if not allow_legacy_canonical and platform in by_platform
+                    else None
+                ),
+                surface=platform,
             )
             variants.append(
                 PlatformVariant(
@@ -2042,6 +2080,8 @@ def normalize_content_output(
         OperatorRisk(code=warning, message=warning, blocking=False)
         for warning in warnings
     )
+    # Diagnostics share the output's limit; never displace blocking errors.
+    risks = risks[:50]
     model = str(candidate.get("_model") or candidate.get("model") or "fallback")[:200]
 
     if errors:
@@ -2397,6 +2437,14 @@ def missing_publishable_surfaces(
                     variant.title,
                 ).lower()
                 for candidate in output.platform_variants
+                # A focused response intentionally omits other channels.
+                # Their deterministic titles are placeholders, not competing
+                # publishable titles. Real, valid candidates must stay unique.
+                if not _social_surface_quality_errors(
+                    candidate.blocks,
+                    surface=candidate.platform,
+                    title=candidate.title,
+                )
             )
             == 1
             for output in ready
@@ -3279,6 +3327,17 @@ def content_request_payload(
     payload["response_contract"] = {
         "schema_version": CONTENT_SCHEMA_VERSION,
         "master_title": "string",
+        "title_safety_rule": (
+            "Write a native master title of 8-40 characters and platform titles of 8-36 characters. "
+            "Platform titles must be distinct after whitespace and punctuation normalization. "
+            "Every title must retain a factual anchor from approved canonical factual text: "
+            "an approved number/date, a grounded named entity, or an exact contiguous span of at least four characters. "
+            "A reader-facing question or editorial judgment still needs this anchor. "
+            "Every number, named entity and factual assertion must be grounded in that canonical text; "
+            "do not add events, promises, unsupported personal attribution, URLs, HTML, audit/meta copy or banned wrappers. "
+            "An unsafe or unanchored title is replaced with a safe fallback, which may collide with another title. "
+            "Use model_title_normalized diagnostics to correct the indicated surface's title while preserving its safe body."
+        ),
         "blocks": (
             "array of actual block objects; each object must be either "
             '{"block_ref":"<one exact block_ref from canonical_block_registry>"} '
@@ -3327,7 +3386,7 @@ def content_request_payload(
             "Every factual, pricing, identity, or experience statement must use its exact block_ref from canonical_block_registry; never paraphrase it.",
             "Every platform variant must include every registry block marked required, but may choose its own safe order.",
             "The canonical registry exposed to the model contains approved evidence blocks only. Never invent or request a server-template block_ref; write all editorial prose as original opinion/transition objects.",
-            "Write a native social master_title and a distinct title for each platform. Keep each title between 12 and 36 Chinese characters when possible; it may use grounded entity names and numbers from public claims plus a clearly editorial judgment, but no new event assertion.",
+            "Write a native social master_title and a distinct title for each platform. Follow title_safety_rule, including its required canonical factual anchor even for a reader question; do not introduce a new event assertion.",
             "For the master, use two to six concise editorial blocks: a concrete hook, at least one distinct analytical step, and an optional natural close. For wechat_mp and toutiao use at least two authored blocks: a hook plus one analytical step. A short-feed or video variant may use one to three authored blocks; its first block must itself contain "
             + ("a brief-specific supported interpretation or practical takeaway, not merely announce the topic; a selection condition or verification question is a fallback when evidence is sparse." if public_brief is not None else "a concrete event-specific implication, not merely announce the topic."),
             "Editorial blocks may only be opinion, transition, or CTA. They must not add unsupported facts, named-entity claims, quotations, prices, promises, or unapproved first-person attribution.",

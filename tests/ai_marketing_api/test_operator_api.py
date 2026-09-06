@@ -370,6 +370,12 @@ def test_compose_repairs_each_shallow_surface_with_a_focused_request(monkeypatch
     assert "claims" not in calls[1]
     assert "authorized_context" not in calls[1]
     assert calls[1]["canonical_block_registry"]
+    title_rule = calls[0]["response_contract"]["title_safety_rule"]
+    assert "exact contiguous span of at least four characters" in title_rule
+    assert "approved number/date" in title_rule and "grounded named entity" in title_rule
+    assert all(call["response_contract"]["title_safety_rule"] == title_rule for call in calls[1:])
+    assert "response_contract.title_safety_rule" in calls[1]["quality_retry"]["instruction"]
+    assert "model_title_normalized:master:missing" in calls[1]["quality_retry"]["discarded_block_diagnostics"]
     assert calls[2]["quality_retry"]["requested_surfaces"] == ["wechat_mp"]
     assert calls[2]["channels"] == ["wechat_mp"]
     assert calls[3]["quality_retry"]["requested_surfaces"] == ["xiaohongshu"]

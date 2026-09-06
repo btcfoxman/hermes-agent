@@ -114,6 +114,10 @@ def test_initial_public_brief_contract_is_task_based_and_preserves_safety(role, 
     assert payload["authorized_context"] == baseline["authorized_context"]
     assert payload["approved_preferences"] == baseline["approved_preferences"]
     assert payload["channels"] == baseline["channels"]
+    title_rule = payload["response_contract"]["title_safety_rule"]
+    assert title_rule == baseline["response_contract"]["title_safety_rule"]
+    assert "exact contiguous span of at least four characters" in title_rule
+    assert "A reader-facing question or editorial judgment still needs this anchor" in title_rule
     assert request.runtime_budget == original.runtime_budget
     assert request.runtime_budget.max_model_calls == 6
     assert request.runtime_budget.max_elapsed_seconds == 180
@@ -225,6 +229,9 @@ def test_public_brief_focused_repair_has_consistent_safe_reader_task_contract(
     for legacy in ("cash occupation", "cash-flow", "settlement", "bargaining", "approved remedy", "approved rule/remedy"):
         assert legacy not in positive
     contract = retry_body["response_contract"]
+    assert contract["title_safety_rule"] == calls[0]["response_contract"]["title_safety_rule"]
+    assert "response_contract.title_safety_rule" in retry["instruction"]
+    assert "model_title_normalized" in retry["instruction"]
     assert "single legal kind" in contract["authored_kind_rule"]
     blocks = contract["blocks"] if surface == "master" else contract["platform_variants"][0]["blocks"]
     authored = [block for block in blocks if "kind" in block]

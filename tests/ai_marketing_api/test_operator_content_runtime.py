@@ -2984,6 +2984,137 @@ def test_terminal_social_gate_accepts_deep_distinct_model_editorial():
     )
 
 
+def _commercial_focused_title_fixture(title: str):
+    """Synthetic facts match the commercial/two-claim/three-channel shape,
+    not a reconstruction of any unavailable production model response.
+    """
+    facts = [
+        "AIID创作站是面向创作任务的统一工具箱。",
+        "AIID创作站提供按创作任务组织的工具入口。",
+    ]
+    contexts = [
+        _context(f"public-tool-{index}", "commercial", "company_public", "capability", content=fact)
+        for index, fact in enumerate(facts)
+    ]
+    request = _request(
+        contexts,
+        [_claim(context.content, "fact", [context.record_id]) for context in contexts],
+        channels=["wechat_mp", "wechat_moments", "weitoutiao"],
+    )
+    request = OperatorComposeRequest.model_validate({
+        **request.model_dump(mode="json"),
+        "approved_proposal": {
+            **request.approved_proposal.model_dump(mode="json"),
+            "title": "AIID创作站的任务选择边界",
+        },
+        "public_editorial_brief": {
+            "role_id": "commercial", "objective": "给创作者提供工具选择条件，不比较效果",
+            "audience": "动画内容创作者", "angle": "按手头任务判断适用条件",
+            "channels": ["wechat_mp", "wechat_moments", "weitoutiao"],
+        },
+    })
+    registry = OperatorRegistry()
+    authorized = registry.authorize(OperatorRole.COMMERCIAL, contexts, AS_OF)
+    fallback = build_content_fallback(registry, OperatorRole.COMMERCIAL, request, authorized)
+    payload = content_request_payload(OperatorRole.COMMERCIAL, request, authorized)
+    required = [{"block_ref": block["block_ref"]} for block in payload["canonical_block_registry"] if block["required"]]
+    assert len(required) == len(request.claims) == 2
+    candidate = {
+        "_model": "synthetic-focused-title-test",
+        "platform_variants": [{
+            "platform": "wechat_moments", "title": title,
+            "blocks": [
+                {"kind": "transition", "text": "先弄清手头的创作目标，工具选择才有明确的判断边界。", "evidence_ids": []},
+                *required,
+                {"kind": "opinion", "text": "材料整理和表达对象可以作为核对公开说明的起点。", "evidence_ids": []},
+            ],
+        }],
+    }
+    output = normalize_content_output(registry, OperatorRole.COMMERCIAL, request, authorized, fallback, candidate)
+    return registry, request, authorized, fallback, candidate, output
+
+
+@pytest.mark.parametrize("title, falls_back", [
+    ("选工具前，先弄清手头要做什么", True),
+    ("AIID创作站适合怎样的创作任务", False),
+])
+def test_focused_commercial_surface_is_not_missing_due_to_omitted_title_placeholders(title, falls_back):
+    _, request, _, _, _, output = _commercial_focused_title_fixture(title)
+    assert output.status == ContentStatus.CONTENT_READY.value
+    assert output.critic.errors == []
+    assert not any(warning.startswith("discarded_unsafe_model_editorial:") for warning in output.critic.warnings)
+    moments = next(variant for variant in output.platform_variants if variant.platform == "wechat_moments")
+    assert moments.title == (request.approved_proposal.title if falls_back else title)
+    title_warnings = [warning for warning in output.critic.warnings if warning.startswith("model_title_normalized:")]
+    assert title_warnings == (["model_title_normalized:wechat_moments:missing_fact_anchor"] if falls_back else [])
+    assert _social_surface_quality_errors(moments.blocks, surface=moments.platform, title=moments.title) == []
+    for variant in output.platform_variants:
+        if variant.platform != "wechat_moments":
+            assert variant.title == request.approved_proposal.title
+            assert any(block.origin == "server_template" for block in variant.blocks)
+    missing = missing_publishable_surfaces([output], request.channels)
+    assert "wechat_moments" not in missing
+    assert missing == ["master", "wechat_mp", "weitoutiao"]
+
+
+def test_focused_commercial_surface_still_rejects_a_real_title_collision():
+    registry, request, authorized, fallback, candidate, _ = _commercial_focused_title_fixture(
+        "AIID创作站适合怎样的创作任务"
+    )
+    duplicate = deepcopy(candidate["platform_variants"][0])
+    duplicate["platform"] = "weitoutiao"
+    duplicate["blocks"][0]["text"] = "整理自己的表达需求，再核对工具入口的适用条件。"
+    candidate["platform_variants"].append(duplicate)
+    output = normalize_content_output(registry, OperatorRole.COMMERCIAL, request, authorized, fallback, candidate)
+    valid = [variant for variant in output.platform_variants if variant.platform != "wechat_mp"]
+    assert all(not _social_surface_quality_errors(variant.blocks, surface=variant.platform, title=variant.title) for variant in valid)
+    assert missing_publishable_surfaces([output], request.channels) == ["master", *request.channels]
+    rejected = enforce_social_publishability(output)
+    assert rejected.status == ContentStatus.QUALITY_INSUFFICIENT.value
+    assert "platform_titles_not_distinct" in rejected.critic.errors
+    assert rejected.master_content is None and rejected.platform_variants == []
+
+
+@pytest.mark.parametrize("reverse_attempts", [False, True])
+def test_commercial_focused_title_fallback_retains_whole_surfaces_across_attempts(reverse_attempts):
+    registry, request, authorized, fallback, candidate, focused = _commercial_focused_title_fixture(
+        "选工具前，先弄清手头要做什么"
+    )
+    required = [block for block in candidate["platform_variants"][0]["blocks"] if "block_ref" in block]
+
+    def blocks(hook, analysis):
+        return [
+            {"kind": "transition", "text": hook, "evidence_ids": []},
+            *deepcopy(required),
+            {"kind": "opinion", "text": analysis, "evidence_ids": []},
+        ]
+
+    first = normalize_content_output(registry, OperatorRole.COMMERCIAL, request, authorized, fallback, {
+        "_model": "synthetic-commercial-first-draft",
+        "master_title": "AIID创作站该怎样理解适用边界",
+        "blocks": blocks("先明确表达对象，工具选择才有适用的判断标准。", "可以从手头素材和表达目标入手，核对工具的公开说明。"),
+        "platform_variants": [
+            {"platform": "wechat_mp", "title": "AIID创作站的选择需要核对什么", "blocks": blocks("整理自己的表达需求，再核对工具入口的适用条件。", "读者可以围绕素材准备和表达目标，逐项核对公开说明。")},
+            {"platform": "weitoutiao", "title": "AIID创作站怎样对应创作任务", "blocks": blocks("把手头任务说明白，再讨论适合怎样的工具入口。", "不妨先梳理素材与表达对象，把不清楚的适用条件留作核对问题。")},
+        ],
+    })
+    assert first.status == ContentStatus.CONTENT_READY.value and first.critic.errors == []
+    assert missing_publishable_surfaces([first], request.channels) == ["wechat_moments"]
+    attempts = [focused, first] if reverse_attempts else [first, focused]
+    original = [output.model_dump() for output in attempts]
+    assert missing_publishable_surfaces(attempts, request.channels) == []
+
+    combined = combine_publishable_surfaces(attempts)
+
+    assert combined is not None
+    assert combined.blocks == first.blocks and combined.master_title == first.master_title
+    assert combined.platform_variants == [
+        first.platform_variants[0], focused.platform_variants[1], first.platform_variants[2],
+    ]
+    assert enforce_social_publishability(combined).status == ContentStatus.CONTENT_READY.value
+    assert [output.model_dump() for output in attempts] == original
+
+
 def _aggregation_retry_attempts(*, collision: str | None = None):
     from tests.ai_marketing_api.test_operator_api import _publishable_model_candidate
 

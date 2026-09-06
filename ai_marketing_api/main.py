@@ -934,6 +934,7 @@ async def _run_compose(
             return blocks
 
         repair_response_contract = {
+            "title_safety_rule": compose_payload["response_contract"]["title_safety_rule"],
             "return_only_these_top_level_keys": [
                 "master_title",
                 "blocks",
@@ -1105,6 +1106,7 @@ async def _run_compose(
                             "discarded_unsafe_model_editorial:",
                             "model_platform_variant_missing:",
                             "model_platform_blocks_missing:",
+                            "model_title_normalized:",
                         )
                     )
                 ],
@@ -1162,6 +1164,11 @@ async def _run_compose(
                 "adapting the wording to the brief and owner_revision without copying it verbatim. "
                 "Keep already accepted surfaces unchanged. Return the specified compact block contract."
             )
+        retry_payload["quality_retry"]["instruction"] += (
+            " Follow response_contract.title_safety_rule for the requested title, including its canonical factual anchor. "
+            "Use model_title_normalized diagnostics to correct a replaced title; do not remove its anchor "
+            "when framing a reader question, or rewrite already safe blocks merely to change the title."
+        )
         candidate = await run.call(_llm_json,
             profile.system_prompt,
             retry_payload,
