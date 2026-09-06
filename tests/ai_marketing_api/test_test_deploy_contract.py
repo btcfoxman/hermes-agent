@@ -1,4 +1,8 @@
 from pathlib import Path
+import shutil
+import subprocess
+
+import pytest
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -32,9 +36,14 @@ def test_deploy_script_preserves_server_credentials_and_updates_only_canonical_h
     deploy_script = (REPOSITORY_ROOT / "test/deploy.sh").read_text(encoding="utf-8")
 
     assert 'APP_DIR="${APP_DIR:-/home/btcfoxman/docker/hermes-agent}"' in deploy_script
-    assert 'COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-hermes-agent}"' in deploy_script
+    assert (
+        'COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-hermes-agent}"' in deploy_script
+    )
     assert 'HERMES_HOST_PORT="${HERMES_HOST_PORT:-8095}"' in deploy_script
-    assert '[ "${resolved_app_dir}" = "/home/btcfoxman/docker/hermes-agent" ]' in deploy_script
+    assert (
+        '[ "${resolved_app_dir}" = "/home/btcfoxman/docker/hermes-agent" ]'
+        in deploy_script
+    )
     assert "deployment does not create or replace model credentials" in deploy_script
     assert "upsert_env_value" not in deploy_script
     assert '[[ ! "${IMAGE_TAG:-}" =~ ^test-[0-9a-f]{40}$ ]]' in deploy_script
@@ -48,9 +57,12 @@ def test_deploy_script_preserves_server_credentials_and_updates_only_canonical_h
     assert 'str(result.get("model") or "").lower() != "fallback"' in deploy_script
     assert '[(source_text, "fact", ["canonical-official-probe"])]' in deploy_script
     assert "retry 3 10 probe_industry_claim_contract" in deploy_script
-    assert 'docker compose \\\n    --project-name "${COMPOSE_PROJECT_NAME}"' in deploy_script
+    assert (
+        'docker compose \\\n    --project-name "${COMPOSE_PROJECT_NAME}"'
+        in deploy_script
+    )
     assert '"http://127.0.0.1:8095/health"' in deploy_script
-    assert 'http://127.0.0.1:${HERMES_HOST_PORT}/health' not in deploy_script
+    assert "http://127.0.0.1:${HERMES_HOST_PORT}/health" not in deploy_script
     assert "compose pull hermes-agent" in deploy_script
     assert "compose up -d --remove-orphans hermes-agent" in deploy_script
     assert "compose exec -T hermes-agent" in deploy_script
@@ -58,9 +70,7 @@ def test_deploy_script_preserves_server_credentials_and_updates_only_canonical_h
 
 
 def test_container_healthcheck_authenticates_canonical_operator_readiness():
-    compose = (REPOSITORY_ROOT / "test/docker-compose.yml").read_text(
-        encoding="utf-8"
-    )
+    compose = (REPOSITORY_ROOT / "test/docker-compose.yml").read_text(encoding="utf-8")
 
     assert "${IMAGE_TAG:?IMAGE_TAG must be an immutable test git SHA tag}" in compose
     assert "'Authorization': 'Bearer ' + os.environ['HERMES_API_KEY']" in compose
@@ -80,3 +90,111 @@ def test_env_example_documents_only_runtime_configuration():
     assert "HERMES_OPENAI_BASE_URL=" in env_example
     assert "HERMES_OPENAI_API_KEY=" in env_example
     assert "HERMES_API_KEY=" in env_example
+
+
+def test_host_deployment_is_locked_before_all_preflight_and_runtime_changes():
+    script = (REPOSITORY_ROOT / "test/deploy.sh").read_text(encoding="utf-8")
+    assert (
+        'readonly SHARED_DEPLOY_LOCK="/home/btcfoxman/docker/.ai-marketing-test-deploy.lock"'
+        in script
+    )
+    assert "umask 077" in script
+    assert 'exec 200>>"${SHARED_DEPLOY_LOCK}"' in script
+    assert "flock -w 1200 200" in script
+    assert "command -v flock" in script
+    assert '[ -L "${SHARED_DEPLOY_LOCK}" ]' in script
+    assert '[ ! "/proc/$$/fd/200" -ef "${SHARED_DEPLOY_LOCK}" ]' in script
+    assert "Waiting for shared LAN deployment lock" in script
+    assert "Acquired shared LAN deployment lock" in script
+    acquired = script.index("\nacquire_shared_deploy_lock\n")
+    for change in (
+        "resolved_app_dir=",
+        'mkdir -p "${APP_DIR}',
+        'if [ ! -f "${APP_DIR}/.env" ]',
+        "cp -f ",
+        "retry 5 10 docker_login_ghcr",
+        "compose config >/dev/null",
+        "retry 5 10 compose pull",
+        "compose up -d",
+        "for i in $(seq 1 30)",
+    ):
+        assert acquired < script.index(change)
+    assert "flock -u" not in script
+    assert "exec 200>&-" not in script
+    assert not any(
+        "rm " in line and "SHARED_DEPLOY_LOCK" in line for line in script.splitlines()
+    )
+    workflow = (REPOSITORY_ROOT / ".github/workflows/deploy-test.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "flock" not in workflow  # Hosted quality/image builds remain parallel.
+
+
+def _lock_fragment(path: Path) -> str:
+    script = (REPOSITORY_ROOT / "test/deploy.sh").read_text(encoding="utf-8")
+    function = script.split("acquire_shared_deploy_lock() {", 1)[1].split("\n}\n", 1)[0]
+    return (
+        "\n".join([
+            "set -euo pipefail",
+            "umask 077",
+            'log() { printf "%s\\n" "$*"; }',
+            "acquire_shared_deploy_lock() {" + function + "\n}",
+            "acquire_shared_deploy_lock",
+        ])
+        .replace("/home/btcfoxman/docker/.ai-marketing-test-deploy.lock", str(path))
+        .replace("flock -w 1200 200", "flock -w 1 200")
+    )
+
+
+@pytest.mark.skipif(
+    not (shutil.which("bash") and shutil.which("flock")),
+    reason="Linux Bash/flock integration",
+)
+def test_shared_lock_rejects_symlinks_and_keeps_the_target_untouched(tmp_path):
+    target = tmp_path / "target"
+    target.write_text("preserve", encoding="utf-8")
+    lock = tmp_path / "lock"
+    lock.symlink_to(target)
+    result = subprocess.run(
+        ["bash", "-c", _lock_fragment(lock)], capture_output=True, text=True, timeout=5
+    )
+    assert result.returncode != 0
+    assert "Refusing a symbolic-link" in result.stdout
+    assert target.read_text(encoding="utf-8") == "preserve"
+    assert lock.is_symlink()
+
+
+@pytest.mark.skipif(
+    not (shutil.which("bash") and shutil.which("flock")),
+    reason="Linux Bash/flock integration",
+)
+def test_shared_lock_serializes_waiters_and_persists_after_exit(tmp_path):
+    lock = tmp_path / "lock"
+    fragment = _lock_fragment(lock)
+    with subprocess.Popen(
+        ["bash", "-c", fragment + '\nprintf "holder-ready\\n"\nread -r release'],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    ) as holder:
+        try:
+            assert "Waiting" in holder.stdout.readline()
+            assert "Acquired" in holder.stdout.readline()
+            assert holder.stdout.readline().strip() == "holder-ready"
+            inode = lock.stat().st_ino
+            assert lock.stat().st_mode & 0o777 == 0o600
+            waiting = subprocess.run(
+                ["bash", "-c", fragment], capture_output=True, text=True, timeout=5
+            )
+            assert waiting.returncode != 0
+            assert "Timed out waiting" in waiting.stdout
+            assert "Acquired" not in waiting.stdout
+        finally:
+            holder.communicate("release\n", timeout=5)
+    after = subprocess.run(
+        ["bash", "-c", fragment], capture_output=True, text=True, timeout=5
+    )
+    assert after.returncode == 0, after.stderr
+    assert "Acquired" in after.stdout
+    assert lock.exists() and lock.stat().st_ino == inode

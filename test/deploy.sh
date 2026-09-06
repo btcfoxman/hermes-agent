@@ -13,6 +13,37 @@ log() {
   printf '[hermes-agent-deploy] %s\n' "$*"
 }
 
+acquire_shared_deploy_lock() {
+  # Every repository deploying to this small LAN host uses the same inode.
+  # Never unlink the lock: waiters must not accidentally lock different files.
+  readonly SHARED_DEPLOY_LOCK="/home/btcfoxman/docker/.ai-marketing-test-deploy.lock"
+  if ! command -v flock >/dev/null 2>&1; then
+    log "flock is required for serialized LAN deployment"
+    return 1
+  fi
+  if [ -L "${SHARED_DEPLOY_LOCK}" ] || { [ -e "${SHARED_DEPLOY_LOCK}" ] && [ ! -f "${SHARED_DEPLOY_LOCK}" ]; }; then
+    log "Refusing a symbolic-link or non-regular shared deployment lock"
+    return 1
+  fi
+  exec 200>>"${SHARED_DEPLOY_LOCK}"
+  if [ -L "${SHARED_DEPLOY_LOCK}" ] || [ ! -f "${SHARED_DEPLOY_LOCK}" ] || [ ! "/proc/$$/fd/200" -ef "${SHARED_DEPLOY_LOCK}" ]; then
+    log "Shared deployment lock changed while opening it; refusing deployment"
+    return 1
+  fi
+  log "Waiting for shared LAN deployment lock (up to 1200 seconds)"
+  if ! flock -w 1200 200; then
+    log "Timed out waiting for shared LAN deployment lock; no deployment changes were made"
+    return 1
+  fi
+  if [ -L "${SHARED_DEPLOY_LOCK}" ] || [ ! "/proc/$$/fd/200" -ef "${SHARED_DEPLOY_LOCK}" ]; then
+    log "Shared deployment lock changed while waiting; refusing deployment"
+    return 1
+  fi
+  log "Acquired shared LAN deployment lock; protecting preflight, pull, startup and health checks"
+  # FD 200 stays open through all deployment and EXIT cleanup operations.
+  # The operating system releases the lock when this process exits.
+}
+
 retry() {
   local attempts="$1"
   local delay="$2"
@@ -183,6 +214,8 @@ assert not any(
 ), result
 '
 }
+
+acquire_shared_deploy_lock
 
 resolved_app_dir="$(realpath -m "${APP_DIR}")"
 [ "${resolved_app_dir}" = "/home/btcfoxman/docker/hermes-agent" ] || {
