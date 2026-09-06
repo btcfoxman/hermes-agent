@@ -93,7 +93,9 @@ async def apply_grounded_paraphrases(
     }
     pairs: dict[str, tuple[Any, str]] = {}
     bindings: dict[tuple[str, str], str] = {}
-    reviews: list[ClaimBindingReview] = []
+    # A local editorial revision may retain already verified expressions on
+    # other surfaces. Their certificates must travel with the unchanged text.
+    reviews: list[ClaimBindingReview] = list(output.claim_binding_reviews)
     for surface, blocks in surfaces.items():
         for block in blocks:
             text = proposed.get((surface, block.binding_hash))

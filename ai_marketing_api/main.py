@@ -27,7 +27,7 @@ from ai_marketing_api.operator_content import (
     publishable_editorial_references,
 )
 from ai_marketing_api.operator_editorial import BoundedModelRun
-from ai_marketing_api.operator_review import apply_editorial_assessment, assess_editorial
+from ai_marketing_api.operator_review import apply_editorial_assessment, assess_editorial, replace_editorial_surfaces
 from ai_marketing_api.operator_grounding import apply_grounded_paraphrases
 from ai_marketing_api.operator_planning import EditorialPlanRequest, plan_editorial
 from ai_marketing_api.operator_runtime import (
@@ -1156,56 +1156,76 @@ async def _run_compose(
             model_args=(openai_base_url, openai_api_key, model_name, timeout_seconds),
             owner_revision=compose_payload.get("owner_revision"),
         )
-        # One targeted editorial revision, followed by a new independent review.
-        # Reserve both calls; never consume the last call on an unreviewable edit.
+        # One bounded batch fixes all editor-identified surfaces together. A
+        # single-surface repair cannot fix a multi-platform assessment, and
+        # previously accepted surfaces must remain exactly unchanged.
         allowed_surfaces = {"master", *payload.channels}
-        failed = [surface for surface in (review.failed_surfaces if review else []) if surface in allowed_surfaces] or ["master"]
-        repairable = [surface for surface in failed if sum(
-            attempt.stage == "repair" and attempt.surface == surface for attempt in run.attempts
-        ) < payload.runtime_budget.max_surface_revisions]
+        failed = list(dict.fromkeys(surface for surface in (review.failed_surfaces if review else []) if surface in allowed_surfaces)) or ["master"]
+        repairable = [surface for surface in failed if surface_attempts.get(surface, 0) < payload.runtime_budget.max_surface_revisions]
+        # A paraphrase-producing repair also needs independent claim review.
+        reserved_calls = 3 if payload.fact_expression_mode == "grounded_paraphrase" else 2
         if (
             review is not None and not review.passed
             and repairable
-            and len(run.attempts) + 2 <= payload.runtime_budget.max_model_calls
+            and len(run.attempts) + reserved_calls <= payload.runtime_budget.max_model_calls
             and run.remaining_seconds > 0
         ):
-            repair_surface = repairable[0]
+            for surface in repairable:
+                surface_attempts[surface] = surface_attempts.get(surface, 0) + 1
+            repair_channels = [surface for surface in repairable if surface != "master"]
             editorial_repair_payload = {
                 **compose_payload,
-                "channels": [] if repair_surface == "master" else [repair_surface],
+                "channels": repair_channels,
                 "editorial_revision": {
-                    "focus_surface": repair_surface,
+                    "focus_surface": repairable[0] if len(repairable) == 1 else "selected_surfaces",
+                    "focus_surfaces": repairable,
                     "issues": review.issues,
                     "previous_draft": {
                         "master_title": output.master_title,
                         "master_content": output.master_content,
                         "platform_variants": [{"platform": v.platform, "title": v.title, "body": v.body} for v in output.platform_variants],
                     },
-                    "instruction": "Revise only focus_surface to address the independent editor's specific issues. Return its blocks/title under the original structured response contract. Other surfaces are retained. No new claims, privacy, authorization, pricing or identity information may be introduced.",
+                    "instruction": "Revise exactly focus_surfaces to address every applicable independent-editor issue. Return top-level blocks/master_title only when master is listed, and exactly the channels listed in this request as platform_variants. Other surfaces are retained unchanged. Follow the original canonical block contract; ordinary fact public_text may be proposed for independent verification. No new claims, privacy, authorization, pricing or identity information may be introduced. Use transition/opinion for a closing judgment; CTA only for an actual invitation. Do not invent product instructions or results to make the advice more concrete: express an optional reader task or question where product detail is not evidenced.",
                 },
             }
             repaired_candidate = await run.call(
                 _llm_json, profile.system_prompt, editorial_repair_payload, fallback,
                 openai_base_url, openai_api_key, model_name, timeout_seconds,
-                stage="repair", surface=repair_surface,
+                stage="repair", surface=",".join(repairable),
             )
+            # Ignore unrequested changes even if the model returns an entire
+            # package. In particular, they cannot introduce a new paraphrase
+            # into a surface the independent editor already accepted.
+            repair_variants = repaired_candidate.get("platform_variants")
+            repair_variants = repair_variants if isinstance(repair_variants, list) else []
+            scoped_candidate = {
+                **repaired_candidate,
+                "platform_variants": [variant for variant in repair_variants
+                    if isinstance(variant, dict) and variant.get("platform") in repair_channels],
+            }
+            if "master" not in repairable:
+                for key in ("blocks", "master_title", "master_content"):
+                    scoped_candidate.pop(key, None)
             repaired = normalize_content_output(
-                OPERATOR_REGISTRY, role_id, payload, contexts, fallback, repaired_candidate,
+                OPERATOR_REGISTRY, role_id, payload, contexts, fallback, scoped_candidate,
             )
-            # A later independently safe surface replaces the earlier one. This
-            # intentionally differs from preserving the first safe draft before
-            # an editor has found an audience/value problem with that draft.
-            combined = combine_publishable_surfaces([repaired, *normalized_attempts])
-            output = enforce_social_publishability(combined or repaired)
-            if output.status == ContentStatus.CONTENT_READY.value:
+            combined = replace_editorial_surfaces(output, repaired, repairable)
+            if combined is not None:
+                output = combined
+                if payload.fact_expression_mode == "grounded_paraphrase":
+                    output = await apply_grounded_paraphrases(
+                        output=output, raw_candidates=[scoped_candidate], run=run, llm=_llm_json,
+                        system=profile.system_prompt,
+                        model_args=(openai_base_url, openai_api_key, model_name, timeout_seconds),
+                    )
                 review, review_state = await assess_editorial(
                     output=output, brief=compose_payload.get("public_editorial_brief") or compose_payload.get("approved_editorial_brief", {}), run=run, llm=_llm_json,
                     system=profile.system_prompt,
                     model_args=(openai_base_url, openai_api_key, model_name, timeout_seconds),
                     owner_revision=compose_payload.get("owner_revision"),
                 )
-            else:
-                review, review_state = None, "not_completed"
+            # A rejected repair cannot erase the useful diagnostics from the
+            # original independent assessment or promote its failing draft.
         output = apply_editorial_assessment(output, review)
     if output.status == ContentStatus.QUALITY_INSUFFICIENT.value and len(run.attempts) >= payload.runtime_budget.max_model_calls:
         run.exhausted = True

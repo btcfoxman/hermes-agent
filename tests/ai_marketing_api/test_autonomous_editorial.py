@@ -423,3 +423,207 @@ def test_http_compose_verifies_expression_then_reviews_actual_rendered_copy(
         == hashlib.sha256(fact.encode()).hexdigest()
     )
     assert data["generation_trace"]["model_calls"] == 3
+
+
+def test_independent_editor_repairs_all_failed_surfaces_without_overwriting_accepted(
+    monkeypatch,
+):
+    payload = _compose_payload()
+    payload["channels"] = ["wechat_mp", "wechat_moments"]
+    payload["public_editorial_brief"] = {**_brief(), "channels": payload["channels"]}
+    payload["runtime_budget"] = {"max_model_calls": 4}
+    calls = []
+    original = {}
+
+    async def fake(system, body, fallback, *args, **kwargs):
+        calls.append(body)
+        if "editorial_review" in body:
+            draft = body["editorial_review"]["draft"]
+            if len(calls) == 2:
+                original.update(draft)
+                return {**_review(False), "failed_surfaces": ["master", "wechat_mp"]}
+            assert "revised" in draft["master_content"]
+            assert "revised" in draft["platform_variants"][0]["body"]
+            assert draft["platform_variants"][1] == original["platform_variants"][1]
+            return _review()
+        candidate = _publishable_model_candidate(body)
+        if "editorial_revision" in body:
+            assert body["editorial_revision"]["focus_surfaces"] == [
+                "master",
+                "wechat_mp",
+            ]
+            assert body["channels"] == ["wechat_mp"]
+            for block in candidate["blocks"]:
+                if "text" in block:
+                    block["text"] += " revised"
+            for variant in candidate["platform_variants"]:
+                for block in variant["blocks"]:
+                    if "text" in block:
+                        block["text"] += " revised"
+            extra = _publishable_model_candidate({
+                **body,
+                "channels": ["wechat_moments"],
+            })["platform_variants"][0]
+            extra["title"] = "Unrequested change"
+            candidate["platform_variants"].append(extra)
+        return candidate
+
+    monkeypatch.setattr(api, "_llm_json", fake)
+    data = _request("POST", "/api/v1/operators/industry/compose", json=payload).json()
+    assert data["status"] == "content_ready", data
+    assert len(calls) == 4
+    assert data["generation_trace"]["repair_calls"] == 1
+    assert data["generation_trace"]["attempts"][2]["surface"] == "master,wechat_mp"
+
+
+def test_editorial_revision_reverifies_new_expression_and_keeps_untouched_expression(
+    monkeypatch,
+):
+    payload = _compose_payload()
+    fact = "The toolbox supports image and video creation."
+    first_public = "Images and videos can be created in the toolbox."
+    revised_public = "The toolbox can create images and videos."
+    payload["authorized_context"][0]["content"] = fact
+    payload["claims"] = [
+        {
+            "text": fact,
+            "kind": "fact",
+            "evidence_ids": ["source-1"],
+            "verification_status": "verified",
+        }
+    ]
+    payload["approved_proposal"]["key_points"] = [fact]
+    payload["approved_proposal"]["title"] = "image and video workflow"
+    payload["public_editorial_brief"] = _brief()
+    payload["fact_expression_mode"] = "grounded_paraphrase"
+    payload["runtime_budget"] = {"max_model_calls": 6}
+    stages = []
+    first_variant = {}
+
+    async def fake(system, body, fallback, *args, **kwargs):
+        if "claim_verification" in body:
+            stages.append("verify")
+            return {
+                "_model": "verifier",
+                "reviews": [
+                    {
+                        "pair_id": row["pair_id"],
+                        "verdict": "supported",
+                        "key_fields_preserved": True,
+                    }
+                    for row in body["claim_verification"]["pairs"]
+                ],
+            }
+        if "editorial_review" in body:
+            stages.append("review")
+            draft = body["editorial_review"]["draft"]
+            if len(stages) == 3:
+                first_variant.update(draft["platform_variants"][0])
+                assert first_public in draft["master_content"]
+                return _review(False)
+            assert revised_public in draft["master_content"]
+            assert draft["platform_variants"][0] == first_variant
+            return _review()
+        revised = "editorial_revision" in body
+        stages.append("repair" if revised else "compose")
+        candidate = _publishable_model_candidate(body)
+        candidate["master_title"] = "image and video workflow"
+        for variant in candidate["platform_variants"]:
+            variant["title"] = "image and video creation guide"
+        for blocks in [
+            candidate["blocks"],
+            *[v["blocks"] for v in candidate["platform_variants"]],
+        ]:
+            for block in blocks:
+                if "block_ref" in block:
+                    block["public_text"] = revised_public if revised else first_public
+        return candidate
+
+    monkeypatch.setattr(api, "_llm_json", fake)
+    data = _request("POST", "/api/v1/operators/industry/compose", json=payload).json()
+    assert data["status"] == "content_ready", data
+    assert stages == ["compose", "verify", "review", "repair", "verify", "review"]
+    supported = {
+        row["public_text_sha256"]
+        for row in data["claim_binding_reviews"]
+        if row["verdict"] == "supported"
+    }
+    assert {
+        hashlib.sha256(text.encode()).hexdigest()
+        for text in (first_public, revised_public)
+    } <= supported
+    assert data["generation_trace"]["model_calls"] == 6
+
+
+def test_unsafe_editorial_repair_cannot_hide_original_review_failure(monkeypatch):
+    payload = _compose_payload()
+    payload["public_editorial_brief"] = _brief()
+    calls = []
+
+    async def fake(system, body, fallback, *args, **kwargs):
+        calls.append(body)
+        if "editorial_review" in body:
+            return _review(False)
+        candidate = _publishable_model_candidate(body)
+        if "editorial_revision" in body:
+            candidate["blocks"] = [
+                {
+                    "kind": "opinion",
+                    "text": "Guaranteed benefits and risk-free success.",
+                    "evidence_ids": [],
+                }
+            ]
+        return candidate
+
+    monkeypatch.setattr(api, "_llm_json", fake)
+    data = _request("POST", "/api/v1/operators/industry/compose", json=payload).json()
+    assert data["status"] == "quality_insufficient", data
+    assert len(calls) == 3
+    assert "editorial_review_failed" in data["critic"]["errors"]
+    assert data["editorial_assessment"]["issues"] == _review(False)["issues"]
+    assert "Guaranteed" not in (data["master_content"] or "")
+
+
+def test_sparse_evidence_brief_and_editor_do_not_demand_invented_product_tutorial(
+    monkeypatch,
+):
+    payload = _role_compose_payload("commercial")
+    payload["channels"] = ["wechat_mp"]
+    payload["public_editorial_brief"] = _brief("commercial")
+    calls = []
+
+    async def fake(system, body, fallback, *args, **kwargs):
+        calls.append(body)
+        if "editorial_review" in body:
+            review = body["editorial_review"]
+            assert review["canonical_claims"]
+            assert "sparse positioning evidence" in review["instruction"]
+            return _review()
+        assert len(body["evidence_scope_contract"]) == 4
+        assert "not additional facts" in body["evidence_scope_contract"][0]
+        candidate = _publishable_model_candidate(body)
+        candidate["master_title"] = "customer workflow choice"
+        candidate["platform_variants"][0]["title"] = "a practical customer choice"
+        for blocks in [
+            candidate["blocks"],
+            candidate["platform_variants"][0]["blocks"],
+        ]:
+            first_editorial = next(block for block in blocks if "text" in block)
+            blocks.remove(first_editorial)
+            blocks.insert(0, first_editorial)
+        # A closing judgment is not automatically an engagement invitation.
+        candidate["blocks"].append({
+            "kind": "closing",
+            "text": "按眼前的创作任务选择入口，再决定是否需要扩展工作流。",
+            "evidence_ids": [],
+        })
+        return candidate
+
+    monkeypatch.setattr(api, "_llm_json", fake)
+    data = _request("POST", "/api/v1/operators/commercial/compose", json=payload).json()
+    assert data["status"] == "content_ready", data
+    assert len(calls) == 2
+    assert "按眼前的创作任务" in data["master_content"]
+    assert all(
+        "editorial_intent_required" not in item for item in data["critic"]["warnings"]
+    )

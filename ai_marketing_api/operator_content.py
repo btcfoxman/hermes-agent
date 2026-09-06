@@ -361,7 +361,7 @@ _EDITORIAL_KIND_ALIASES = {
     "significance": ContentBlockKind.OPINION.value,
     "why_it_matters": ContentBlockKind.OPINION.value,
     "call_to_action": ContentBlockKind.CTA.value,
-    "closing": ContentBlockKind.CTA.value,
+    "closing": ContentBlockKind.OPINION.value,
     "question": ContentBlockKind.CTA.value,
     "reader_question": ContentBlockKind.CTA.value,
     "prompt": ContentBlockKind.CTA.value,
@@ -3246,4 +3246,11 @@ def content_request_payload(
             "The server independently verifies it; never claim it is already verified."
         )
         payload["response_contract"]["safety"][1] = payload["constraints"][0]
+    if public_brief is not None:
+        payload["evidence_scope_contract"] = [
+            "The public brief supplies audience and editing intent, not additional facts. A positioning statement is not independent testing, demonstrated ease of use, or measured performance.",
+            "Match depth to the available claims. When evidence is sparse, write a short concrete choice criterion or suggested reader task; do not invent features, interface steps, personal experience, customer results, prices, comparisons, or quantified value to fill an article.",
+            "Even a wechat_mp article may be concise. A useful opening, the evidenced positioning and a distinct practical choice judgment are enough; do not pad it to meet an imagined platform word count.",
+            "Phrase optional reader tasks as suggestions or questions, not assertions about what the product has done or can certainly achieve. A closing judgment is kind=opinion, not kind=cta; include a CTA only for a real invitation, and it is optional.",
+        ]
     return payload
