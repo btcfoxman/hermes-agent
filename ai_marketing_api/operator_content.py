@@ -9,10 +9,14 @@ from urllib.parse import urlparse
 
 from pydantic import Field
 
+from ai_marketing_api.operator_editorial import EditorialReview, GenerationTrace, OwnerRevision, PublicEditorialBrief, RuntimeBudget
+from ai_marketing_api.operator_grounding import ClaimBindingReview
+
 from ai_marketing_api.operator_runtime import (
     CONTENT_SCHEMA_VERSION,
     AuthorizedContext,
     ClaimKind,
+    ContextAuthorizationError,
     OperatorClaim,
     OperatorProfile,
     OperatorProposeRequest,
@@ -60,6 +64,10 @@ class OperatorComposeRequest(OperatorProposeRequest):
 
     approved_proposal: ProposalOutline
     claims: List[OperatorClaim] = Field(max_length=50)
+    public_editorial_brief: Optional[PublicEditorialBrief] = None
+    runtime_budget: RuntimeBudget = Field(default_factory=RuntimeBudget)
+    fact_expression_mode: Literal["exact", "grounded_paraphrase"] = "exact"
+    owner_revision: Optional[OwnerRevision] = None
 
 
 class ContentBlock(StrictModel):
@@ -74,6 +82,8 @@ class ContentBlock(StrictModel):
     locked: bool = False
     required: bool = False
     binding_hash: str = Field(default="", max_length=64)
+    public_text: Optional[str] = Field(default=None, max_length=20000)
+    public_text_verified: bool = False
 
 
 class PlatformVariant(StrictModel):
@@ -114,6 +124,9 @@ class OperatorContentOutput(StrictModel):
     critic: ContentCritic
     requires_human_review: Literal[True] = True
     model: str = Field(default="fallback", max_length=200)
+    generation_trace: Optional[GenerationTrace] = None
+    claim_binding_reviews: List[ClaimBindingReview] = Field(default_factory=list, max_length=100)
+    editorial_assessment: Optional[EditorialReview] = None
 
 
 SUPPORTED_CHANNEL_FORMATS: Dict[str, str] = {
@@ -429,6 +442,8 @@ def _fact_display_text(block: ContentBlock, *, surface: str = "master") -> str:
     independently, so presentation never weakens evidence binding.
     """
 
+    if block.public_text_verified and block.public_text:
+        return block.public_text
     text = block.text.strip()
     if (
         _value(block.kind) != ContentBlockKind.FACT.value
@@ -523,6 +538,8 @@ def _source_texts(context: AuthorizedContext) -> List[str]:
 
 
 def _is_disclosable(role: OperatorRole, context: AuthorizedContext) -> bool:
+    if context.structured_data.get("publishable") is False or context.structured_data.get("e2e_only") is True:
+        return False
     space = _value(context.space)
     if role is OperatorRole.COMMERCIAL and space == "company_internal":
         return False
@@ -2117,7 +2134,7 @@ def enforce_social_publishability(
                 code="social_copy_publishable",
                 passed=not errors,
                 message=(
-                    "Every surface contains model-authored, platform-native editorial depth."
+                    "Every surface passed deterministic structure and safety heuristics; this is not an editorial-quality certification."
                     if not errors
                     else "Safe fallback, generic templates, or shallow prose cannot be published."
                 ),
@@ -2797,6 +2814,27 @@ def content_request_payload(
     role = role_id if isinstance(role_id, OperatorRole) else OperatorRole(role_id)
     visible = disclosable_contexts(role, request, contexts)
     visible_ids = {context.record_id for context in visible}
+    public_brief = request.public_editorial_brief
+    if request.owner_revision is not None:
+        revision_channels = [item.platform for item in request.owner_revision.platform_variants]
+        if len(set(revision_channels)) != len(revision_channels) or not set(revision_channels).issubset(set(request.channels)):
+            raise ContextAuthorizationError("owner_revision_channel_denied", "owner_revision", "Owner edits must stay within the existing requested channel scope.")
+    if public_brief is not None:
+        if _value(public_brief.role_id) != role.value:
+            raise ContextAuthorizationError("editorial_brief_role_denied", "public_editorial_brief", "The public brief must belong to this operator role.")
+        if public_brief.channels and set(public_brief.channels) != set(request.channels):
+            raise ContextAuthorizationError("editorial_brief_channels_mismatch", "public_editorial_brief", "The public brief must use exactly the requested channels.")
+        brief_text = re.sub(r"\s+", "", json.dumps(_dump(public_brief), ensure_ascii=False)).lower()
+        for context in contexts:
+            if _is_disclosable(role, context):
+                continue
+            # Defense in depth for known private excerpts. Semantic disclosure
+            # authorization belongs to the orchestrator's field-level projection;
+            # never infer that raw request strings are public just because this
+            # substring guard did not find a match.
+            excerpt = re.sub(r"\s+", "", context.content).lower()
+            if len(excerpt) >= 16 and excerpt in brief_text:
+                raise ContextAuthorizationError("editorial_brief_private_excerpt", context.record_id, "A non-public excerpt cannot be included in the public brief.")
     public_claims = [
         _dump(claim)
         for claim in request.claims
@@ -2836,6 +2874,7 @@ def content_request_payload(
     industry_editorial_guard: Dict[str, Any] = {}
     if (
         role is OperatorRole.INDUSTRY
+        and public_brief is None
         and _INDUSTRY_FUNDS_REMEDY_SOURCE_RE.search(approved_fact_text)
     ):
         affected_party = next(
@@ -2920,6 +2959,12 @@ def content_request_payload(
             "cta": None,
         }
     )
+    if public_brief is not None:
+        editorial_brief = {
+            "angle": public_brief.angle or public_brief.objective,
+            "audience_value": public_brief.reader_value or public_brief.audience,
+            "cta": public_brief.cta,
+        }
     publication_brief = {
         "commercial": {
             "voice": "A precise business operator who connects one verified capability or offer to one concrete customer situation.",
@@ -2972,12 +3017,13 @@ def content_request_payload(
         ),
     }
     payload: Dict[str, Any] = {
-        "objective": "Compose platform drafts from the approved public claims only.",
+        "objective": public_brief.objective if public_brief else "Compose platform drafts from the approved public claims only.",
         "topic": public_title,
-        "audience": "the approved target audience",
+        "audience": public_brief.audience if public_brief else "the approved target audience",
         "channels": list(request.channels),
         "constraints": [
             "Use only the supplied public claims verbatim for factual, pricing, identity, and experience statements.",
+            *(public_brief.constraints if public_brief else []),
         ],
         "as_of": request.as_of.isoformat(),
         "approved_proposal": {
@@ -2990,6 +3036,7 @@ def content_request_payload(
             "first_person": role is OperatorRole.PERSONAL_IP,
         },
         "approved_editorial_brief": editorial_brief,
+        "public_editorial_brief": _dump(public_brief) if public_brief else None,
         "publication_brief": {
             **publication_brief,
             "thesis_contract": [
@@ -3180,4 +3227,23 @@ def content_request_payload(
             "Make each requested platform variant meaningfully different in title, rhythm, depth, and reader action while preserving every required factual block reference.",
         ],
     }
+    if request.owner_revision is not None:
+        payload["owner_revision"] = _dump(request.owner_revision)
+        payload["owner_revision_contract"] = (
+            "This is owner-authorized editing intent, not additional evidence. Respect the instruction and "
+            "preserve supplied draft wording where it remains supported. Rebuild structured blocks from the "
+            "existing canonical claim refs; new claims, numbers, pricing, promises or personal experience "
+            "in the supplied draft are not authorized facts. Never mark the owner's text as verified evidence. "
+            "Return a revised draft for human confirmation, not approval or publication. If a requested change "
+            "needs new facts, do not invent them or silently claim exact preservation of the edited draft."
+        )
+    if request.fact_expression_mode == "grounded_paraphrase":
+        payload["fact_expression_mode"] = "grounded_paraphrase"
+        payload["constraints"][0] = "Keep canonical block_ref evidence immutable. Ordinary non-numeric fact references may additionally propose public_text for independent verification. Prices, dates, numbers, promises, identity and experience stay verbatim."
+        payload["response_contract"]["blocks"] += (
+            ' In grounded_paraphrase mode a factual reference may be '
+            '{"block_ref":"<approved ref>","public_text":"<faithful natural summary>"}. '
+            "The server independently verifies it; never claim it is already verified."
+        )
+        payload["response_contract"]["safety"][1] = payload["constraints"][0]
     return payload

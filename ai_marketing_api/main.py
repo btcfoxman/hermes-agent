@@ -21,13 +21,15 @@ from ai_marketing_api.operator_content import (
     build_content_fallback,
     combine_publishable_surfaces,
     content_request_payload,
-    curated_industry_surface_candidate,
-    curated_operator_surface_candidate,
     enforce_social_publishability,
     missing_publishable_surfaces,
     normalize_content_output,
     publishable_editorial_references,
 )
+from ai_marketing_api.operator_editorial import BoundedModelRun
+from ai_marketing_api.operator_review import apply_editorial_assessment, assess_editorial
+from ai_marketing_api.operator_grounding import apply_grounded_paraphrases
+from ai_marketing_api.operator_planning import EditorialPlanRequest, plan_editorial
 from ai_marketing_api.operator_runtime import (
     CONTENT_SCHEMA_VERSION,
     SCHEMA_VERSION,
@@ -66,6 +68,7 @@ def root() -> Dict[str, Any]:
             "operatorPropose": "/api/v1/operators/{role_id}/propose",
             "operatorRevise": "/api/v1/operators/{role_id}/revise",
             "operatorCompose": "/api/v1/operators/{role_id}/compose",
+            "editorialPlan": "/api/v1/operators/editorial/plan",
         },
     }
 
@@ -510,6 +513,7 @@ async def _llm_json(
     timeout_seconds: Optional[str] = None,
     *,
     temperature: float = 0.3,
+    max_output_tokens: Optional[int] = None,
 ) -> Dict[str, Any]:
     requested_base_url = str(openai_base_url or "").strip()
     requested_api_key = str(openai_api_key or "").strip()
@@ -544,6 +548,8 @@ async def _llm_json(
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False, default=str)},
         ],
     }
+    if max_output_tokens is not None:
+        request["max_completion_tokens"] = int(max_output_tokens)
     resolved_timeout = _timeout_seconds(timeout_seconds)
     request_started = False
     try:
@@ -581,6 +587,7 @@ async def _llm_json(
         result = _json_from_response(content)
         result["_model"] = model
         result["_llm_attempted"] = True
+        result["_usage"] = data.get("usage", {})
         return result
     except Exception as exc:
         fallback = dict(fallback)
@@ -600,7 +607,15 @@ def operator_health(authorization: Optional[str] = Header(default=None)) -> Dict
     """Deployment probe for the three bundled, immutable operator profiles."""
 
     _require_operator_auth(authorization)
-    return OPERATOR_REGISTRY.health()
+    return {**OPERATOR_REGISTRY.health(), "editorial_runtime": {
+        "public_brief": "operator.editorial_brief.v1",
+        "generation_trace": "operator.generation_trace.v1",
+        "planning": "/api/v1/operators/editorial/plan",
+        "fact_expression_modes": ["exact", "grounded_paraphrase"],
+        "independent_editorial_review": True,
+        "curated_story_fallback": False,
+        "external_research": "orchestration_authorized_context_only",
+    }}
 
 
 @app.get("/api/v1/operators/{role_id}/probe")
@@ -680,99 +695,6 @@ async def _run_operator(
     )
 
 
-def _annotate_curated_operator_output(
-    output: OperatorContentOutput,
-    surfaces: List[str],
-    role_id: OperatorRole = OperatorRole.INDUSTRY,
-) -> OperatorContentOutput:
-    data = output.model_dump()
-    role_value = role_id.value
-    repair_code = f"curated_{role_value}_policy_repair"
-    warning = repair_code + ":" + ",".join(surfaces)
-    warnings = list(
-        dict.fromkeys([warning, *data["critic"]["warnings"]])
-    )[:50]
-    data["critic"] = {
-        **data["critic"],
-        "warnings": warnings,
-        "checks": [
-            *data["critic"]["checks"],
-            {
-                "code": repair_code,
-                "passed": True,
-                "message": (
-                    f"A known evidence-bound {role_value} story policy supplied "
-                    "the listed social surfaces without introducing new facts."
-                ),
-            },
-        ],
-    }
-    data["risk_flags"] = [
-        {
-            "code": repair_code,
-            "message": warning,
-            "blocking": False,
-        },
-        *data["risk_flags"],
-    ][:50]
-    return enforce_social_publishability(OperatorContentOutput(**data))
-
-
-def _curated_operator_bundle(
-    *,
-    role_id: OperatorRole,
-    payload: OperatorComposeRequest,
-    contexts: List[Any],
-    fallback: Dict[str, Any],
-    compose_payload: Dict[str, Any],
-) -> Optional[OperatorContentOutput]:
-    """Build one coherent evidence-bound replacement for every surface.
-
-    Curated operator policies are deliberately narrow.  When one matches, a
-    complete bundle must pass the same per-surface normalizer and terminal
-    social-copy gate before it can replace a rejected model response.
-    """
-
-    curated_surfaces = list(
-        dict.fromkeys(["master", *compose_payload.get("channels", [])])
-    )
-    curated_attempts: List[OperatorContentOutput] = []
-    for surface in curated_surfaces:
-        curated_candidate = curated_operator_surface_candidate(
-            role_id,
-            compose_payload,
-            surface,
-        )
-        if curated_candidate is None:
-            return None
-        curated_normalized = normalize_content_output(
-            OPERATOR_REGISTRY,
-            role_id,
-            payload,
-            contexts,
-            fallback,
-            curated_candidate,
-        )
-        curated_missing = missing_publishable_surfaces(
-            [curated_normalized],
-            [] if surface == "master" else [surface],
-        )
-        if surface in curated_missing:
-            return None
-        curated_attempts.append(curated_normalized)
-
-    if len(curated_attempts) != len(curated_surfaces):
-        return None
-    curated_combined = combine_publishable_surfaces(curated_attempts)
-    if curated_combined is None:
-        return None
-    return _annotate_curated_operator_output(
-        curated_combined,
-        curated_surfaces,
-        role_id,
-    )
-
-
 async def _run_compose(
     role_id: OperatorRole,
     payload: OperatorComposeRequest,
@@ -804,6 +726,7 @@ async def _run_compose(
             detail={"code": exc.code, "record_id": exc.record_id, "message": str(exc)},
         ) from exc
 
+    run = BoundedModelRun(payload.runtime_budget)
     fallback = build_content_fallback(OPERATOR_REGISTRY, role_id, payload, contexts)
     compose_payload: Dict[str, Any] = {}
     if fallback.get("_fallback_errors"):
@@ -812,49 +735,11 @@ async def _run_compose(
         # state orchestration needs to recover safely.
         candidate = fallback
     else:
-        compose_payload = content_request_payload(role_id, payload, contexts)
-        guard = compose_payload.get("industry_editorial_guard")
-        if (
-            role_id is OperatorRole.INDUSTRY
-            and isinstance(guard, dict)
-            and guard.get("event_type")
-            == "regulatory_return_of_withheld_business_funds"
-        ):
-            curated_attempts: List[OperatorContentOutput] = []
-            curated_surfaces = ["master", *compose_payload.get("channels", [])]
-            for surface in curated_surfaces:
-                curated_candidate = curated_industry_surface_candidate(
-                    compose_payload,
-                    surface,
-                )
-                if curated_candidate is None:
-                    break
-                curated_normalized = normalize_content_output(
-                    OPERATOR_REGISTRY,
-                    role_id,
-                    payload,
-                    contexts,
-                    fallback,
-                    curated_candidate,
-                )
-                curated_missing = missing_publishable_surfaces(
-                    [curated_normalized],
-                    [] if surface == "master" else [surface],
-                )
-                if surface in curated_missing:
-                    break
-                curated_attempts.append(curated_normalized)
-            if len(curated_attempts) == len(curated_surfaces):
-                curated_combined = combine_publishable_surfaces(
-                    curated_attempts
-                )
-                if curated_combined is not None:
-                    return _annotate_curated_operator_output(
-                        curated_combined,
-                        curated_surfaces,
-                        role_id,
-                    )
-        candidate = await _llm_json(
+        try:
+            compose_payload = content_request_payload(role_id, payload, contexts)
+        except ContextAuthorizationError as exc:
+            raise HTTPException(status_code=403, detail={"code": exc.code, "record_id": exc.record_id, "message": str(exc)}) from exc
+        candidate = await run.call(_llm_json,
             profile.system_prompt,
             compose_payload,
             fallback,
@@ -872,6 +757,7 @@ async def _run_compose(
         candidate,
     )
     normalized_attempts = [normalized]
+    raw_candidates = [candidate]
     output = enforce_social_publishability(normalized)
     candidate_model = str(
         candidate.get("_model") or candidate.get("model") or "fallback"
@@ -921,34 +807,6 @@ async def _run_compose(
         surface: candidate_authored_text(candidate, surface)
         for surface in ["master", *compose_payload.get("channels", [])]
     }
-    live_model_attempted = bool(candidate.get("_llm_attempted")) or (
-        candidate_model != "fallback" and not candidate.get("_error")
-    )
-    if live_model_attempted and missing_publishable_surfaces(
-        normalized_attempts,
-        compose_payload.get("channels", []),
-    ):
-        # Once a known evidence-bound story has a complete curated policy,
-        # another sequence of one-surface model repairs cannot improve its
-        # factual grounding.  Replace the rejected response immediately after
-        # the first real model attempt so the caller's request budget is not
-        # consumed by up to eighteen retries before the same full replacement.
-        curated_output = _curated_operator_bundle(
-            role_id=role_id,
-            payload=payload,
-            contexts=contexts,
-            fallback=fallback,
-            compose_payload=compose_payload,
-        )
-        if curated_output is not None:
-            return curated_output
-    has_curated_industry_policy = (
-        role_id is OperatorRole.INDUSTRY
-        and isinstance(compose_payload.get("industry_editorial_guard"), dict)
-        and compose_payload["industry_editorial_guard"].get("event_type")
-        == "regulatory_return_of_withheld_business_funds"
-    )
-
     def remember_rejected_text(surface: str, values: List[str]) -> None:
         remembered = rejected_text_by_surface.setdefault(surface, [])
         for value in values:
@@ -963,12 +821,14 @@ async def _run_compose(
     # capped globally and per surface, and remains fail closed: no partial or
     # template surface leaves this endpoint.
     surface_attempts: Dict[str, int] = {}
-    for retry_number in range(1, 19):
+    for retry_number in range(1, payload.runtime_budget.max_model_calls):
         if (
             output.status != ContentStatus.QUALITY_INSUFFICIENT.value
             or candidate_model == "fallback"
             or candidate.get("_error")
         ):
+            break
+        if not run.can_call():
             break
         failed_surfaces = missing_publishable_surfaces(
             normalized_attempts,
@@ -980,7 +840,7 @@ async def _run_compose(
             surface
             for surface in failed_surfaces
             if surface_attempts.get(surface, 0)
-            < (0 if has_curated_industry_policy else 3)
+            < payload.runtime_budget.max_surface_revisions
         ]
         if not eligible_surfaces:
             break
@@ -1129,6 +989,9 @@ async def _run_compose(
             "approved_editorial_brief": compose_payload.get(
                 "approved_editorial_brief"
             ),
+            "public_editorial_brief": compose_payload.get("public_editorial_brief"),
+            "owner_revision": compose_payload.get("owner_revision"),
+            "owner_revision_contract": compose_payload.get("owner_revision_contract"),
             "publication_brief": compose_payload.get("publication_brief"),
             "industry_editorial_guard": compose_payload.get(
                 "industry_editorial_guard", {}
@@ -1238,7 +1101,16 @@ async def _run_compose(
                 ],
             },
         }
-        candidate = await _llm_json(
+        if payload.public_editorial_brief is not None:
+            retry_payload["quality_retry"]["instruction"] = (
+                "Repair only focus_surface for the exact audience, product and purpose in public_editorial_brief. "
+                "Use critic_errors and rejected text as diagnostics, not as publication copy. "
+                "Explain a concrete decision or task relevant to that audience, using the supplied evidence. "
+                "Do not impose a regulatory, cash-flow or human-review story on unrelated subjects. "
+                "Preserve the canonical factual refs; add no new claims, biography, prices or guarantees. "
+                "Keep already accepted surfaces unchanged. Return the specified compact block contract."
+            )
+        candidate = await run.call(_llm_json,
             profile.system_prompt,
             retry_payload,
             fallback,
@@ -1249,6 +1121,7 @@ async def _run_compose(
             # Keep repair output steady while allowing a rejected stock phrase
             # to escape the exact same low-temperature completion.
             temperature=0.3,
+            stage="repair", surface=retry_surface,
         )
         latest_rejected_text = candidate_authored_text(candidate, retry_surface)
         remember_rejected_text(retry_surface, latest_rejected_text)
@@ -1261,34 +1134,102 @@ async def _run_compose(
             candidate,
         )
         normalized_attempts.append(normalized)
+        raw_candidates.append(candidate)
         combined = combine_publishable_surfaces(normalized_attempts)
         output = enforce_social_publishability(combined or normalized)
         candidate_model = str(
             candidate.get("_model") or candidate.get("model") or "fallback"
         ).strip().lower()
 
-    remaining_surfaces = missing_publishable_surfaces(
-        normalized_attempts,
-        compose_payload.get("channels", []),
-    )
-    if live_model_attempted and remaining_surfaces:
-        # A curated repair is one coherent editorial bundle.  Do not mix a
-        # repaired master with whichever model variants happened to pass (or
-        # vice versa): that can preserve the same audit-style wrapper and
-        # generic filler that triggered the repair in the first place.  Build
-        # every requested surface from the same narrow, evidence-bound policy,
-        # validate each one independently, and replace the result only when the
-        # complete bundle passes the normal terminal gate.
-        curated_output = _curated_operator_bundle(
-            role_id=role_id,
-            payload=payload,
-            contexts=contexts,
-            fallback=fallback,
-            compose_payload=compose_payload,
+    if payload.fact_expression_mode == "grounded_paraphrase" and output.status == ContentStatus.CONTENT_READY.value:
+        output = await apply_grounded_paraphrases(
+            output=output, raw_candidates=raw_candidates, run=run, llm=_llm_json,
+            system=profile.system_prompt,
+            model_args=(openai_base_url, openai_api_key, model_name, timeout_seconds),
         )
-        if curated_output is not None:
-            output = curated_output
-    return output
+    review_required = payload.public_editorial_brief is not None or payload.owner_revision is not None
+    review_state = "not_completed" if review_required else "not_requested"
+    if review_required and output.status == ContentStatus.CONTENT_READY.value:
+        review, review_state = await assess_editorial(
+            output=output, brief=compose_payload.get("public_editorial_brief") or compose_payload.get("approved_editorial_brief", {}), run=run, llm=_llm_json,
+            system=profile.system_prompt,
+            model_args=(openai_base_url, openai_api_key, model_name, timeout_seconds),
+            owner_revision=compose_payload.get("owner_revision"),
+        )
+        # One targeted editorial revision, followed by a new independent review.
+        # Reserve both calls; never consume the last call on an unreviewable edit.
+        allowed_surfaces = {"master", *payload.channels}
+        failed = [surface for surface in (review.failed_surfaces if review else []) if surface in allowed_surfaces] or ["master"]
+        repairable = [surface for surface in failed if sum(
+            attempt.stage == "repair" and attempt.surface == surface for attempt in run.attempts
+        ) < payload.runtime_budget.max_surface_revisions]
+        if (
+            review is not None and not review.passed
+            and repairable
+            and len(run.attempts) + 2 <= payload.runtime_budget.max_model_calls
+            and run.remaining_seconds > 0
+        ):
+            repair_surface = repairable[0]
+            editorial_repair_payload = {
+                **compose_payload,
+                "channels": [] if repair_surface == "master" else [repair_surface],
+                "editorial_revision": {
+                    "focus_surface": repair_surface,
+                    "issues": review.issues,
+                    "previous_draft": {
+                        "master_title": output.master_title,
+                        "master_content": output.master_content,
+                        "platform_variants": [{"platform": v.platform, "title": v.title, "body": v.body} for v in output.platform_variants],
+                    },
+                    "instruction": "Revise only focus_surface to address the independent editor's specific issues. Return its blocks/title under the original structured response contract. Other surfaces are retained. No new claims, privacy, authorization, pricing or identity information may be introduced.",
+                },
+            }
+            repaired_candidate = await run.call(
+                _llm_json, profile.system_prompt, editorial_repair_payload, fallback,
+                openai_base_url, openai_api_key, model_name, timeout_seconds,
+                stage="repair", surface=repair_surface,
+            )
+            repaired = normalize_content_output(
+                OPERATOR_REGISTRY, role_id, payload, contexts, fallback, repaired_candidate,
+            )
+            # A later independently safe surface replaces the earlier one. This
+            # intentionally differs from preserving the first safe draft before
+            # an editor has found an audience/value problem with that draft.
+            combined = combine_publishable_surfaces([repaired, *normalized_attempts])
+            output = enforce_social_publishability(combined or repaired)
+            if output.status == ContentStatus.CONTENT_READY.value:
+                review, review_state = await assess_editorial(
+                    output=output, brief=compose_payload.get("public_editorial_brief") or compose_payload.get("approved_editorial_brief", {}), run=run, llm=_llm_json,
+                    system=profile.system_prompt,
+                    model_args=(openai_base_url, openai_api_key, model_name, timeout_seconds),
+                    owner_revision=compose_payload.get("owner_revision"),
+                )
+            else:
+                review, review_state = None, "not_completed"
+        output = apply_editorial_assessment(output, review)
+    if output.status == ContentStatus.QUALITY_INSUFFICIENT.value and len(run.attempts) >= payload.runtime_budget.max_model_calls:
+        run.exhausted = True
+    trace = run.trace(
+        blocked=bool(fallback.get("_fallback_errors")), review=review_state,
+        stop_reason="budget_exhausted" if run.exhausted else str(output.status),
+    )
+    if payload.fact_expression_mode == "grounded_paraphrase":
+        trace.evidence_mode = "grounded_paraphrase"
+    return output.model_copy(update={"generation_trace": trace})
+
+
+@app.post("/api/v1/operators/editorial/plan")
+async def editorial_plan(
+    payload: EditorialPlanRequest,
+    authorization: Optional[str] = Header(default=None),
+    x_hermes_openai_base_url: Optional[str] = Header(default=None, alias="X-Hermes-OpenAI-Base-URL"),
+    x_hermes_openai_api_key: Optional[str] = Header(default=None, alias="X-Hermes-OpenAI-API-Key"),
+    x_hermes_model: Optional[str] = Header(default=None, alias="X-Hermes-Model"),
+    x_hermes_timeout_seconds: Optional[str] = Header(default=None, alias="X-Hermes-Timeout-Seconds"),
+) -> Dict[str, Any]:
+    _require_operator_auth(authorization)
+    return await plan_editorial(payload, _llm_json, x_hermes_openai_base_url,
+        x_hermes_openai_api_key, x_hermes_model, x_hermes_timeout_seconds)
 
 
 @app.post("/api/v1/operators/{role_id}/propose", response_model=OperatorOutput)

@@ -19,3 +19,10 @@
 - `compose` 返回 `master_title`、结构化 `blocks` 和按请求渠道逐项生成的 `platform_variants`；不要自行输出可绕过 blocks 的事实正文。
 
 `kind` 只使用 `fact` 或 `opinion`。若缺少关键商务事实或唯一有效报价，保持提案克制并让外层运行时生成阻塞问题；绝不填造缺失值。
+
+公开创作简报与复核契约：
+
+- `public_editorial_brief` 是中枢明确授权的公开创作意图：保留具体受众、目标、语气和行动方向，不把它们泛化为占位词。它不是新的事实证据，也不能覆盖权限与事实边界。
+- 仅在 `fact_expression_mode=grounded_paraphrase` 时，可在普通事实的原 `block_ref` 旁提出 `public_text` 自然转述。原证据引用仍不可修改；价格、数字、日期、承诺、身份和经历保持原文。运行时独立复核后决定是否采用转述，模型不得自称已经核验。
+- 请求含 `claim_verification` 时，独立检查给定转述是否由原命题完整支持；含义增强、新主体、因果扩张、重要条件省略均不能通过，不确定就明确返回 uncertain。
+- 请求含 `editorial_review` 时，按 response_contract 评估受众相关性、读者价值、具体清晰程度和平台适配。不能把无违禁词、JSON 合法或有来源当成高质量。该复核不授予任何对外发布或个人授权。

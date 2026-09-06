@@ -507,7 +507,7 @@ def test_compose_targeted_retries_only_request_the_remaining_surface(monkeypatch
     assert len(calls) == 3
 
 
-def test_compose_uses_curated_funds_policy_without_model_dependency(monkeypatch):
+def test_compose_known_funds_story_cannot_bypass_unavailable_model(monkeypatch):
     fact = (
         "监管部门要求平台全额退还强制扣除酒店经营者的订单储备金，"
         "并要求企业全面整改及公开整改措施。"
@@ -557,7 +557,7 @@ def test_compose_uses_curated_funds_policy_without_model_dependency(monkeypatch)
 
     async def fake_llm(system, model_payload, fallback, *args, **kwargs):
         calls.append(model_payload)
-        raise AssertionError("known funds-remedy policy must not wait for the model")
+        return {**fallback, "_error": "model unavailable", "_llm_attempted": True}
 
     monkeypatch.setattr(marketing_api, "_llm_json", fake_llm)
 
@@ -569,30 +569,13 @@ def test_compose_uses_curated_funds_policy_without_model_dependency(monkeypatch)
 
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "content_ready"
-    assert calls == []
-    assert any(
-        check["code"] == "curated_industry_policy_repair"
-        and check["passed"] is True
-        for check in data["critic"]["checks"]
-    )
-    assert any(
-        warning.startswith("curated_industry_policy_repair:master,")
-        and "toutiao" in warning
-        for warning in data["critic"]["warnings"]
-    )
-    toutiao = next(
-        variant
-        for variant in data["platform_variants"]
-        if variant["platform"] == "toutiao"
-    )
-    assert "先把" not in toutiao["body"]
-    assert "不是" not in toutiao["body"]
-    assert "资金" in toutiao["body"]
-    assert "结算" in toutiao["body"]
+    assert data["status"] == "quality_insufficient"
+    assert len(calls) == 1
+    assert data["generation_trace"]["origin"] == "deterministic_fallback"
+    assert not any("curated" in check["code"] for check in data["critic"]["checks"])
 
 
-def test_compose_uses_commercial_human_review_policy_only_after_model_attempt(
+def test_compose_commercial_story_does_not_replace_failed_model_with_fixed_copy(
     monkeypatch,
 ):
     capability = (
@@ -679,35 +662,13 @@ def test_compose_uses_commercial_human_review_policy_only_after_model_attempt(
     assert response.status_code == 200
     data = response.json()
     assert calls
-    assert data["status"] == "content_ready", (
-        data["critic"]["errors"],
-        data["critic"]["warnings"],
-        data["model"],
-        len(calls),
-    )
-    assert any(
-        check["code"] == "curated_commercial_policy_repair"
-        and check["passed"] is True
-        for check in data["critic"]["checks"]
-    )
-    assert any(
-        warning.startswith("curated_commercial_policy_repair:master,")
-        and "douyin" in warning
-        for warning in data["critic"]["warnings"]
-    )
-    # One real model attempt is enough to select the narrow evidence-bound
-    # replacement; do not spend the request budget on surface-by-surface
-    # retries before applying the same complete bundle.
-    assert len(calls) == 1
-    assert all(
-        "version 2" not in variant["title"]
-        for variant in data["platform_variants"]
-    )
-    assert "负责人" in data["master_content"]
-    assert "先把事实和判断分开" not in data["master_content"]
+    assert data["status"] == "quality_insufficient"
+    assert len(calls) == 2
+    assert data["generation_trace"]["repair_calls"] == 1
+    assert not any("curated" in check["code"] for check in data["critic"]["checks"])
 
 
-def test_compose_uses_personal_confirm_and_replay_policy_after_model_attempt(
+def test_compose_personal_story_cannot_turn_timeout_into_template_success(
     monkeypatch,
 ):
     experience = (
@@ -778,14 +739,9 @@ def test_compose_uses_personal_confirm_and_replay_policy_after_model_attempt(
     data = response.json()
     assert calls
     assert len(calls) == 1
-    assert data["status"] == "content_ready", data["critic"]["errors"]
-    assert data["master_title"] == "从自动发布到人工确认：补救成本的取舍"
-    assert all("我" not in variant["title"] for variant in data["platform_variants"])
-    assert any(
-        check["code"] == "curated_personal_ip_policy_repair"
-        and check["passed"] is True
-        for check in data["critic"]["checks"]
-    )
+    assert data["status"] == "quality_insufficient", data["critic"]["errors"]
+    assert data["generation_trace"]["origin"] == "deterministic_fallback"
+    assert not any("curated" in check["code"] for check in data["critic"]["checks"])
 
 
 def test_compose_uses_the_same_byte_stable_role_prompt(monkeypatch):
