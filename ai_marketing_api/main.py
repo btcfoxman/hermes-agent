@@ -28,7 +28,12 @@ from ai_marketing_api.operator_content import (
     publishable_editorial_references,
 )
 from ai_marketing_api.operator_editorial import BoundedModelRun
-from ai_marketing_api.operator_review import apply_editorial_assessment, assess_editorial, replace_editorial_surfaces
+from ai_marketing_api.operator_review import (
+    annotate_editorial_repair_failure,
+    apply_editorial_assessment,
+    assess_editorial,
+    replace_editorial_surfaces,
+)
 from ai_marketing_api.operator_grounding import apply_grounded_paraphrases
 from ai_marketing_api.operator_planning import EditorialPlanRequest, plan_editorial
 from ai_marketing_api.operator_runtime import (
@@ -1219,20 +1224,33 @@ async def _run_compose(
             model_args=(openai_base_url, openai_api_key, model_name, timeout_seconds),
             owner_revision=compose_payload.get("owner_revision"),
         )
-        # One bounded batch fixes all editor-identified surfaces together. A
-        # single-surface repair cannot fix a multi-platform assessment, and
-        # previously accepted surfaces must remain exactly unchanged.
+        # Each bounded batch fixes the editor-identified surfaces together.
+        # Rejected structure may be retried within the existing per-surface,
+        # model-call and elapsed budgets; accepted surfaces stay unchanged.
         allowed_surfaces = {"master", *payload.channels}
-        failed = list(dict.fromkeys(surface for surface in (review.failed_surfaces if review else []) if surface in allowed_surfaces)) or ["master"]
-        repairable = [surface for surface in failed if surface_attempts.get(surface, 0) < payload.runtime_budget.max_surface_revisions]
-        # A paraphrase-producing repair also needs independent claim review.
-        reserved_calls = 3 if payload.fact_expression_mode == "grounded_paraphrase" else 2
-        if (
-            review is not None and not review.passed
-            and repairable
-            and len(run.attempts) + reserved_calls <= payload.runtime_budget.max_model_calls
-            and run.remaining_seconds > 0
-        ):
+        initial_failed = {
+            surface for surface in (review.failed_surfaces if review else [])
+            if surface in allowed_surfaces
+        } or {"master"}
+        last_repair_diagnostics = None
+        while review is not None and not review.passed:
+            failed = list(dict.fromkeys(surface for surface in review.failed_surfaces if surface in allowed_surfaces)) or ["master"]
+            expanded = [surface for surface in failed if surface not in initial_failed]
+            if expanded:
+                # A later review may reject formerly accepted copy, but cannot
+                # authorize widening this repair's original mutation scope.
+                last_repair_diagnostics = {
+                    "errors": [f"editorial_repair_scope_expanded:{surface}" for surface in expanded],
+                    "warnings": [],
+                }
+                break
+            repairable = [surface for surface in failed if surface_attempts.get(surface, 0) < payload.runtime_budget.max_surface_revisions]
+            # A paraphrase-producing repair also needs independent claim review.
+            reserved_calls = 3 if payload.fact_expression_mode == "grounded_paraphrase" else 2
+            if (not repairable
+                    or len(run.attempts) + reserved_calls > payload.runtime_budget.max_model_calls
+                    or run.remaining_seconds <= 0):
+                break
             for surface in repairable:
                 surface_attempts[surface] = surface_attempts.get(surface, 0) + 1
             repair_channels = [surface for surface in repairable if surface != "master"]
@@ -1243,12 +1261,13 @@ async def _run_compose(
                     "focus_surface": repairable[0] if len(repairable) == 1 else "selected_surfaces",
                     "focus_surfaces": repairable,
                     "issues": review.issues,
+                    "deterministic_validation": last_repair_diagnostics or {},
                     "previous_draft": {
                         "master_title": output.master_title,
                         "master_content": output.master_content,
                         "platform_variants": [{"platform": v.platform, "title": v.title, "body": v.body} for v in output.platform_variants],
                     },
-                    "instruction": "Revise exactly focus_surfaces to address every applicable independent-editor issue. Return top-level blocks/master_title only when master is listed, and exactly the channels listed in this request as platform_variants. Other surfaces are retained unchanged. Follow the original canonical block contract; ordinary fact public_text may be proposed for independent verification. No new claims, privacy, authorization, pricing or identity information may be introduced. Use transition/opinion for a closing judgment; CTA only for an actual invitation. Do not invent product instructions or results to make the advice more concrete: express an optional reader task or question where product detail is not evidenced.",
+                    "instruction": "Revise exactly focus_surfaces to address every applicable independent-editor issue and the last repair's deterministic_validation codes, if present. Return top-level blocks/master_title only when master is listed, and exactly the channels listed in this request as platform_variants. Other surfaces are retained unchanged. Follow the original canonical block contract; ordinary fact public_text may be proposed for independent verification. No new claims, privacy, authorization, pricing or identity information may be introduced. Use transition/opinion for a closing judgment; CTA only for an actual invitation. Do not invent product instructions or results to make the advice more concrete: express an optional reader task or question where product detail is not evidenced.",
                 },
             }
             repaired_candidate = await run.call(
@@ -1272,8 +1291,12 @@ async def _run_compose(
             repaired = normalize_content_output(
                 OPERATOR_REGISTRY, role_id, payload, contexts, fallback, scoped_candidate,
             )
-            combined = replace_editorial_surfaces(output, repaired, repairable)
+            repair_diagnostics: Dict[str, Any] = {}
+            combined = replace_editorial_surfaces(
+                output, repaired, repairable, diagnostics=repair_diagnostics,
+            )
             if combined is not None:
+                last_repair_diagnostics = None
                 output = combined
                 if payload.fact_expression_mode == "grounded_paraphrase":
                     output = await apply_grounded_paraphrases(
@@ -1287,9 +1310,13 @@ async def _run_compose(
                     model_args=(openai_base_url, openai_api_key, model_name, timeout_seconds),
                     owner_revision=compose_payload.get("owner_revision"),
                 )
+            else:
+                last_repair_diagnostics = repair_diagnostics
             # A rejected repair cannot erase the useful diagnostics from the
-            # original independent assessment or promote its failing draft.
+            # preceding independent assessment or promote its failing draft.
         output = apply_editorial_assessment(output, review)
+        if last_repair_diagnostics:
+            output = annotate_editorial_repair_failure(output, last_repair_diagnostics)
     if output.status == ContentStatus.QUALITY_INSUFFICIENT.value and len(run.attempts) >= payload.runtime_budget.max_model_calls:
         run.exhausted = True
     trace = run.trace(
