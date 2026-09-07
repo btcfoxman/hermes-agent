@@ -155,7 +155,12 @@ _NEGATED_PRICE_INTENT_RE = re.compile(
     re.IGNORECASE,
 )
 _PRICE_VALUE_RE = re.compile(
-    r"(?:[¥￥$€£]\s*\d|\d+(?:\.\d+)?\s*(?:元|万元|美元|usd|rmb|%\s*(?:off|折)))",
+    r"(?:[¥￥$€£]\s*\d|\d+(?:\.\d+)?\s*(?:元|万元|美元|usd|rmb|%\s*(?:off|折))|"
+    r"\d+(?:\.\d+)?\s*%\s*(?:off|折扣|优惠)?|"
+    r"\d+(?:\.\d+)?\s*折|"
+    r"[零〇一二两三四五六七八九十百千万亿]+\s*(?:元|万元|美元|折)|"
+    r"(?:价格|报价|售价|费用|折扣|优惠|立减).{0,16}(?:\d|免费|零元|面议|半价)|"
+    r"(?:免费|零元|面议|半价)|\b(?:price|pricing|discount|free)\b.{0,16}\d?)",
     re.IGNORECASE,
 )
 _PROMISE_RE = re.compile(
@@ -164,7 +169,40 @@ _PROMISE_RE = re.compile(
     re.IGNORECASE,
 )
 _COMMERCIAL_ASSERTION_RE = re.compile(
-    r"(?:我们|本公司|公司|产品|服务|团队).{0,16}(?:提供|支持|具备|拥有|实现|帮助|保证|承诺)",
+    # Preserve the original stricter branch while matching downstream review's
+    # additional subjects, reverse capability claims and English assertions.
+    r"(?:"
+    r"(?:我们|本公司|公司|产品|服务|团队).{0,16}(?:提供|支持|具备|拥有|实现|帮助|保证|承诺)|"
+    r"(?:我司|我们|本公司|公司|团队|产品|平台|系统|服务).{0,20}"
+    r"(?:支持|能够|可以|具备|提供|擅长|实现|覆盖|帮助)|"
+    r"(?:支持|能够|可以|具备|提供|擅长|实现|覆盖).{0,20}"
+    r"(?:能力|功能|服务|场景|客户)|"
+    r"\b(?:we|our|company|team|product|platform|system|service)\b.{0,40}"
+    r"\b(?:can|support|provide|offer|enable|deliver|capable)\b"
+    r")",
+    re.IGNORECASE,
+)
+_DELIVERY_ACTION = r"(?:交付|上线|部署|完成)"
+_DELIVERY_CLAUSE = r"[^，,。！？!?；;\n]"
+_DELIVERY_QUANTITY = r"(?:\d+(?:\.\d+)?|[零〇一二两三四五六七八九十百千万]+)"
+_DELIVERY_TIME = (
+    rf"(?:{_DELIVERY_QUANTITY}\s*(?:个?工作日|小时|分钟|天|日|周|个?月)(?:之内|以内|内|前|后)?|"
+    r"\d{4}-\d{1,2}-\d{1,2}|"
+    r"(?:\d{4}年)?\d{1,2}月\d{1,2}日?|"
+    r"(?:本|这|下|当)周[一二三四五六日天末内]?|"
+    r"(?:本|这|下|当)个?月(?:初|中|底|末)?|"
+    r"今天|今日|今晚|明天|明日|明晚|后天|年底)"
+)
+_DELIVERY_COMMITMENT_RE = re.compile(
+    r"(?:"
+    # Match the terminal review's deadline semantics, not the 内 in 内容 or
+    # the 前 in 前提. This gate applies only to authored, non-evidence prose.
+    rf"{_DELIVERY_ACTION}{_DELIVERY_CLAUSE}{{0,16}}(?:周期|日期|期限)|"
+    rf"{_DELIVERY_ACTION}{_DELIVERY_CLAUSE}{{0,24}}{_DELIVERY_TIME}|"
+    rf"{_DELIVERY_TIME}{_DELIVERY_CLAUSE}{{0,16}}{_DELIVERY_ACTION}|"
+    rf"(?:承诺|预计|将在|将于|定于|可在|可以在|保证){_DELIVERY_CLAUSE}{{0,16}}{_DELIVERY_ACTION}|"
+    rf"(?:deliver(?:y|ed)?|turnaround|go[- ]?live){_DELIVERY_CLAUSE}{{0,24}}(?:within|by|in)\s+\d+"
+    r")",
     re.IGNORECASE,
 )
 _PERSONAL_ATTRIBUTION_RE = re.compile(
@@ -1367,6 +1405,7 @@ def _safe_candidate_blocks(
                 and _PRICE_VALUE_RE.search(text)
             )
             or _PROMISE_RE.search(text)
+            or _DELIVERY_COMMITMENT_RE.search(text)
             or _UNSUPPORTED_EDITORIAL_ASSERTION_RE.search(text)
         ):
             return None, "assertion_forbidden"
