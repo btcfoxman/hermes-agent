@@ -244,6 +244,63 @@ def test_real_http_adapter_records_actual_requests_usage_and_safe_errors(monkeyp
     assert "cny" not in json.dumps(trace).lower()
 
 
+@pytest.mark.parametrize("headers,provider_id", [
+    ({"X-Oneapi-Request-Id": "newapi-request", "x-request-id": "openai-request", "request-id": "legacy-request"}, "newapi-request"),
+    ({"X-Request-Id": "openai-request", "request-id": "legacy-request"}, "openai-request"),
+    ({"request-id": "legacy-request"}, "legacy-request"),
+    ({"X-Oneapi-Request-Id": "", "X-Request-Id": "openai-request"}, "openai-request"),
+])
+@pytest.mark.parametrize("response_mode", ["valid", "invalid_model_json", "invalid_http_json"])
+def test_provider_correlation_and_usage_survive_json_failures(monkeypatch, capsys, headers, provider_id, response_mode):
+    monkeypatch.setattr(api, "server_stage_route", lambda stage: None)
+    monkeypatch.setattr(api, "_resolve_host_addresses", lambda host, port: {"93.184.216.34", "93.184.216.35"})
+    usage = {"prompt_tokens": 17, "completion_tokens": 9, "total_tokens": 26,
+             "prompt_tokens_details": {"cached_tokens": 3}}
+    calls, observed = [], []
+    original = httpx.AsyncClient
+
+    def handle(request):
+        calls.append(request)
+        if response_mode == "invalid_http_json":
+            return httpx.Response(200, headers=headers, text="PRIVATE UNPARSEABLE RESPONSE")
+        content = '{"ok": true}' if response_mode == "valid" else "PRIVATE INVALID MODEL CONTENT"
+        return httpx.Response(200, headers=headers, json={"choices": [{"message": {"content": content}}], "usage": usage})
+
+    monkeypatch.setattr(api.httpx, "AsyncClient", lambda **kwargs: original(transport=httpx.MockTransport(handle), **kwargs))
+
+    async def observer(event):
+        observed.append(copy.deepcopy(event))
+
+    async def run():
+        observer_token = PROVIDER_REQUEST_OBSERVER.set(observer)
+        single_token = SINGLE_PROVIDER_REQUEST.set(True)
+        try:
+            bounded = BoundedModelRun(RuntimeBudget(max_model_calls=1))
+            result = await bounded.call(api._llm_json, "system", {}, {},
+                "https://model.example/v1", "PRIVATE API KEY", "writer")
+            return result, bounded.trace(blocked=False, review="not_requested", stop_reason="done").model_dump(mode="json")
+        finally:
+            PROVIDER_REQUEST_OBSERVER.reset(observer_token)
+            SINGLE_PROVIDER_REQUEST.reset(single_token)
+
+    result, trace = asyncio.run(run())
+    assert len(calls) == 1
+    assert [event["phase"] for event in observed] == ["before_request", "after_request"]
+    event = trace["provider_requests"][0]
+    assert event["provider_request_id"] == provider_id
+    assert len(event["request_id"]) == 32 and event["request_id"] != provider_id
+    assert {item["request_id"] for item in observed} == {event["request_id"]}
+    assert observed[-1]["provider_request_id"] == provider_id
+    assert event["usage"] == observed[-1]["usage"] == (None if response_mode == "invalid_http_json" else usage)
+    if response_mode == "valid":
+        assert result["ok"] is True and result["_usage"] == usage
+    else:
+        assert result["_error"] == event["error_code"] == "provider_response_invalid"
+    assert event["status"] == ("unknown" if response_mode == "invalid_http_json" else "returned")
+    assert "PRIVATE" not in json.dumps({"result": result, "trace": trace, "observed": observed})
+    assert capsys.readouterr() == ("", "")
+
+
 def test_single_http_mode_keeps_unknown_usage_on_connection_failure(monkeypatch):
     monkeypatch.setattr(api, "server_stage_route", lambda stage: None)
     monkeypatch.setattr(api, "_resolve_host_addresses", lambda host, port: {"93.184.216.34", "93.184.216.35"})

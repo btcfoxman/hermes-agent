@@ -640,7 +640,9 @@ async def _llm_json(
                         },
                         extensions={"sni_hostname": target.sni_hostname},
                     )
-                    event["provider_request_id"] = resp.headers.get("x-request-id") or resp.headers.get("request-id")
+                    event["provider_request_id"] = (resp.headers.get("x-oneapi-request-id")
+                                                    or resp.headers.get("x-request-id")
+                                                    or resp.headers.get("request-id"))
                     event["http_status"] = resp.status_code
                     if resp.is_redirect:
                         raise RuntimeError("llm_redirect_forbidden")
