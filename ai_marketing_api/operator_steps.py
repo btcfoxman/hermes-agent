@@ -20,6 +20,7 @@ from ai_marketing_api.operator_review import assess_editorial, apply_editorial_a
 from ai_marketing_api.operator_routing import BUDGET_RESERVATION_ID, SINGLE_PROVIDER_REQUEST, server_stage_route
 from ai_marketing_api.operator_runtime import ContextAuthorizationError, StrictModel
 from ai_marketing_api.operator_style import MASTER_ONLY, editorial_scope, style_context
+from ai_marketing_api.operator_private_receipts import PRIVATE_GENERATION_CAPTURE, PrivateGenerationCapture
 
 
 EditorialStep = Literal["draft_master", "adapt_platform", "verify_claims", "review_editorial"]
@@ -64,7 +65,7 @@ def _normalized_candidate(registry, role, request, contexts, fallback, candidate
 
 
 async def run_editorial_step(registry, role, step: EditorialStep, payload: EditorialStepRequest, llm,
-                             *, timeout_seconds: float | None = None):
+                             *, timeout_seconds: float | None = None, wire_request_sha256: str = ""):
     if timeout_seconds is not None:
         # The provider timeout never extends the independent BoundedModelRun
         # deadline or call budget. This header is limited by the HTTP schema.
@@ -88,6 +89,9 @@ async def run_editorial_step(registry, role, step: EditorialStep, payload: Edito
     single = SINGLE_PROVIDER_REQUEST.set(True)
     reservation = BUDGET_RESERVATION_ID.set(payload.budget_reservation_id or BUDGET_RESERVATION_ID.get())
     master_only = MASTER_ONLY.set(step == "draft_master")
+    capture = PrivateGenerationCapture(role_id=getattr(role, "value", role), step=step,
+        reservation_id=payload.budget_reservation_id, request_sha256=wire_request_sha256)
+    private_token = PRIVATE_GENERATION_CAPTURE.set(capture)
     try:
         if server_stage_route(stage) is None:
             raise ValueError("stage_route_unavailable")
@@ -118,6 +122,7 @@ async def run_editorial_step(registry, role, step: EditorialStep, payload: Edito
                             raise ValueError("master_evidence_invalid")
                         body["master_draft"] = {"title": prior.master_title, "body": prior.master_content}
                     candidate = await run.call(llm, registry.get(role).system_prompt, body, fallback, stage=stage)
+                    capture.writer(candidate)
                     output = normalize_content_output(registry, role, scoped, contexts, fallback, candidate)
                     # Keep proposals as unverified metadata; rendered text remains
                     # canonical until the separately budgeted verifier accepts it.
@@ -160,22 +165,21 @@ async def run_editorial_step(registry, role, step: EditorialStep, payload: Edito
                 trace.evidence_mode = "grounded_paraphrase"
             output.generation_trace = trace
             artifact = output.model_dump(mode="json")
-            return {"schema_version": "operator.editorial_step.v1", "step": step,
+            result = {"schema_version": "operator.editorial_step.v1", "step": step,
                 "status": "artifact" if not output.critic.errors else "blocked",
                 "artifact": artifact, "artifact_signature": artifact_signature(artifact),
                 "publishable": False, "requires_human_review": True,
-                "generation_trace": trace.model_dump(mode="json"),
-                **({"private_review_receipt": run.private_review_receipt}
-                   if step == "review_editorial" and run.private_review_receipt is not None else {})}
+                "generation_trace": trace.model_dump(mode="json")}
+            return capture.attach(result, run.private_review_receipt if step == "review_editorial" else None)
     except ValueError as exc:
         code = str(exc) if str(exc) in {"stage_route_unavailable", "artifact_signature_invalid", "signed_master_required", "signed_candidate_required", "candidate_required", "master_evidence_invalid"} else "step_artifact_invalid"
-        return {"schema_version": "operator.editorial_step.v1", "step": step,
+        result = {"schema_version": "operator.editorial_step.v1", "step": step,
             "status": "unavailable", "error_code": code, "artifact": None,
             "publishable": False, "requires_human_review": True,
-            "generation_trace": run.trace(blocked=True, review="not_requested", stop_reason=code).model_dump(mode="json"),
-            **({"private_review_receipt": run.private_review_receipt}
-               if step == "review_editorial" and run.private_review_receipt is not None else {})}
+            "generation_trace": run.trace(blocked=True, review="not_requested", stop_reason=code).model_dump(mode="json")}
+        return capture.attach(result, run.private_review_receipt if step == "review_editorial" else None)
     finally:
+        PRIVATE_GENERATION_CAPTURE.reset(private_token)
         MASTER_ONLY.reset(master_only)
         BUDGET_RESERVATION_ID.reset(reservation)
         SINGLE_PROVIDER_REQUEST.reset(single)

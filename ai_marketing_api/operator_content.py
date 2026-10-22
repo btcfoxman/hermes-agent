@@ -2025,7 +2025,10 @@ def _normalize_content_output(
     blocks = _reindex(
         base_blocks if raw_master_blocks is None else master_selection
     )
-    if role is OperatorRole.INDUSTRY:
+    # Analysis may lead with evidence and interleave its interpretation.  Keep
+    # the model's safe block order instead of moving a dependent opinion ahead
+    # of the fact it explains. Other industry genres keep their legacy layout.
+    if role is OperatorRole.INDUSTRY and request.genre != "industry_analysis":
         blocks = _platform_blocks(
             "master",
             blocks,
@@ -2105,7 +2108,7 @@ def _normalize_content_output(
             ),
             prefix=f"{platform}-block",
         )
-        if role is OperatorRole.INDUSTRY:
+        if role is OperatorRole.INDUSTRY and request.genre != "industry_analysis":
             variant_blocks = _platform_blocks(
                 platform,
                 variant_blocks,

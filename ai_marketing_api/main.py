@@ -45,8 +45,9 @@ from ai_marketing_api.operator_grounding import apply_grounded_paraphrases
 from ai_marketing_api.operator_planning import EditorialPlanRequest, plan_editorial
 from ai_marketing_api.operator_steps import EditorialStep, EditorialStepRequest, run_editorial_step
 from ai_marketing_api.operator_receipts import (
-    EditorialReceiptError, EditorialReceiptStore, execute_with_receipt,
+    EditorialReceiptError, EditorialReceiptStore, execute_with_receipt, request_sha256 as receipt_request_sha256,
 )
+from ai_marketing_api.operator_private_receipts import PRIVATE_GENERATION_CAPTURE
 from ai_marketing_api.operator_runtime import (
     CONTENT_SCHEMA_VERSION,
     SCHEMA_VERSION,
@@ -605,6 +606,9 @@ async def _llm_json(
     resolved_timeout = _timeout_seconds(timeout_seconds)
     request_started = False
     provider_requests: list[dict[str, Any]] = []
+    private_capture = PRIVATE_GENERATION_CAPTURE.get()
+    if private_capture is not None:
+        private_capture.protect(api_key)
     async def complete_event(event):
         try:
             await observe_provider({**event, "phase": "after_request"})
@@ -633,7 +637,10 @@ async def _llm_json(
                     provider_requests.append(event)
                     if PROVIDER_EVENT_SINK.get() is not None:
                         PROVIDER_EVENT_SINK.get().append(event)
-                    resp = await client.post(
+                    if private_capture is not None:
+                        private_capture.begin(event)
+                    send = client.post if private_capture is None else lambda url, **kwargs: private_capture.post(client, url, **kwargs)
+                    resp = await send(
                         f"{request_base_url}/chat/completions",
                         json=request,
                         headers={
@@ -649,16 +656,26 @@ async def _llm_json(
                     event["http_status"] = resp.status_code
                     if resp.is_redirect:
                         raise RuntimeError("llm_redirect_forbidden")
+                    if private_capture is not None:
+                        private_capture.stage("http_status")
                     resp.raise_for_status()
+                    if private_capture is not None:
+                        private_capture.stage("envelope_json")
                     data = resp.json()
+                    if private_capture is not None:
+                        private_capture.envelope(data)
                     event.update(status="returned", usage=data.get("usage") if isinstance(data.get("usage"), dict) else None)
                     await complete_event(event)
                     break
                 except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
                     last_error = exc
+                    if private_capture is not None:
+                        private_capture.failure("provider_connection_failed", exc)
                     event.update(status="unknown", error_code="provider_connection_failed")
                     await complete_event(event)
-                except asyncio.CancelledError:
+                except asyncio.CancelledError as exc:
+                    if private_capture is not None:
+                        private_capture.failure("provider_cancelled", exc)
                     event.update(status="unknown", error_code="provider_cancelled")
                     await complete_event(event)
                     raise
@@ -666,8 +683,14 @@ async def _llm_json(
                 if last_error is not None:
                     raise last_error
                 raise RuntimeError("no_public_llm_address")
+        if private_capture is not None:
+            private_capture.stage("message_content")
         content = data["choices"][0]["message"]["content"]
+        if private_capture is not None:
+            private_capture.stage("model_json")
         result = _json_from_response(content)
+        if private_capture is not None:
+            private_capture.stage("complete")
         result["_model"] = model
         result["_llm_attempted"] = True
         result["_usage"] = data.get("usage", {})
@@ -685,6 +708,8 @@ async def _llm_json(
             code = "provider_response_invalid"
         else:
             code = "provider_request_failed"
+        if private_capture is not None:
+            private_capture.failure(code, exc)
         for event in provider_requests:
             if event["status"] == "prepared":
                 event.update(status="unknown", error_code=code)
@@ -1485,13 +1510,15 @@ async def operator_editorial_step(role_id: OperatorRole, step: EditorialStep,
         ("x-hermes-openai-base-url", "x-hermes-openai-api-key", "x-hermes-model")):
         raise HTTPException(status_code=400, detail={"code": "client_stage_override_forbidden"})
     try:
+        wire_payload = await request.json()
         async def execute():
             return await run_editorial_step(OPERATOR_REGISTRY, role_id, step, payload, _llm_json,
-                                           timeout_seconds=x_hermes_timeout_seconds)
+                                           timeout_seconds=x_hermes_timeout_seconds,
+                                           wire_request_sha256=receipt_request_sha256(wire_payload))
         if not payload.budget_reservation_id:
             return await execute()
         return await execute_with_receipt(role_id=role_id.value, step=step,
-            reservation_id=payload.budget_reservation_id, wire_payload=await request.json(), execute=execute)
+            reservation_id=payload.budget_reservation_id, wire_payload=wire_payload, execute=execute)
     except EditorialReceiptError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code},
                             headers={"Cache-Control": "no-store"}) from None
