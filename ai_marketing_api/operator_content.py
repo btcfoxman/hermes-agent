@@ -854,7 +854,6 @@ def _commercial_gate(
             request.topic,
             request.approved_proposal.title,
             request.approved_proposal.angle,
-            *(claim.text for claim in request.claims),
         ]
     )
     offers = [
@@ -867,6 +866,9 @@ def _commercial_gate(
         and not _NEGATED_PRICE_INTENT_RE.search(clause)
         for clause in _PRICE_INTENT_CLAUSE_SPLIT_RE.split(rendered_direction)
     )
+    # Canonical facts can mention where prices must be checked without asking
+    # this article to quote them. Intent belongs to the editorial direction;
+    # actual monetary values/free offers in evidence still require an offer.
     price_sensitive = price_requested or any(
         _PRICE_VALUE_RE.search(block.text) for block in blocks
     )

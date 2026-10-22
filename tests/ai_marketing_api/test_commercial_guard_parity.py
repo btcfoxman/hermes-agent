@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
+from pathlib import Path
 
 import pytest
 
@@ -174,6 +176,73 @@ def test_price_fact_without_an_offer_still_fails_closed(text):
     assert output.status == "needs_input"
     assert "unique_public_business_offer_required" in output.critic.errors
     assert output.master_content is None and output.platform_variants == []
+
+
+def _live_positioning_request():
+    # Public, authorized input captured from the failed first campaign. There
+    # are no credentials or provider settings in this fixture. Keep its exact
+    # scope: two distinct capability records, no BusinessOffer, genre use_case.
+    return json.loads((Path(__file__).parent / "fixtures" / "commercial_use_case_positioning.v1.json").read_text(encoding="utf-8"))
+
+
+def _offline_draft_boundary(monkeypatch, tmp_path):
+    monkeypatch.setenv("HERMES_API_KEY", "operator-test-secret")
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("HERMES_MODEL", "offline-regression-writer")
+    monkeypatch.setenv("HERMES_OPENAI_BASE_URL", "https://evaluation.invalid/v1")
+    monkeypatch.setenv("HERMES_OPENAI_API_KEY", "never-used-regression-key")
+    calls = []
+    async def offline_model(system, body, fallback, *args, **kwargs):
+        calls.append(kwargs["stage"])
+        return {"_model": "offline-regression-writer", "master_title": "视频工具开发者如何核对适用边界",
+            "blocks": [{"block_ref": block["block_ref"]} for block in body["canonical_block_registry"] if block["required"]],
+            "platform_variants": []}
+    monkeypatch.setattr(api, "_llm_json", offline_model)
+    return calls
+
+
+def test_real_campaign_use_case_with_price_location_fact_reaches_drafting(monkeypatch, tmp_path):
+    value = _live_positioning_request()
+    calls = _offline_draft_boundary(monkeypatch, tmp_path)
+    result = http_request("POST", "/api/v1/operators/commercial/editorial-steps/draft_master", json={"compose": value}).json()
+    assert result["status"] == "artifact", result
+    assert result["generation_trace"]["model_calls"] == 1
+    assert calls == ["compose"]
+    blocks = result["artifact"]["blocks"]
+    assert [block["text"] for block in blocks] == [claim["text"] for claim in value["claims"]]
+    assert [block["evidence_ids"] for block in blocks] == [claim["evidence_ids"] for claim in value["claims"]]
+    assert all(block["source_exact"] and block["locked"] for block in blocks)
+    assert "unique_public_business_offer_required" not in result["artifact"]["critic"]["errors"]
+
+
+@pytest.mark.parametrize("case", ["price_intent", "discount_intent", "amount", "amount_with_disclaimer", "free", "negated_but_half_price", "negotiable", "multiple_offers", "offer_claim_missing"])
+def test_live_use_case_still_blocks_real_quote_or_unbound_offer_before_model(monkeypatch, tmp_path, case):
+    value = _live_positioning_request()
+    calls = _offline_draft_boundary(monkeypatch, tmp_path)
+    if case in {"price_intent", "discount_intent"}:
+        value["objective"] = "请介绍具体价格" if case == "price_intent" else "不介绍价格；但请介绍最新折扣"
+    elif case in {"multiple_offers", "offer_claim_missing"}:
+        value["objective"] = "请介绍具体价格"
+        for index in range(2 if case == "multiple_offers" else 1):
+            value["authorized_context"].append({"record_id": f"active-offer-{index}", "space": "company_public",
+                "record_type": "business_offer", "content": "Private offer details are never public copy.",
+                "status": "approved", "authorized_roles": ["commercial"], "source_tier": "official",
+                "valid_from": "2026-01-01T00:00:00Z", "valid_until": "2027-01-01T00:00:00Z",
+                "structured_data": {"publicly_quoteable": True, "public_text": f"公开方案价格为 {99 + index} 元。"}})
+    else:
+        text = {"amount": "公开方案价格为 99 元。", "amount_with_disclaimer": "公开方案价格为 99 元，具体价格以站内当前说明为准。",
+                "free": "公开方案免费使用。", "negated_but_half_price": "不报价，但公开方案限时半价。", "negotiable": "公开方案报价面议。"}[case]
+        evidence_id = value["claims"][1]["evidence_ids"][0]
+        value["claims"][1]["text"] = text
+        context = next(row for row in value["authorized_context"] if row["record_id"] == evidence_id)
+        context["content"] = text
+        context["structured_data"]["public_text"] = text
+    result = http_request("POST", "/api/v1/operators/commercial/editorial-steps/draft_master", json={"compose": value}).json()
+    assert result["status"] == "blocked", result
+    expected = "business_offer_claim_missing" if case == "offer_claim_missing" else "unique_public_business_offer_required"
+    assert expected in result["artifact"]["critic"]["errors"]
+    assert result["generation_trace"]["model_calls"] == 0
+    assert calls == []
 
 
 def test_industry_editorial_retains_its_existing_non_numeric_price_exception():

@@ -1,0 +1,125 @@
+{
+  "as_of": "2026-10-22T20:29:52.819146+00:00",
+  "genre": "use_case",
+  "topic": "OverseasAPI",
+  "claims": [
+    {
+      "kind": "fact",
+      "text": "AIID API 站面向漫剧创作、电商内容与广告团队，以及视频工具、漫剧工作台和音视频工具箱的开发者。",
+      "evidence_ids": [
+        "dailyinput_a47a3f3a81faf77ad3273449a3dd846c"
+      ],
+      "verification_status": "verified"
+    },
+    {
+      "kind": "fact",
+      "text": "API 站的产品定位是稳定、性价比高、模型全面；具体模型、价格和服务条件以站内当前说明为准。",
+      "evidence_ids": [
+        "dailyinput_4f0f0b17d12ae3d1bcbc47de09476401"
+      ],
+      "verification_status": "verified"
+    }
+  ],
+  "audience": "视频工具开发者",
+  "channels": [
+    "wechat_mp",
+    "wechat_moments",
+    "weitoutiao"
+  ],
+  "objective": "视频工具开发者评估 OverseasAPI 是否适合现有工作流的核对框架",
+  "constraints": [
+    "Use only the supplied approved_proposal and claims.",
+    "Fact, identity, and experience blocks must copy a claim verbatim and preserve its evidence_ids.",
+    "Do not introduce new numbers, prices, promises, events, or first-person experiences."
+  ],
+  "runtime_budget": {
+    "max_model_calls": 6,
+    "max_elapsed_seconds": 180,
+    "max_surface_revisions": 2
+  },
+  "style_references": [],
+  "approved_proposal": {
+    "cta": "邀请读者提供具体场景，进入人工商务沟通。",
+    "angle": "把已批准的产品能力或案例证据连接到明确的客户场景和下一步沟通。",
+    "title": "OverseasAPI",
+    "key_points": [
+      "AIID API 站面向漫剧创作、电商内容与广告团队，以及视频工具、漫剧工作台和音视频工具箱的开发者。",
+      "API 站的产品定位是稳定、性价比高、模型全面；具体模型、价格和服务条件以站内当前说明为准。"
+    ],
+    "first_person": false,
+    "audience_value": "视频工具开发者",
+    "suggested_formats": [
+      "微信公众号：以“4 项核对清单”展开，适合保存和内部评估。",
+      "微信朋友圈：用简短问题引导开发者先做自查，再引导查看站内说明。",
+      "微头条：以“定位不等于适配”的观点切入，列出关键核对项。"
+    ]
+  },
+  "authorized_context": [
+    {
+      "space": "company_public",
+      "title": "OverseasAPI",
+      "status": "approved",
+      "content": "API 站的产品定位是稳定、性价比高、模型全面；具体模型、价格和服务条件以站内当前说明为准。",
+      "record_id": "dailyinput_4f0f0b17d12ae3d1bcbc47de09476401",
+      "source_uri": null,
+      "valid_from": "2026-10-22T20:29:42.363669+00:00",
+      "record_type": "capability",
+      "source_tier": "official",
+      "valid_until": null,
+      "structured_data": {
+        "day_scoped": true,
+        "public_text": "API 站的产品定位是稳定、性价比高、模型全面；具体模型、价格和服务条件以站内当前说明为准。",
+        "source_tier": "official",
+        "publisher_id": "owner"
+      },
+      "authorized_roles": [
+        "commercial"
+      ]
+    },
+    {
+      "space": "company_public",
+      "title": "OverseasAPI",
+      "status": "approved",
+      "content": "AIID API 站面向漫剧创作、电商内容与广告团队，以及视频工具、漫剧工作台和音视频工具箱的开发者。",
+      "record_id": "dailyinput_a47a3f3a81faf77ad3273449a3dd846c",
+      "source_uri": null,
+      "valid_from": "2026-10-22T20:29:42.363669+00:00",
+      "record_type": "capability",
+      "source_tier": "official",
+      "valid_until": null,
+      "structured_data": {
+        "day_scoped": true,
+        "public_text": "AIID API 站面向漫剧创作、电商内容与广告团队，以及视频工具、漫剧工作台和音视频工具箱的开发者。",
+        "source_tier": "official",
+        "publisher_id": "owner"
+      },
+      "authorized_roles": [
+        "commercial"
+      ]
+    }
+  ],
+  "decision_thread_id": "decision_19a870d69c6a45e9a16f51eda8e793fa",
+  "approved_preferences": [],
+  "fact_expression_mode": "grounded_paraphrase",
+  "public_editorial_brief": {
+    "cta": "了解模型与接入方式，按自己的场景验证适配性",
+    "tone": "具体、实用、可信，解释适合谁和不适合谁，不喊口号",
+    "angle": "帮助视频工具开发者按目标用户、所需模型、接入与服务条件、当前站内说明逐项核对，而非仅依据产品定位作判断。",
+    "role_id": "commercial",
+    "audience": "视频工具开发者",
+    "channels": [
+      "wechat_mp",
+      "wechat_moments",
+      "weitoutiao"
+    ],
+    "objective": "帮助适合的客户判断已授权产品的实际用途与适用边界。 长期方向：持续帮助适合的客户理解 AIID 两站的实际用途，沉淀有判断、有依据的行业内容与真实个人表达。",
+    "product_id": "api",
+    "constraints": [
+      "不新增报价、折扣、承诺、业绩数字或个人经历。",
+      "不把来源核验步骤、编辑说明、claim ID 写进社媒正文。"
+    ],
+    "landing_url": "https://aiid.edu.kg",
+    "reader_value": "面向明确的开发者读者，能够把已验证的产品受众与定位转化为可执行的评估问题；同时明确具体模型、价格和服务条件应以站内当前说明为准，避免作出未经证实的承诺。",
+    "schema_version": "operator.editorial_brief.v1"
+  }
+}
