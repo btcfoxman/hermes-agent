@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Literal, Optional, Sequence, Set
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field
+from ai_marketing_api.operator_style import StyleReference, style_context
 
 
 SCHEMA_VERSION = "operator.proposal.v1"
@@ -122,6 +123,8 @@ class OperatorProposeRequest(StrictModel):
     approved_preferences: List[ApprovedPreference] = Field(default_factory=list, max_length=100)
     as_of: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     decision_thread_id: Optional[str] = Field(default=None, max_length=160)
+    genre: str = Field(default="", max_length=80, pattern=r"^[a-z0-9_\-]*$")
+    style_references: List[StyleReference] = Field(default_factory=list, max_length=12)
 
 
 class ProposalOutline(StrictModel):
@@ -167,6 +170,7 @@ class OperatorOutput(StrictModel):
     risk_flags: List[OperatorRisk] = Field(default_factory=list, max_length=30)
     requires_human_review: bool = True
     model: str = Field(default="fallback", max_length=200)
+    generation_trace: Optional[Dict[str, Any]] = None
 
 
 class OperatorReviseRequest(OperatorProposeRequest):
@@ -1005,6 +1009,9 @@ def request_payload(request: OperatorProposeRequest) -> Dict[str, Any]:
     """Serialize only user/context data; the SOUL remains a stable system message."""
 
     payload = _model_dump(request)
+    payload.pop("genre", None)
+    payload.pop("style_references", None)
+    payload["style_context"] = style_context(request)
     channels = {str(item or "").strip().lower() for item in request.channels}
     payload["approved_preferences"] = [
         _model_dump(preference)

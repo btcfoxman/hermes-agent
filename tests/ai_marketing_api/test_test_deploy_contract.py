@@ -1,7 +1,11 @@
 from pathlib import Path
+import asyncio
+import io
 import shutil
 import subprocess
+import urllib.request
 
+import httpx
 import pytest
 
 
@@ -62,13 +66,12 @@ def test_deploy_script_preserves_server_credentials_and_updates_only_canonical_h
     assert "TEMP_DOCKER_CONFIG" in deploy_script
     assert 'export DOCKER_CONFIG="${TEMP_DOCKER_CONFIG}"' in deploy_script
     assert "probe_operator_endpoints" in deploy_script
-    assert "probe_compose_contracts" in deploy_script
-    assert "probe_industry_claim_contract" in deploy_script
+    assert "probe_schema_contract" in deploy_script
+    assert "probe_compose_contracts" not in deploy_script
+    assert "probe_industry_claim_contract" not in deploy_script
     assert "probe_service_health" in deploy_script
-    assert 'result["model"]' not in deploy_script
-    assert 'str(result.get("model") or "").lower() != "fallback"' in deploy_script
-    assert '[(source_text, "fact", ["canonical-official-probe"])]' in deploy_script
-    assert "retry 3 10 probe_industry_claim_contract" in deploy_script
+    assert 'method="POST"' not in deploy_script
+    assert "Paid model smoke was not executed" in deploy_script
     assert (
         'docker compose \\\n    --project-name "${COMPOSE_PROJECT_NAME}"'
         in deploy_script
@@ -79,6 +82,36 @@ def test_deploy_script_preserves_server_credentials_and_updates_only_canonical_h
     assert "compose up -d --remove-orphans hermes-agent" in deploy_script
     assert "compose exec -T hermes-agent" in deploy_script
     assert "hermes-agent-test" not in deploy_script
+
+
+def test_deployment_probes_execute_real_read_only_contracts_without_model_calls(monkeypatch):
+    import ai_marketing_api.main as api
+    monkeypatch.setenv("HERMES_API_KEY", "deployment-contract-test-only")
+    async def must_not_call(*args, **kwargs):
+        raise AssertionError("Deployment readiness must not invoke a paid model")
+    monkeypatch.setattr(api, "_llm_json", must_not_call)
+    requests = []
+    def urlopen(request, timeout):
+        url = request.full_url if isinstance(request, urllib.request.Request) else request
+        method = request.get_method() if isinstance(request, urllib.request.Request) else "GET"
+        assert method == "GET"
+        headers = dict(request.header_items()) if isinstance(request, urllib.request.Request) else {}
+        requests.append(url)
+        async def call():
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api.app)) as client:
+                return await client.get(url, headers=headers)
+        response = asyncio.run(call())
+        assert response.status_code == 200
+        result = io.BytesIO(response.content)
+        result.status = response.status_code
+        return result
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    script = (REPOSITORY_ROOT / "test/deploy.sh").read_text(encoding="utf-8")
+    for function in ("probe_service_health", "probe_operator_endpoints", "probe_schema_contract"):
+        fragment = script.split(function + "() {", 1)[1].split("\n}\n", 1)[0]
+        source = fragment.split("python -c '\n", 1)[1].rsplit("\n'", 1)[0]
+        exec(compile(source, "<deployment-readiness>", "exec"), {})
+    assert len(requests) == 6
 
 
 def test_container_healthcheck_authenticates_canonical_operator_readiness():

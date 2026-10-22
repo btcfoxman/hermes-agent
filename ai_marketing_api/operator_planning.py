@@ -230,7 +230,7 @@ async def plan_editorial(
             }
         ],
     }
-    result = await run.call(llm, PLANNER_PROMPT, body, {}, *model_args)
+    result = await run.call(llm, PLANNER_PROMPT, body, {}, *model_args, stage="planner")
     selections: list[EditorialSelection] = []
     hypotheses: list[LearningHypothesis] = []
     valid = (

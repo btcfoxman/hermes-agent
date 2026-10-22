@@ -10,12 +10,14 @@ import asyncio
 import hashlib
 import json
 import time
+import re
 from typing import Any, Awaitable, Callable, Literal
 from urllib.parse import urlsplit
 
 from pydantic import Field, field_validator
 
 from ai_marketing_api.operator_runtime import OperatorRole, StrictModel
+from ai_marketing_api.operator_routing import PROVIDER_EVENT_SINK
 
 
 class PublicEditorialBrief(StrictModel):
@@ -75,7 +77,7 @@ class OwnerRevision(StrictModel):
 
 
 class GenerationAttempt(StrictModel):
-    stage: Literal["compose", "repair", "claim_verification", "editorial_review"]
+    stage: Literal["planner", "propose", "revise", "compose", "repair", "claim_verification", "editorial_review"]
     surface: str = "all"
     model: str = "fallback"
     outcome: Literal["returned", "unavailable", "failed", "timeout"]
@@ -84,6 +86,8 @@ class GenerationAttempt(StrictModel):
     input_tokens: int | None = None
     output_tokens: int | None = None
     upstream_attempted: bool = False
+    error_code: str | None = None
+    provider_requests: list[dict[str, Any]] = Field(default_factory=list, max_length=8)
 
 
 class GenerationTrace(StrictModel):
@@ -107,6 +111,7 @@ class GenerationTrace(StrictModel):
     )
     human_review_required: Literal[True] = True
     attempts: list[GenerationAttempt] = Field(default_factory=list, max_length=8)
+    provider_requests: list[dict[str, Any]] = Field(default_factory=list, max_length=32)
 
 
 class EditorialReview(StrictModel):
@@ -117,7 +122,8 @@ class EditorialReview(StrictModel):
     clear_and_specific: bool
     platform_fit: bool
     issues: list[str] = Field(default_factory=list, max_length=8)
-    failed_surfaces: list[str] = Field(default_factory=list, max_length=20)
+    failed_surfaces: list[str] = Field(default_factory=list, max_length=21)
+    quality_scorecard: "QualityScorecard | None" = None
 
     @property
     def passed(self) -> bool:
@@ -129,7 +135,34 @@ class EditorialReview(StrictModel):
                 self.platform_fit,
             ))
             and not self.issues
+            and (self.quality_scorecard is None or self.quality_scorecard.passed)
         )
+
+
+class SurfaceQuality(StrictModel):
+    surface: str = Field(min_length=1, max_length=80)
+    reader_relevance: int = Field(ge=1, le=5, strict=True)
+    information_gain: int = Field(ge=1, le=5, strict=True)
+    analytical_depth: int = Field(ge=1, le=5, strict=True)
+    natural_expression: int = Field(ge=1, le=5, strict=True)
+    platform_fit: int = Field(ge=1, le=5, strict=True)
+    major_issues: list[str] = Field(max_length=20)
+    issues: list[str] = Field(default_factory=list, max_length=20)
+
+    @property
+    def passed(self) -> bool:
+        return not self.major_issues and min(self.reader_relevance, self.information_gain,
+            self.analytical_depth, self.natural_expression, self.platform_fit) >= 4
+
+
+class QualityScorecard(StrictModel):
+    schema_version: Literal["quality_scorecard.v1"] = "quality_scorecard.v1"
+    content_sha256: str = Field(default="", max_length=64)
+    surfaces: list[SurfaceQuality] = Field(min_length=1, max_length=21)
+    passed: bool = False
+
+
+EditorialReview.model_rebuild()
 
 
 class BoundedModelRun:
@@ -162,7 +195,7 @@ class BoundedModelRun:
         fallback: dict[str, Any],
         *args: Any,
         stage: Literal[
-            "compose", "repair", "claim_verification", "editorial_review"
+            "planner", "propose", "revise", "compose", "repair", "claim_verification", "editorial_review"
         ] = "compose",
         surface: str = "all",
         **kwargs: Any,
@@ -174,6 +207,8 @@ class BoundedModelRun:
                 "_model": "fallback",
             }
         started = time.monotonic()
+        provider_events: list[dict[str, Any]] = []
+        event_token = PROVIDER_EVENT_SINK.set(provider_events)
         try:
             result = await asyncio.wait_for(
                 llm(
@@ -182,6 +217,7 @@ class BoundedModelRun:
                     fallback,
                     *args,
                     max_output_tokens=self.budget.max_output_tokens,
+                    stage=stage,
                     **kwargs,
                 ),
                 timeout=self.remaining_seconds,
@@ -197,13 +233,15 @@ class BoundedModelRun:
             # Do not expose raw provider exceptions (which can embed endpoints
             # or credentials) in model-facing content or persisted diagnostics.
             result = {**fallback, "_error": "model_adapter_failure"}
+        finally:
+            PROVIDER_EVENT_SINK.reset(event_token)
         if not isinstance(result, dict):
             result = {**fallback, "_error": "model_response_not_object"}
         model = str(result.get("_model") or result.get("model") or "fallback")
         error = str(result.get("_error") or "")
         outcome = (
             "timeout"
-            if error == "runtime_deadline_exceeded"
+            if error in {"runtime_deadline_exceeded", "provider_timeout"}
             else "failed"
             if error
             else "unavailable"
@@ -232,6 +270,8 @@ class BoundedModelRun:
                 output_tokens=token_count("completion_tokens"),
                 upstream_attempted=bool(result.get("_llm_attempted"))
                 or (model != "fallback" and not error),
+                error_code=(error if re.fullmatch(r"[a-z][a-z0-9_]{0,79}", error) else "model_call_failed") if error else None,
+                provider_requests=list(result.get("_provider_requests") or provider_events)[:8],
             )
         )
         return result
@@ -250,4 +290,5 @@ class BoundedModelRun:
             stop_reason=stop_reason,
             editorial_review=review,
             attempts=self.attempts,
+            provider_requests=[event for item in self.attempts for event in item.provider_requests][:32],
         )

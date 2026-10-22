@@ -129,3 +129,178 @@ tests do not establish live writing quality, real publishing or user-time gains.
 Deployment probes must exercise generic inputs. The compose endpoint no longer
 calls the historical funds-remedy or human-review fixed-story builders; their
 legacy helper definitions are not a production success path.
+
+## Genre, style references and scored review
+
+Propose, revise and compose accept `genre` (an optional lowercase identifier)
+and `style_references: [{reference_id, title?, url?, genre?, style_notes?, excerpt?}]`.
+They travel as a separate `style_context`, including through focused repairs
+and independent editing. They are untrusted expression examples, never factual
+evidence, product capabilities or the owner's biography. Reference facts must
+not be added to `claims` or `authorized_context`.
+
+Compose also accepts `editorial_feedback` (at most 6000 characters) for a prior
+independent editor's revision diagnostics. Unlike raw `constraints`, which are
+intentionally withheld from the external model, this explicit field reaches
+drafting, adaptation, focused repairs and independent review as untrusted data.
+It never enters claims or authorized context. Known non-public excerpts are
+rejected before model dispatch. The orchestrator remains responsible for
+projecting safe review diagnostics rather than raw private source material.
+
+For a request with genre or style references, the editor must return
+`quality_scorecard.v1`. Each `surfaces` row identifies `master` or an exact
+requested platform and contains integer 1–5 scores for `reader_relevance`,
+`information_gain`, `analytical_depth`, `natural_expression`, and `platform_fit`,
+plus explicit `major_issues` and optional actionable `issues`. Every surface
+must occur exactly once. All five scores must be at least 4 and major issues
+must be empty; means and author-supplied pass flags are insufficient.
+
+The server stamps `passed` and `content_sha256`. The hash covers the UTF-8,
+sorted-key, compact JSON projection `{master_title, master_content,
+platform_variants:[{platform,title,body}]}`, preserving variant order. It is a
+rendered-copy hash, not orchestration's package/asset approval hash.
+
+Genre-aware structure allows a sourced event or figure to open a data brief
+and does not impose an authored-hook position or fixed number of editorial
+blocks. Independent scoring judges genre-appropriate substance. Evidence,
+numeric, personal-card, privacy and disclosure gates still apply. Safe server
+templates do not become authored content. Legacy requests without these new
+fields retain the boolean-review contract. Scored review uses a dedicated,
+stable independent-editor system prompt rather than the writing prompt.
+
+## Internal single-call editorial steps
+
+`POST /api/v1/operators/{role_id}/editorial-steps/{step}` uses the existing
+service Bearer credential. Supported steps are `draft_master`, `adapt_platform`,
+`verify_claims`, and `review_editorial`. Body:
+
+```json
+{
+  "compose": {"objective": "...", "channels": ["wechat_mp"], "genre": "company_data_brief"},
+  "candidate": null,
+  "candidate_signature": null,
+  "surface": "master",
+  "budget_reservation_id": "existing-reservation-id"
+}
+```
+
+`compose` is a complete ordinary compose request, including approved proposal,
+claims and authorized evidence; the example above only illustrates the envelope.
+Each step performs at most one actual provider HTTP request, never retries a
+second address or repairs its own output. Claim verification can complete
+without an upstream call when no eligible paraphrase was proposed.
+
+The response is `operator.editorial_step.v1` with
+`status=artifact|blocked|unavailable`, `artifact`, `artifact_signature`, and
+`generation_trace`. It always has `publishable=false` and
+`requires_human_review=true`. An internal artifact's content status cannot
+authorize publishing or replace the final evidence and owner-review gates.
+
+1. `draft_master` returns a normalized master artifact with no platform variants.
+2. `adapt_platform` requires that original master artifact and signature, plus a
+   surface in the original channel set. It returns one platform variant.
+3. Orchestration merges the master with each platform variant. The merged
+   object is unsigned. `verify_claims` re-normalizes it from current evidence,
+   verifies eligible proposed expressions, renders the actual copy and issues
+   a fresh whole-artifact signature.
+4. `review_editorial` requires that whole artifact and signature. It assesses
+   actual rendered copy and returns a scored, signed internal artifact. Its
+   embedded generation trace and claim certificates support orchestration's
+   existing authenticated-compose validation.
+
+Signatures are HMAC-SHA256 using the service key over sorted-key, compact,
+`ensure_ascii=false` UTF-8 JSON of the whole artifact. Carry the returned object
+unchanged; do not manufacture signatures or reuse one after merging. Rotation
+of the service key invalidates previous signatures and requires revalidation.
+Unsigned input can propose public expressions but cannot attest verification.
+
+## Server routes and provider cost evidence
+
+The standalone image reads optional `$HERMES_HOME/config.yaml` (default
+`/data/hermes/config.yaml`) without importing Hermes core. Stage routes live in
+server configuration:
+
+```yaml
+marketing_api:
+  stage_routes:
+    compose:
+      model: writer-deployment
+      base_url: https://models.example/v1
+      api_key_env: HERMES_OPENAI_API_KEY
+    claim_verification:
+      model: evidence-deployment
+      base_url: https://models.example/v1
+      api_key_env: HERMES_OPENAI_API_KEY
+    editorial_review:
+      model: editor-deployment
+      base_url: https://models.example/v1
+      api_key_env: HERMES_OPENAI_API_KEY
+```
+
+`planner`, `propose`, `revise`, and `repair` can also be pinned independently.
+An absent per-stage entry uses the existing server-owned `HERMES_MODEL`,
+`HERMES_OPENAI_BASE_URL`, and `HERMES_OPENAI_API_KEY` when all three are present.
+For the authorized standalone deployment without a mounted YAML file,
+`HERMES_<STAGE>_MODEL` can select a server-owned stage model, for example
+`HERMES_COMPOSE_MODEL`, `HERMES_CLAIM_VERIFICATION_MODEL`, and
+`HERMES_EDITORIAL_REVIEW_MODEL`. These use the existing server endpoint/key;
+an explicit YAML stage route takes precedence, and an invalid stage model
+does not silently fall back.
+An explicitly configured invalid stage fails closed and never silently uses
+the default. New step endpoints reject client model/base-URL/API-key overrides.
+Legal paired overrides remain supported on the legacy endpoints when no
+explicit stage route replaces them.
+
+Authenticated service requests can send
+`X-Hermes-Single-Provider-Request: true` and
+`X-Hermes-Budget-Reservation-Id: <existing reservation>`. The first bounds every
+model invocation to one provider HTTP attempt. It does not reduce a legacy
+multi-call compose RPC to one invocation: reserve its entire configured call
+budget. New editorial steps already impose a one-call limit.
+
+`generation_trace.provider_requests` contains actual request UUIDs, stage,
+model, reservation ID, request hash, upstream request ID when available, usage
+or null, and safe error/status fields. Planner and proposal calls carry the
+same trace. A timeout or missing usage is unknown, never a fabricated zero.
+The runtime reports no inferred CNY amount. The orchestrator reserves before
+the RPC and reconciles these events; uncertain calls retain their reservation.
+The optional request observer hook runs before each actual request and after
+its result, allowing a later stricter cost service without changing model code.
+
+Every physical request limits the UTF-8 JSON of its messages to 150000 bytes
+and its output to 24000 completion tokens (default 12000). A smaller server
+`marketing_api.provider_limits.max_input_bytes` may tighten the input bound;
+neither server settings nor client input may enlarge the absolute bounds.
+Oversized messages return `input_budget_exceeded` before provider dispatch and
+produce no provider event. These limits support a conservatively configured
+reservation upper bound; they do not establish a provider price or CNY charge.
+
+Test deployment readiness performs GET-only health, role and OpenAPI checks.
+It prints that paid model smoke was not executed. Real generation acceptance
+must run separately through orchestration's budget reservation ledger.
+
+## Offline evaluation scenarios
+
+`tests/ai_marketing_api/fixtures/editorial_scenarios.v1.json` contains 30
+synthetic contract exercises: 10 per role, each split into 8 tuning and 2
+held-out cases. Material-gap cases expect abstention. All fixtures are marked
+synthetic and provide zero human-approval credit; replace with verified real
+materials before claiming real editorial quality or owner acceptance.
+
+```bash
+python -m ai_marketing_api.evaluation_runner
+python -m ai_marketing_api.evaluation_runner --results saved-results.json --split all
+```
+
+The default does not create model responses or contact any service; it reports
+`not_run` and `qualified=false`. Saved results are rechecked through the actual
+evidence normalizer, deterministic renderer, content hash and per-surface score
+gates. An offline pass remains a machine-assisted assessment.
+
+Optional live evaluation requires all of `--live --allow-paid --api-url` and
+`--reservations`, whose JSON maps every selected scenario ID to its own existing
+budget reservation. It uses the bounded legacy compose contract and records
+actual provider traces in `--save-results`. Held-out live runs additionally
+require `--unlock-heldout`; they are not a tuning loop. The caller owns ledger
+reconciliation and uncertain reservations. No live evaluation is enabled by
+default, and this runner never publishes or records owner acceptance.

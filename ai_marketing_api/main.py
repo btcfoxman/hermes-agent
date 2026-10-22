@@ -7,12 +7,14 @@ import os
 import re
 import secrets
 import socket
+import uuid
+import hashlib
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 from typing import Any, Dict, List, Optional
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 
 from ai_marketing_api.operator_content import (
     ContentStatus,
@@ -27,7 +29,12 @@ from ai_marketing_api.operator_content import (
     normalize_content_output,
     publishable_editorial_references,
 )
-from ai_marketing_api.operator_editorial import BoundedModelRun
+from ai_marketing_api.operator_editorial import BoundedModelRun, RuntimeBudget
+from ai_marketing_api.operator_style import CURRENT_GENRE, editorial_scope, style_context
+from ai_marketing_api.operator_routing import (
+    BUDGET_RESERVATION_ID, MAX_PROVIDER_OUTPUT_TOKENS, PROVIDER_EVENT_SINK, SINGLE_PROVIDER_REQUEST,
+    observe_provider, server_input_byte_limit, server_stage_route,
+)
 from ai_marketing_api.operator_review import (
     annotate_editorial_repair_failure,
     apply_editorial_assessment,
@@ -36,6 +43,7 @@ from ai_marketing_api.operator_review import (
 )
 from ai_marketing_api.operator_grounding import apply_grounded_paraphrases
 from ai_marketing_api.operator_planning import EditorialPlanRequest, plan_editorial
+from ai_marketing_api.operator_steps import EditorialStep, EditorialStepRequest, run_editorial_step
 from ai_marketing_api.operator_runtime import (
     CONTENT_SCHEMA_VERSION,
     SCHEMA_VERSION,
@@ -57,6 +65,21 @@ DEFAULT_LLM_TIMEOUT_SECONDS = 180.0
 OPERATOR_REGISTRY = OperatorRegistry()
 
 
+@app.middleware("http")
+async def provider_cost_context(request: Request, call_next):
+    expected = os.getenv("HERMES_API_KEY", "").strip()
+    supplied = request.headers.get("authorization", "")
+    authenticated = bool(expected and supplied.lower().startswith("bearer ") and secrets.compare_digest(supplied[7:].strip(), expected))
+    reservation = (request.headers.get("x-hermes-budget-reservation-id") or request.headers.get("x-cost-reservation-id", ""))[:160] if authenticated else ""
+    token = BUDGET_RESERVATION_ID.set(reservation)
+    single = SINGLE_PROVIDER_REQUEST.set(authenticated and (bool(reservation) or (request.headers.get("x-hermes-single-provider-request") or request.headers.get("x-hermes-single-request", "")).lower() == "true"))
+    try:
+        return await call_next(request)
+    finally:
+        SINGLE_PROVIDER_REQUEST.reset(single)
+        BUDGET_RESERVATION_ID.reset(token)
+
+
 @app.get("/")
 def root() -> Dict[str, Any]:
     return {
@@ -75,6 +98,7 @@ def root() -> Dict[str, Any]:
             "operatorRevise": "/api/v1/operators/{role_id}/revise",
             "operatorCompose": "/api/v1/operators/{role_id}/compose",
             "editorialPlan": "/api/v1/operators/editorial/plan",
+            "editorialStep": "/api/v1/operators/{role_id}/editorial-steps/{step}",
         },
     }
 
@@ -520,7 +544,16 @@ async def _llm_json(
     *,
     temperature: float = 0.3,
     max_output_tokens: Optional[int] = None,
+    stage: str = "compose",
 ) -> Dict[str, Any]:
+    if bool(str(openai_base_url or "").strip()) != bool(str(openai_api_key or "").strip()):
+        return {**fallback, "_error": "openai_override_base_url_and_api_key_must_be_supplied_together"}
+    try:
+        route = server_stage_route(stage)
+    except ValueError:
+        return {**fallback, "_error": "stage_route_unavailable", "_model": "fallback"}
+    if route and (not route.get("server_default") or not (openai_base_url and openai_api_key)):
+        openai_base_url, openai_api_key, model_name = route["base_url"], route["api_key"], route["model"]
     requested_base_url = str(openai_base_url or "").strip()
     requested_api_key = str(openai_api_key or "").strip()
     if bool(requested_base_url) != bool(requested_api_key):
@@ -539,7 +572,10 @@ async def _llm_json(
         ).strip().rstrip("/")
     if not api_key:
         return fallback
-    target = await _resolve_public_openai_target(base_url)
+    try:
+        target = await _resolve_public_openai_target(base_url)
+    except Exception:
+        return {**fallback, "_error": "provider_resolution_failed", "_model": "fallback"}
     if target is None:
         blocked = dict(fallback)
         blocked["_error"] = "invalid_openai_base_url"
@@ -554,10 +590,23 @@ async def _llm_json(
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False, default=str)},
         ],
     }
-    if max_output_tokens is not None:
-        request["max_completion_tokens"] = int(max_output_tokens)
+    try:
+        if len(json.dumps(request["messages"], ensure_ascii=False, separators=(",", ":")).encode("utf-8")) > server_input_byte_limit():
+            return {**fallback, "_error": "input_budget_exceeded", "_model": "fallback", "_provider_requests": []}
+    except ValueError:
+        return {**fallback, "_error": "provider_limits_unavailable", "_model": "fallback", "_provider_requests": []}
+    if max_output_tokens is not None and (type(max_output_tokens) is not int or max_output_tokens <= 0):
+        return {**fallback, "_error": "output_budget_invalid", "_model": "fallback", "_provider_requests": []}
+    max_output_tokens = min(max_output_tokens or 12000, MAX_PROVIDER_OUTPUT_TOKENS)
+    request["max_completion_tokens"] = max_output_tokens
     resolved_timeout = _timeout_seconds(timeout_seconds)
     request_started = False
+    provider_requests: list[dict[str, Any]] = []
+    async def complete_event(event):
+        try:
+            await observe_provider({**event, "phase": "after_request"})
+        except Exception:
+            event["settlement_pending"] = True
     try:
         async with httpx.AsyncClient(
             timeout=resolved_timeout,
@@ -565,9 +614,22 @@ async def _llm_json(
             trust_env=False,
         ) as client:
             last_error: Optional[Exception] = None
-            for request_base_url in target.request_base_urls:
+            request_urls = target.request_base_urls[:1] if SINGLE_PROVIDER_REQUEST.get() else target.request_base_urls
+            for request_base_url in request_urls:
+                event = {"request_id": uuid.uuid4().hex, "stage": stage, "model": model,
+                    "reservation_id": BUDGET_RESERVATION_ID.get() or None,
+                    "request_sha256": hashlib.sha256(json.dumps(request, sort_keys=True, ensure_ascii=False).encode()).hexdigest(),
+                    "max_output_tokens": max_output_tokens, "usage": None,
+                    "provider_request_id": None, "error_code": None, "status": "prepared"}
                 try:
+                    try:
+                        await observe_provider({**event, "phase": "before_request"})
+                    except Exception as exc:
+                        raise ValueError("cost_authorization_failed") from exc
                     request_started = True
+                    provider_requests.append(event)
+                    if PROVIDER_EVENT_SINK.get() is not None:
+                        PROVIDER_EVENT_SINK.get().append(event)
                     resp = await client.post(
                         f"{request_base_url}/chat/completions",
                         json=request,
@@ -578,13 +640,23 @@ async def _llm_json(
                         },
                         extensions={"sni_hostname": target.sni_hostname},
                     )
+                    event["provider_request_id"] = resp.headers.get("x-request-id") or resp.headers.get("request-id")
+                    event["http_status"] = resp.status_code
                     if resp.is_redirect:
                         raise RuntimeError("llm_redirect_forbidden")
                     resp.raise_for_status()
                     data = resp.json()
+                    event.update(status="returned", usage=data.get("usage") if isinstance(data.get("usage"), dict) else None)
+                    await complete_event(event)
                     break
                 except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
                     last_error = exc
+                    event.update(status="unknown", error_code="provider_connection_failed")
+                    await complete_event(event)
+                except asyncio.CancelledError:
+                    event.update(status="unknown", error_code="provider_cancelled")
+                    await complete_event(event)
+                    raise
             else:
                 if last_error is not None:
                     raise last_error
@@ -594,12 +666,34 @@ async def _llm_json(
         result["_model"] = model
         result["_llm_attempted"] = True
         result["_usage"] = data.get("usage", {})
+        result["_provider_requests"] = provider_requests
         return result
     except Exception as exc:
+        if str(exc) in {"llm_redirect_forbidden", "cost_authorization_failed"}:
+            code = str(exc)
+        elif isinstance(exc, httpx.HTTPStatusError):
+            status = exc.response.status_code
+            code = "provider_auth_failed" if status in {401, 403} else "provider_rate_limited" if status == 429 else "provider_http_error"
+        elif isinstance(exc, httpx.TimeoutException):
+            code = "provider_timeout"
+        elif isinstance(exc, (ValueError, KeyError, TypeError, IndexError)):
+            code = "provider_response_invalid"
+        else:
+            code = "provider_request_failed"
+        for event in provider_requests:
+            if event["status"] == "prepared":
+                event.update(status="unknown", error_code=code)
+                try:
+                    await observe_provider({**event, "phase": "after_request"})
+                except Exception:
+                    pass
+        if provider_requests and provider_requests[-1]["status"] == "returned":
+            provider_requests[-1]["error_code"] = code
         fallback = dict(fallback)
-        fallback["_error"] = str(exc)
+        fallback["_error"] = code
         fallback["_llm_attempted"] = request_started
         fallback["_timeout_seconds"] = resolved_timeout
+        fallback["_provider_requests"] = provider_requests
         return fallback
 
 
@@ -681,7 +775,8 @@ async def _run_operator(
         ) from exc
 
     fallback = build_fallback(role_id, action, payload, contexts)
-    candidate = await _llm_json(
+    run = BoundedModelRun(RuntimeBudget(max_model_calls=1))
+    candidate = await run.call(_llm_json,
         profile.system_prompt,
         request_payload(payload),
         fallback,
@@ -689,8 +784,9 @@ async def _run_operator(
         openai_api_key,
         model_name,
         timeout_seconds,
+        stage=action.value,
     )
-    return normalize_output(
+    output = normalize_output(
         OPERATOR_REGISTRY,
         role_id,
         action,
@@ -699,9 +795,17 @@ async def _run_operator(
         fallback,
         candidate,
     )
+    return output.model_copy(update={"generation_trace": run.trace(blocked=False,
+        review="not_requested", stop_reason=output.status).model_dump(mode="json")})
 
 
-async def _run_compose(
+async def _run_compose(*args, **kwargs) -> OperatorContentOutput:
+    payload = args[1] if len(args) > 1 else kwargs["payload"]
+    with editorial_scope(payload.genre):
+        return await _run_compose_impl(*args, **kwargs)
+
+
+async def _run_compose_impl(
     role_id: OperatorRole,
     payload: OperatorComposeRequest,
     authorization: Optional[str],
@@ -834,7 +938,8 @@ async def _run_compose(
             or candidate.get("_error")
         ):
             break
-        if not run.can_call():
+        reserved_calls = (2 if payload.fact_expression_mode == "grounded_paraphrase" else 1) if (payload.public_editorial_brief is not None or payload.owner_revision is not None or payload.genre or payload.style_references) else 0
+        if not run.can_call() or len(run.attempts) + 1 + reserved_calls > payload.runtime_budget.max_model_calls:
             break
         failed_surfaces = missing_publishable_surfaces(
             normalized_attempts,
@@ -1006,6 +1111,9 @@ async def _run_compose(
             ),
             "public_editorial_brief": compose_payload.get("public_editorial_brief"),
             "owner_revision": compose_payload.get("owner_revision"),
+            "style_context": compose_payload.get("style_context"),
+            "editorial_feedback": compose_payload.get("editorial_feedback", ""),
+            "editorial_feedback_rule": compose_payload.get("editorial_feedback_rule"),
             "owner_revision_contract": compose_payload.get("owner_revision_contract"),
             "publication_brief": compose_payload.get("publication_brief"),
             "industry_editorial_guard": compose_payload.get(
@@ -1169,6 +1277,10 @@ async def _run_compose(
                 "adapting the wording to the brief and owner_revision without copying it verbatim. "
                 "Keep already accepted surfaces unchanged. Return the specified compact block contract."
             )
+        if payload.genre:
+            retry_payload["style_context"] = style_context(payload)
+            retry_payload["response_contract"]["editorial_shape"] = compose_payload["response_contract"]["editorial_shape"]
+            retry_payload["quality_retry"]["required_shape"] = [compose_payload["response_contract"]["editorial_shape"]["rule"]]
         retry_payload["quality_retry"]["instruction"] += (
             " Follow response_contract.title_safety_rule for the requested title, including its canonical factual anchor. "
             "Use model_title_normalized diagnostics to correct a replaced title; do not remove its anchor "
@@ -1215,7 +1327,7 @@ async def _run_compose(
             system=profile.system_prompt,
             model_args=(openai_base_url, openai_api_key, model_name, timeout_seconds),
         )
-    review_required = payload.public_editorial_brief is not None or payload.owner_revision is not None
+    review_required = payload.public_editorial_brief is not None or payload.owner_revision is not None or bool(payload.genre or payload.style_references)
     review_state = "not_completed" if review_required else "not_requested"
     if review_required and output.status == ContentStatus.CONTENT_READY.value:
         review, review_state = await assess_editorial(
@@ -1223,6 +1335,9 @@ async def _run_compose(
             system=profile.system_prompt,
             model_args=(openai_base_url, openai_api_key, model_name, timeout_seconds),
             owner_revision=compose_payload.get("owner_revision"),
+            style_context=compose_payload.get("style_context"),
+            editorial_feedback=compose_payload.get("editorial_feedback", ""),
+            scorecard_required=bool(payload.genre or payload.style_references),
         )
         # Each bounded batch fixes the editor-identified surfaces together.
         # Rejected structure may be retried within the existing per-surface,
@@ -1309,6 +1424,9 @@ async def _run_compose(
                     system=profile.system_prompt,
                     model_args=(openai_base_url, openai_api_key, model_name, timeout_seconds),
                     owner_revision=compose_payload.get("owner_revision"),
+                    style_context=compose_payload.get("style_context"),
+                    editorial_feedback=compose_payload.get("editorial_feedback", ""),
+                    scorecard_required=bool(payload.genre or payload.style_references),
                 )
             else:
                 last_repair_diagnostics = repair_diagnostics
@@ -1348,6 +1466,20 @@ async def editorial_plan(
     _require_operator_auth(authorization)
     return await plan_editorial(payload, _llm_json, x_hermes_openai_base_url,
         x_hermes_openai_api_key, x_hermes_model, x_hermes_timeout_seconds)
+
+
+@app.post("/api/v1/operators/{role_id}/editorial-steps/{step}")
+async def operator_editorial_step(role_id: OperatorRole, step: EditorialStep,
+    payload: EditorialStepRequest, request: Request,
+    authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+    _require_operator_auth(authorization)
+    if any(name in request.headers for name in
+        ("x-hermes-openai-base-url", "x-hermes-openai-api-key", "x-hermes-model")):
+        raise HTTPException(status_code=400, detail={"code": "client_stage_override_forbidden"})
+    try:
+        return await run_editorial_step(OPERATOR_REGISTRY, role_id, step, payload, _llm_json)
+    except ContextAuthorizationError as exc:
+        raise HTTPException(status_code=403, detail={"code": exc.code, "record_id": exc.record_id}) from exc
 
 
 @app.post("/api/v1/operators/{role_id}/propose", response_model=OperatorOutput)

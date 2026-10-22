@@ -1,0 +1,2376 @@
+{
+  "schema_version": "editorial.evaluation_scenarios.v1",
+  "material_notice": "Synthetic offline simulation. No factual authority, personal authorization, production knowledge import or human-approval credit. Replace with verified real-source cases before measuring live editorial quality.",
+  "scenarios": [
+    {
+      "scenario_id": "commercial-product_positioning",
+      "role_id": "commercial",
+      "split": "tune",
+      "genre": "update_explainer",
+      "expected": "scorecard_pass",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "说明允许公开的稿件管理能力",
+        "topic": "星桥内容台允许负责人选择待审核稿件。",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "update_explainer",
+        "authorized_context": [
+          {
+            "record_id": "eval-commercial-product_positioning",
+            "space": "company_public",
+            "record_type": "capability",
+            "title": "离线演练资料：product_positioning",
+            "content": "星桥内容台允许负责人选择待审核稿件。\n每份稿件保留修改记录。",
+            "structured_data": {},
+            "status": "approved",
+            "authorized_roles": [
+              "commercial"
+            ],
+            "source_uri": "https://evaluation.invalid/commercial/product_positioning",
+            "source_tier": "official"
+          }
+        ],
+        "approved_proposal": {
+          "title": "星桥内容台允许负责人选择待审核稿件。",
+          "angle": "说明允许公开的稿件管理能力",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [
+            "星桥内容台允许负责人选择待审核稿件。",
+            "每份稿件保留修改记录。"
+          ],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": false
+        },
+        "claims": [
+          {
+            "text": "星桥内容台允许负责人选择待审核稿件。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-commercial-product_positioning"
+            ],
+            "verification_status": "verified"
+          },
+          {
+            "text": "每份稿件保留修改记录。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-commercial-product_positioning"
+            ],
+            "verification_status": "verified"
+          }
+        ],
+        "public_editorial_brief": {
+          "role_id": "commercial",
+          "objective": "说明允许公开的稿件管理能力",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "说明允许公开的稿件管理能力",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "commercial-workflow_tutorial",
+      "role_id": "commercial",
+      "split": "tune",
+      "genre": "tutorial",
+      "expected": "scorecard_pass",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "用已证明的步骤解释审核流",
+        "topic": "星桥内容台支持将草稿发送给指定审核人。",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "tutorial",
+        "authorized_context": [
+          {
+            "record_id": "eval-commercial-workflow_tutorial",
+            "space": "company_public",
+            "record_type": "capability",
+            "title": "离线演练资料：workflow_tutorial",
+            "content": "星桥内容台支持将草稿发送给指定审核人。\n审核人可以填写退回意见。",
+            "structured_data": {},
+            "status": "approved",
+            "authorized_roles": [
+              "commercial"
+            ],
+            "source_uri": "https://evaluation.invalid/commercial/workflow_tutorial",
+            "source_tier": "official"
+          }
+        ],
+        "approved_proposal": {
+          "title": "星桥内容台支持将草稿发送给指定审核人。",
+          "angle": "用已证明的步骤解释审核流",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [
+            "星桥内容台支持将草稿发送给指定审核人。",
+            "审核人可以填写退回意见。"
+          ],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": false
+        },
+        "claims": [
+          {
+            "text": "星桥内容台支持将草稿发送给指定审核人。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-commercial-workflow_tutorial"
+            ],
+            "verification_status": "verified"
+          },
+          {
+            "text": "审核人可以填写退回意见。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-commercial-workflow_tutorial"
+            ],
+            "verification_status": "verified"
+          }
+        ],
+        "public_editorial_brief": {
+          "role_id": "commercial",
+          "objective": "用已证明的步骤解释审核流",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "用已证明的步骤解释审核流",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "commercial-tool_comparison",
+      "role_id": "commercial",
+      "split": "tune",
+      "genre": "comparison",
+      "expected": "scorecard_pass",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "比较两种已授权使用方式",
+        "topic": "星桥内容台允许用户手动挑选稿件。",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "comparison",
+        "authorized_context": [
+          {
+            "record_id": "eval-commercial-tool_comparison",
+            "space": "company_public",
+            "record_type": "capability",
+            "title": "离线演练资料：tool_comparison",
+            "content": "星桥内容台允许用户手动挑选稿件。\n桥灯工作台允许用户按已保存标签筛选稿件。",
+            "structured_data": {},
+            "status": "approved",
+            "authorized_roles": [
+              "commercial"
+            ],
+            "source_uri": "https://evaluation.invalid/commercial/tool_comparison",
+            "source_tier": "official"
+          }
+        ],
+        "approved_proposal": {
+          "title": "星桥内容台允许用户手动挑选稿件。",
+          "angle": "比较两种已授权使用方式",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [
+            "星桥内容台允许用户手动挑选稿件。",
+            "桥灯工作台允许用户按已保存标签筛选稿件。"
+          ],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": false
+        },
+        "claims": [
+          {
+            "text": "星桥内容台允许用户手动挑选稿件。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-commercial-tool_comparison"
+            ],
+            "verification_status": "verified"
+          },
+          {
+            "text": "桥灯工作台允许用户按已保存标签筛选稿件。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-commercial-tool_comparison"
+            ],
+            "verification_status": "verified"
+          }
+        ],
+        "public_editorial_brief": {
+          "role_id": "commercial",
+          "objective": "比较两种已授权使用方式",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "比较两种已授权使用方式",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "commercial-cost_boundary",
+      "role_id": "commercial",
+      "split": "tune",
+      "genre": "comparison",
+      "expected": "scorecard_pass",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "解释计价边界，不能编造省钱比例",
+        "topic": "公开套餐按已完成的图片任务计次。",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "comparison",
+        "authorized_context": [
+          {
+            "record_id": "eval-commercial-cost_boundary",
+            "space": "company_public",
+            "record_type": "capability",
+            "title": "离线演练资料：cost_boundary",
+            "content": "公开套餐按已完成的图片任务计次。\n失败任务的处理规则需要以当前订单条款为准。",
+            "structured_data": {},
+            "status": "approved",
+            "authorized_roles": [
+              "commercial"
+            ],
+            "source_uri": "https://evaluation.invalid/commercial/cost_boundary",
+            "source_tier": "official"
+          }
+        ],
+        "approved_proposal": {
+          "title": "公开套餐按已完成的图片任务计次。",
+          "angle": "解释计价边界，不能编造省钱比例",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [
+            "公开套餐按已完成的图片任务计次。",
+            "失败任务的处理规则需要以当前订单条款为准。"
+          ],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": false
+        },
+        "claims": [
+          {
+            "text": "公开套餐按已完成的图片任务计次。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-commercial-cost_boundary"
+            ],
+            "verification_status": "verified"
+          },
+          {
+            "text": "失败任务的处理规则需要以当前订单条款为准。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-commercial-cost_boundary"
+            ],
+            "verification_status": "verified"
+          }
+        ],
+        "public_editorial_brief": {
+          "role_id": "commercial",
+          "objective": "解释计价边界，不能编造省钱比例",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "解释计价边界，不能编造省钱比例",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "commercial-onboarding_checklist",
+      "role_id": "commercial",
+      "split": "tune",
+      "genre": "tool_roundup",
+      "expected": "scorecard_pass",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "列出首次使用前应确认的问题",
+        "topic": "星桥内容台支持指定负责人审核。",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "tool_roundup",
+        "authorized_context": [
+          {
+            "record_id": "eval-commercial-onboarding_checklist",
+            "space": "company_public",
+            "record_type": "capability",
+            "title": "离线演练资料：onboarding_checklist",
+            "content": "星桥内容台支持指定负责人审核。\n产品资料未包含第三方账号自动连接的说明。",
+            "structured_data": {},
+            "status": "approved",
+            "authorized_roles": [
+              "commercial"
+            ],
+            "source_uri": "https://evaluation.invalid/commercial/onboarding_checklist",
+            "source_tier": "official"
+          }
+        ],
+        "approved_proposal": {
+          "title": "星桥内容台支持指定负责人审核。",
+          "angle": "列出首次使用前应确认的问题",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [
+            "星桥内容台支持指定负责人审核。",
+            "产品资料未包含第三方账号自动连接的说明。"
+          ],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": false
+        },
+        "claims": [
+          {
+            "text": "星桥内容台支持指定负责人审核。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-commercial-onboarding_checklist"
+            ],
+            "verification_status": "verified"
+          },
+          {
+            "text": "产品资料未包含第三方账号自动连接的说明。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-commercial-onboarding_checklist"
+            ],
+            "verification_status": "verified"
+          }
+        ],
+        "public_editorial_brief": {
+          "role_id": "commercial",
+          "objective": "列出首次使用前应确认的问题",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "列出首次使用前应确认的问题",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "commercial-customer_fit",
+      "role_id": "commercial",
+      "split": "tune",
+      "genre": "industry_commentary",
+      "expected": "scorecard_pass",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "从已知能力分析适合的团队，不虚构客户",
+        "topic": "星桥内容台保留每份草稿的修订记录。",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "industry_commentary",
+        "authorized_context": [
+          {
+            "record_id": "eval-commercial-customer_fit",
+            "space": "company_public",
+            "record_type": "capability",
+            "title": "离线演练资料：customer_fit",
+            "content": "星桥内容台保留每份草稿的修订记录。\n负责人可以查看待确认版本。",
+            "structured_data": {},
+            "status": "approved",
+            "authorized_roles": [
+              "commercial"
+            ],
+            "source_uri": "https://evaluation.invalid/commercial/customer_fit",
+            "source_tier": "official"
+          }
+        ],
+        "approved_proposal": {
+          "title": "星桥内容台保留每份草稿的修订记录。",
+          "angle": "从已知能力分析适合的团队，不虚构客户",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [
+            "星桥内容台保留每份草稿的修订记录。",
+            "负责人可以查看待确认版本。"
+          ],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": false
+        },
+        "claims": [
+          {
+            "text": "星桥内容台保留每份草稿的修订记录。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-commercial-customer_fit"
+            ],
+            "verification_status": "verified"
+          },
+          {
+            "text": "负责人可以查看待确认版本。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-commercial-customer_fit"
+            ],
+            "verification_status": "verified"
+          }
+        ],
+        "public_editorial_brief": {
+          "role_id": "commercial",
+          "objective": "从已知能力分析适合的团队，不虚构客户",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "从已知能力分析适合的团队，不虚构客户",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "commercial-unsupported_outcome",
+      "role_id": "commercial",
+      "split": "tune",
+      "genre": "company_data_brief",
+      "expected": "abstain",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "资料不足时拒绝承诺提升效果",
+        "topic": "资料不足的演练",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "company_data_brief",
+        "authorized_context": [],
+        "approved_proposal": {
+          "title": "等待补充公开资料",
+          "angle": "资料不足时拒绝承诺提升效果",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": false
+        },
+        "claims": [],
+        "public_editorial_brief": {
+          "role_id": "commercial",
+          "objective": "资料不足时拒绝承诺提升效果",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "资料不足时拒绝承诺提升效果",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "commercial-feature_limit",
+      "role_id": "commercial",
+      "split": "tune",
+      "genre": "update_explainer",
+      "expected": "scorecard_pass",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "如实说明仍未公开承诺的能力",
+        "topic": "星桥内容台支持人工确认后导出草稿。",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "update_explainer",
+        "authorized_context": [
+          {
+            "record_id": "eval-commercial-feature_limit",
+            "space": "company_public",
+            "record_type": "capability",
+            "title": "离线演练资料：feature_limit",
+            "content": "星桥内容台支持人工确认后导出草稿。\n公开说明未承诺稿件一定获得推荐流量。",
+            "structured_data": {},
+            "status": "approved",
+            "authorized_roles": [
+              "commercial"
+            ],
+            "source_uri": "https://evaluation.invalid/commercial/feature_limit",
+            "source_tier": "official"
+          }
+        ],
+        "approved_proposal": {
+          "title": "星桥内容台支持人工确认后导出草稿。",
+          "angle": "如实说明仍未公开承诺的能力",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [
+            "星桥内容台支持人工确认后导出草稿。",
+            "公开说明未承诺稿件一定获得推荐流量。"
+          ],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": false
+        },
+        "claims": [
+          {
+            "text": "星桥内容台支持人工确认后导出草稿。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-commercial-feature_limit"
+            ],
+            "verification_status": "verified"
+          },
+          {
+            "text": "公开说明未承诺稿件一定获得推荐流量。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-commercial-feature_limit"
+            ],
+            "verification_status": "verified"
+          }
+        ],
+        "public_editorial_brief": {
+          "role_id": "commercial",
+          "objective": "如实说明仍未公开承诺的能力",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "如实说明仍未公开承诺的能力",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "commercial-heldout_contrast",
+      "role_id": "commercial",
+      "split": "heldout",
+      "genre": "comparison",
+      "expected": "scorecard_pass",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "给新场景比较不同协作边界",
+        "topic": "青帆工具允许负责人批准导出版本。",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "comparison",
+        "authorized_context": [
+          {
+            "record_id": "eval-commercial-heldout_contrast",
+            "space": "company_public",
+            "record_type": "capability",
+            "title": "离线演练资料：heldout_contrast",
+            "content": "青帆工具允许负责人批准导出版本。\n青帆工具保留每次退回的原始意见。",
+            "structured_data": {},
+            "status": "approved",
+            "authorized_roles": [
+              "commercial"
+            ],
+            "source_uri": "https://evaluation.invalid/commercial/heldout_contrast",
+            "source_tier": "official"
+          }
+        ],
+        "approved_proposal": {
+          "title": "青帆工具允许负责人批准导出版本。",
+          "angle": "给新场景比较不同协作边界",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [
+            "青帆工具允许负责人批准导出版本。",
+            "青帆工具保留每次退回的原始意见。"
+          ],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": false
+        },
+        "claims": [
+          {
+            "text": "青帆工具允许负责人批准导出版本。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-commercial-heldout_contrast"
+            ],
+            "verification_status": "verified"
+          },
+          {
+            "text": "青帆工具保留每次退回的原始意见。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-commercial-heldout_contrast"
+            ],
+            "verification_status": "verified"
+          }
+        ],
+        "public_editorial_brief": {
+          "role_id": "commercial",
+          "objective": "给新场景比较不同协作边界",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "给新场景比较不同协作边界",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "commercial-heldout_scenario",
+      "role_id": "commercial",
+      "split": "heldout",
+      "genre": "tutorial",
+      "expected": "scorecard_pass",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "以实际协作场景解释单一功能",
+        "topic": "落笔工作台支持将草稿转交另一位审核人。",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "tutorial",
+        "authorized_context": [
+          {
+            "record_id": "eval-commercial-heldout_scenario",
+            "space": "company_public",
+            "record_type": "capability",
+            "title": "离线演练资料：heldout_scenario",
+            "content": "落笔工作台支持将草稿转交另一位审核人。\n用户可以在转交前检查正文。",
+            "structured_data": {},
+            "status": "approved",
+            "authorized_roles": [
+              "commercial"
+            ],
+            "source_uri": "https://evaluation.invalid/commercial/heldout_scenario",
+            "source_tier": "official"
+          }
+        ],
+        "approved_proposal": {
+          "title": "落笔工作台支持将草稿转交另一位审核人。",
+          "angle": "以实际协作场景解释单一功能",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [
+            "落笔工作台支持将草稿转交另一位审核人。",
+            "用户可以在转交前检查正文。"
+          ],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": false
+        },
+        "claims": [
+          {
+            "text": "落笔工作台支持将草稿转交另一位审核人。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-commercial-heldout_scenario"
+            ],
+            "verification_status": "verified"
+          },
+          {
+            "text": "用户可以在转交前检查正文。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-commercial-heldout_scenario"
+            ],
+            "verification_status": "verified"
+          }
+        ],
+        "public_editorial_brief": {
+          "role_id": "commercial",
+          "objective": "以实际协作场景解释单一功能",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "以实际协作场景解释单一功能",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "industry-release_explainer",
+      "role_id": "industry",
+      "split": "tune",
+      "genre": "update_explainer",
+      "expected": "scorecard_pass",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "解释一次模型功能更新对创作的影响",
+        "topic": "霁光实验室公布了分镜预览功能。",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "update_explainer",
+        "authorized_context": [
+          {
+            "record_id": "eval-industry-release_explainer",
+            "space": "industry",
+            "record_type": "source_item",
+            "title": "离线演练资料：release_explainer",
+            "content": "霁光实验室公布了分镜预览功能。\n公开说明将复杂动作列为仍需人工检查的情况。",
+            "structured_data": {},
+            "status": "approved",
+            "authorized_roles": [
+              "industry"
+            ],
+            "source_uri": "https://evaluation.invalid/industry/release_explainer",
+            "source_tier": "official"
+          }
+        ],
+        "approved_proposal": {
+          "title": "霁光实验室公布了分镜预览功能。",
+          "angle": "解释一次模型功能更新对创作的影响",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [
+            "霁光实验室公布了分镜预览功能。",
+            "公开说明将复杂动作列为仍需人工检查的情况。"
+          ],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": false
+        },
+        "claims": [
+          {
+            "text": "霁光实验室公布了分镜预览功能。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-industry-release_explainer"
+            ],
+            "verification_status": "verified"
+          },
+          {
+            "text": "公开说明将复杂动作列为仍需人工检查的情况。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-industry-release_explainer"
+            ],
+            "verification_status": "verified"
+          }
+        ],
+        "public_editorial_brief": {
+          "role_id": "industry",
+          "objective": "解释一次模型功能更新对创作的影响",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "解释一次模型功能更新对创作的影响",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "industry-model_comparison",
+      "role_id": "industry",
+      "split": "tune",
+      "genre": "comparison",
+      "expected": "scorecard_pass",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "比较不同模型的可验证适用范围",
+        "topic": "霁光模型支持先生成分镜预览。",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "comparison",
+        "authorized_context": [
+          {
+            "record_id": "eval-industry-model_comparison",
+            "space": "industry",
+            "record_type": "source_item",
+            "title": "离线演练资料：model_comparison",
+            "content": "霁光模型支持先生成分镜预览。\n杉影模型支持保存已确认的角色参考图。",
+            "structured_data": {},
+            "status": "approved",
+            "authorized_roles": [
+              "industry"
+            ],
+            "source_uri": "https://evaluation.invalid/industry/model_comparison",
+            "source_tier": "official"
+          }
+        ],
+        "approved_proposal": {
+          "title": "霁光模型支持先生成分镜预览。",
+          "angle": "比较不同模型的可验证适用范围",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [
+            "霁光模型支持先生成分镜预览。",
+            "杉影模型支持保存已确认的角色参考图。"
+          ],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": false
+        },
+        "claims": [
+          {
+            "text": "霁光模型支持先生成分镜预览。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-industry-model_comparison"
+            ],
+            "verification_status": "verified"
+          },
+          {
+            "text": "杉影模型支持保存已确认的角色参考图。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-industry-model_comparison"
+            ],
+            "verification_status": "verified"
+          }
+        ],
+        "public_editorial_brief": {
+          "role_id": "industry",
+          "objective": "比较不同模型的可验证适用范围",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "比较不同模型的可验证适用范围",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "industry-open_source_roundup",
+      "role_id": "industry",
+      "split": "tune",
+      "genre": "tool_roundup",
+      "expected": "scorecard_pass",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "介绍开源工具但不要把免费代码等同免费算力",
+        "topic": "纸桥项目公开了草稿版本比较代码。",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "tool_roundup",
+        "authorized_context": [
+          {
+            "record_id": "eval-industry-open_source_roundup",
+            "space": "industry",
+            "record_type": "source_item",
+            "title": "离线演练资料：open_source_roundup",
+            "content": "纸桥项目公开了草稿版本比较代码。\n运行说明要求使用者自行配置服务器。",
+            "structured_data": {},
+            "status": "approved",
+            "authorized_roles": [
+              "industry"
+            ],
+            "source_uri": "https://evaluation.invalid/industry/open_source_roundup",
+            "source_tier": "official"
+          }
+        ],
+        "approved_proposal": {
+          "title": "纸桥项目公开了草稿版本比较代码。",
+          "angle": "介绍开源工具但不要把免费代码等同免费算力",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [
+            "纸桥项目公开了草稿版本比较代码。",
+            "运行说明要求使用者自行配置服务器。"
+          ],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": false
+        },
+        "claims": [
+          {
+            "text": "纸桥项目公开了草稿版本比较代码。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-industry-open_source_roundup"
+            ],
+            "verification_status": "verified"
+          },
+          {
+            "text": "运行说明要求使用者自行配置服务器。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-industry-open_source_roundup"
+            ],
+            "verification_status": "verified"
+          }
+        ],
+        "public_editorial_brief": {
+          "role_id": "industry",
+          "objective": "介绍开源工具但不要把免费代码等同免费算力",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "介绍开源工具但不要把免费代码等同免费算力",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "industry-automation_commentary",
+      "role_id": "industry",
+      "split": "tune",
+      "genre": "industry_commentary",
+      "expected": "scorecard_pass",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "解释自动化与工作分工，不虚构现场采访",
+        "topic": "该研究报告观察到重复文稿整理任务可以由自动化工具处理。",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "industry_commentary",
+        "authorized_context": [
+          {
+            "record_id": "eval-industry-automation_commentary",
+            "space": "industry",
+            "record_type": "source_item",
+            "title": "离线演练资料：automation_commentary",
+            "content": "该研究报告观察到重复文稿整理任务可以由自动化工具处理。\n报告同时指出异常判断仍需人工复核。",
+            "structured_data": {},
+            "status": "approved",
+            "authorized_roles": [
+              "industry"
+            ],
+            "source_uri": "https://evaluation.invalid/industry/automation_commentary",
+            "source_tier": "official"
+          }
+        ],
+        "approved_proposal": {
+          "title": "该研究报告观察到重复文稿整理任务可以由自动化工具处理。",
+          "angle": "解释自动化与工作分工，不虚构现场采访",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [
+            "该研究报告观察到重复文稿整理任务可以由自动化工具处理。",
+            "报告同时指出异常判断仍需人工复核。"
+          ],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": false
+        },
+        "claims": [
+          {
+            "text": "该研究报告观察到重复文稿整理任务可以由自动化工具处理。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-industry-automation_commentary"
+            ],
+            "verification_status": "verified"
+          },
+          {
+            "text": "报告同时指出异常判断仍需人工复核。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-industry-automation_commentary"
+            ],
+            "verification_status": "verified"
+          }
+        ],
+        "public_editorial_brief": {
+          "role_id": "industry",
+          "objective": "解释自动化与工作分工，不虚构现场采访",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "解释自动化与工作分工，不虚构现场采访",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "industry-founder_case",
+      "role_id": "industry",
+      "split": "tune",
+      "genre": "founder_story",
+      "expected": "scorecard_pass",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "分析真实授权的第三方创业案例，不改写成本人经历",
+        "topic": "公开案例记录林岚独立开发了一款字幕校对工具。",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "founder_story",
+        "authorized_context": [
+          {
+            "record_id": "eval-industry-founder_case",
+            "space": "industry",
+            "record_type": "source_item",
+            "title": "离线演练资料：founder_case",
+            "content": "公开案例记录林岚独立开发了一款字幕校对工具。\n案例说明其仍需亲自处理用户反馈。",
+            "structured_data": {},
+            "status": "approved",
+            "authorized_roles": [
+              "industry"
+            ],
+            "source_uri": "https://evaluation.invalid/industry/founder_case",
+            "source_tier": "official"
+          }
+        ],
+        "approved_proposal": {
+          "title": "公开案例记录林岚独立开发了一款字幕校对工具。",
+          "angle": "分析真实授权的第三方创业案例，不改写成本人经历",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [
+            "公开案例记录林岚独立开发了一款字幕校对工具。",
+            "案例说明其仍需亲自处理用户反馈。"
+          ],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": false
+        },
+        "claims": [
+          {
+            "text": "公开案例记录林岚独立开发了一款字幕校对工具。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-industry-founder_case"
+            ],
+            "verification_status": "verified"
+          },
+          {
+            "text": "案例说明其仍需亲自处理用户反馈。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-industry-founder_case"
+            ],
+            "verification_status": "verified"
+          }
+        ],
+        "public_editorial_brief": {
+          "role_id": "industry",
+          "objective": "分析真实授权的第三方创业案例，不改写成本人经历",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "分析真实授权的第三方创业案例，不改写成本人经历",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "industry-company_data",
+      "role_id": "industry",
+      "split": "tune",
+      "genre": "company_data_brief",
+      "expected": "scorecard_pass",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "直接用事件与数据资料开场",
+        "topic": "示例公司披露其视频工具仍处于试用阶段。",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "company_data_brief",
+        "authorized_context": [
+          {
+            "record_id": "eval-industry-company_data",
+            "space": "industry",
+            "record_type": "source_item",
+            "title": "离线演练资料：company_data",
+            "content": "示例公司披露其视频工具仍处于试用阶段。\n同一披露说明该工具尚未产生销售收入。",
+            "structured_data": {},
+            "status": "approved",
+            "authorized_roles": [
+              "industry"
+            ],
+            "source_uri": "https://evaluation.invalid/industry/company_data",
+            "source_tier": "official"
+          }
+        ],
+        "approved_proposal": {
+          "title": "示例公司披露其视频工具仍处于试用阶段。",
+          "angle": "直接用事件与数据资料开场",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [
+            "示例公司披露其视频工具仍处于试用阶段。",
+            "同一披露说明该工具尚未产生销售收入。"
+          ],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": false
+        },
+        "claims": [
+          {
+            "text": "示例公司披露其视频工具仍处于试用阶段。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-industry-company_data"
+            ],
+            "verification_status": "verified"
+          },
+          {
+            "text": "同一披露说明该工具尚未产生销售收入。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-industry-company_data"
+            ],
+            "verification_status": "verified"
+          }
+        ],
+        "public_editorial_brief": {
+          "role_id": "industry",
+          "objective": "直接用事件与数据资料开场",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "直接用事件与数据资料开场",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "industry-missing_primary",
+      "role_id": "industry",
+      "split": "tune",
+      "genre": "comparison",
+      "expected": "abstain",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "没有可核验资料时先补研究",
+        "topic": "资料不足的演练",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "comparison",
+        "authorized_context": [],
+        "approved_proposal": {
+          "title": "等待补充公开资料",
+          "angle": "没有可核验资料时先补研究",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": false
+        },
+        "claims": [],
+        "public_editorial_brief": {
+          "role_id": "industry",
+          "objective": "没有可核验资料时先补研究",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "没有可核验资料时先补研究",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "industry-timeline_change",
+      "role_id": "industry",
+      "split": "tune",
+      "genre": "update_explainer",
+      "expected": "scorecard_pass",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "区分已经上线和未来计划",
+        "topic": "官方更新说明导出队列已经开放。",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "update_explainer",
+        "authorized_context": [
+          {
+            "record_id": "eval-industry-timeline_change",
+            "space": "industry",
+            "record_type": "source_item",
+            "title": "离线演练资料：timeline_change",
+            "content": "官方更新说明导出队列已经开放。\n同一说明将协作权限功能列为后续计划。",
+            "structured_data": {},
+            "status": "approved",
+            "authorized_roles": [
+              "industry"
+            ],
+            "source_uri": "https://evaluation.invalid/industry/timeline_change",
+            "source_tier": "official"
+          }
+        ],
+        "approved_proposal": {
+          "title": "官方更新说明导出队列已经开放。",
+          "angle": "区分已经上线和未来计划",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [
+            "官方更新说明导出队列已经开放。",
+            "同一说明将协作权限功能列为后续计划。"
+          ],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": false
+        },
+        "claims": [
+          {
+            "text": "官方更新说明导出队列已经开放。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-industry-timeline_change"
+            ],
+            "verification_status": "verified"
+          },
+          {
+            "text": "同一说明将协作权限功能列为后续计划。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-industry-timeline_change"
+            ],
+            "verification_status": "verified"
+          }
+        ],
+        "public_editorial_brief": {
+          "role_id": "industry",
+          "objective": "区分已经上线和未来计划",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "区分已经上线和未来计划",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "industry-heldout_mechanism",
+      "role_id": "industry",
+      "split": "heldout",
+      "genre": "industry_commentary",
+      "expected": "scorecard_pass",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "分析新的版权审查流程及其边界",
+        "topic": "清泉平台公布了素材来源确认流程。",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "industry_commentary",
+        "authorized_context": [
+          {
+            "record_id": "eval-industry-heldout_mechanism",
+            "space": "industry",
+            "record_type": "source_item",
+            "title": "离线演练资料：heldout_mechanism",
+            "content": "清泉平台公布了素材来源确认流程。\n公告说明争议素材在人工确认前保持暂停。",
+            "structured_data": {},
+            "status": "approved",
+            "authorized_roles": [
+              "industry"
+            ],
+            "source_uri": "https://evaluation.invalid/industry/heldout_mechanism",
+            "source_tier": "official"
+          }
+        ],
+        "approved_proposal": {
+          "title": "清泉平台公布了素材来源确认流程。",
+          "angle": "分析新的版权审查流程及其边界",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [
+            "清泉平台公布了素材来源确认流程。",
+            "公告说明争议素材在人工确认前保持暂停。"
+          ],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": false
+        },
+        "claims": [
+          {
+            "text": "清泉平台公布了素材来源确认流程。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-industry-heldout_mechanism"
+            ],
+            "verification_status": "verified"
+          },
+          {
+            "text": "公告说明争议素材在人工确认前保持暂停。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-industry-heldout_mechanism"
+            ],
+            "verification_status": "verified"
+          }
+        ],
+        "public_editorial_brief": {
+          "role_id": "industry",
+          "objective": "分析新的版权审查流程及其边界",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "分析新的版权审查流程及其边界",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "industry-heldout_selection",
+      "role_id": "industry",
+      "split": "heldout",
+      "genre": "comparison",
+      "expected": "scorecard_pass",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "为新读者比较两个不同的生产步骤",
+        "topic": "清泉平台允许先审查来源再导出素材。",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "comparison",
+        "authorized_context": [
+          {
+            "record_id": "eval-industry-heldout_selection",
+            "space": "industry",
+            "record_type": "source_item",
+            "title": "离线演练资料：heldout_selection",
+            "content": "清泉平台允许先审查来源再导出素材。\n远山工具允许先保存素材清单再手动检查来源。",
+            "structured_data": {},
+            "status": "approved",
+            "authorized_roles": [
+              "industry"
+            ],
+            "source_uri": "https://evaluation.invalid/industry/heldout_selection",
+            "source_tier": "official"
+          }
+        ],
+        "approved_proposal": {
+          "title": "清泉平台允许先审查来源再导出素材。",
+          "angle": "为新读者比较两个不同的生产步骤",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [
+            "清泉平台允许先审查来源再导出素材。",
+            "远山工具允许先保存素材清单再手动检查来源。"
+          ],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": false
+        },
+        "claims": [
+          {
+            "text": "清泉平台允许先审查来源再导出素材。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-industry-heldout_selection"
+            ],
+            "verification_status": "verified"
+          },
+          {
+            "text": "远山工具允许先保存素材清单再手动检查来源。",
+            "kind": "fact",
+            "evidence_ids": [
+              "eval-industry-heldout_selection"
+            ],
+            "verification_status": "verified"
+          }
+        ],
+        "public_editorial_brief": {
+          "role_id": "industry",
+          "objective": "为新读者比较两个不同的生产步骤",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "为新读者比较两个不同的生产步骤",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "personal_ip-first_observation",
+      "role_id": "personal_ip",
+      "split": "tune",
+      "genre": "personal_reflection",
+      "expected": "scorecard_pass",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "从已授权观点写出个人判断",
+        "topic": "我更愿意在内容对外前保留一次人工确认。",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "personal_reflection",
+        "authorized_context": [
+          {
+            "record_id": "eval-personal_ip-first_observation",
+            "space": "personal_approved",
+            "record_type": "experience",
+            "title": "离线演练资料：first_observation",
+            "content": "我更愿意在内容对外前保留一次人工确认。\n我认为退回意见应当具体到原文。",
+            "structured_data": {
+              "allowed_usages": [
+                "personal_ip_content"
+              ],
+              "privacy_level": "public"
+            },
+            "status": "approved",
+            "authorized_roles": [
+              "personal_ip"
+            ],
+            "source_uri": "https://evaluation.invalid/personal_ip/first_observation",
+            "source_tier": "official"
+          }
+        ],
+        "approved_proposal": {
+          "title": "我更愿意在内容对外前保留一次人工确认。",
+          "angle": "从已授权观点写出个人判断",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [
+            "我更愿意在内容对外前保留一次人工确认。",
+            "我认为退回意见应当具体到原文。"
+          ],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": true
+        },
+        "claims": [
+          {
+            "text": "我更愿意在内容对外前保留一次人工确认。",
+            "kind": "experience",
+            "evidence_ids": [
+              "eval-personal_ip-first_observation"
+            ],
+            "verification_status": "verified"
+          },
+          {
+            "text": "我认为退回意见应当具体到原文。",
+            "kind": "experience",
+            "evidence_ids": [
+              "eval-personal_ip-first_observation"
+            ],
+            "verification_status": "verified"
+          }
+        ],
+        "public_editorial_brief": {
+          "role_id": "personal_ip",
+          "objective": "从已授权观点写出个人判断",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "从已授权观点写出个人判断",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "personal_ip-real_experience",
+      "role_id": "personal_ip",
+      "split": "tune",
+      "genre": "founder_story",
+      "expected": "scorecard_pass",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "只围绕本人授权经历叙事",
+        "topic": "我在一次草稿讨论中请同伴指出无法核验的句子。",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "founder_story",
+        "authorized_context": [
+          {
+            "record_id": "eval-personal_ip-real_experience",
+            "space": "personal_approved",
+            "record_type": "experience",
+            "title": "离线演练资料：real_experience",
+            "content": "我在一次草稿讨论中请同伴指出无法核验的句子。\n我保留了原稿与修改后的版本。",
+            "structured_data": {
+              "allowed_usages": [
+                "personal_ip_content"
+              ],
+              "privacy_level": "public"
+            },
+            "status": "approved",
+            "authorized_roles": [
+              "personal_ip"
+            ],
+            "source_uri": "https://evaluation.invalid/personal_ip/real_experience",
+            "source_tier": "official"
+          }
+        ],
+        "approved_proposal": {
+          "title": "我在一次草稿讨论中请同伴指出无法核验的句子。",
+          "angle": "只围绕本人授权经历叙事",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [
+            "我在一次草稿讨论中请同伴指出无法核验的句子。",
+            "我保留了原稿与修改后的版本。"
+          ],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": true
+        },
+        "claims": [
+          {
+            "text": "我在一次草稿讨论中请同伴指出无法核验的句子。",
+            "kind": "experience",
+            "evidence_ids": [
+              "eval-personal_ip-real_experience"
+            ],
+            "verification_status": "verified"
+          },
+          {
+            "text": "我保留了原稿与修改后的版本。",
+            "kind": "experience",
+            "evidence_ids": [
+              "eval-personal_ip-real_experience"
+            ],
+            "verification_status": "verified"
+          }
+        ],
+        "public_editorial_brief": {
+          "role_id": "personal_ip",
+          "objective": "只围绕本人授权经历叙事",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "只围绕本人授权经历叙事",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "personal_ip-decision_boundary",
+      "role_id": "personal_ip",
+      "split": "tune",
+      "genre": "personal_reflection",
+      "expected": "scorecard_pass",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "讲述取舍，不能杜撰成功数据",
+        "topic": "我没有把未经确认的用户反馈写成产品承诺。",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "personal_reflection",
+        "authorized_context": [
+          {
+            "record_id": "eval-personal_ip-decision_boundary",
+            "space": "personal_approved",
+            "record_type": "experience",
+            "title": "离线演练资料：decision_boundary",
+            "content": "我没有把未经确认的用户反馈写成产品承诺。\n我把这些反馈保留在待确认清单中。",
+            "structured_data": {
+              "allowed_usages": [
+                "personal_ip_content"
+              ],
+              "privacy_level": "public"
+            },
+            "status": "approved",
+            "authorized_roles": [
+              "personal_ip"
+            ],
+            "source_uri": "https://evaluation.invalid/personal_ip/decision_boundary",
+            "source_tier": "official"
+          }
+        ],
+        "approved_proposal": {
+          "title": "我没有把未经确认的用户反馈写成产品承诺。",
+          "angle": "讲述取舍，不能杜撰成功数据",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [
+            "我没有把未经确认的用户反馈写成产品承诺。",
+            "我把这些反馈保留在待确认清单中。"
+          ],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": true
+        },
+        "claims": [
+          {
+            "text": "我没有把未经确认的用户反馈写成产品承诺。",
+            "kind": "experience",
+            "evidence_ids": [
+              "eval-personal_ip-decision_boundary"
+            ],
+            "verification_status": "verified"
+          },
+          {
+            "text": "我把这些反馈保留在待确认清单中。",
+            "kind": "experience",
+            "evidence_ids": [
+              "eval-personal_ip-decision_boundary"
+            ],
+            "verification_status": "verified"
+          }
+        ],
+        "public_editorial_brief": {
+          "role_id": "personal_ip",
+          "objective": "讲述取舍，不能杜撰成功数据",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "讲述取舍，不能杜撰成功数据",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "personal_ip-lesson_notes",
+      "role_id": "personal_ip",
+      "split": "tune",
+      "genre": "tutorial",
+      "expected": "scorecard_pass",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "从授权经历提炼可借鉴建议",
+        "topic": "我曾把一次退回意见拆成事实问题和表达问题。",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "tutorial",
+        "authorized_context": [
+          {
+            "record_id": "eval-personal_ip-lesson_notes",
+            "space": "personal_approved",
+            "record_type": "experience",
+            "title": "离线演练资料：lesson_notes",
+            "content": "我曾把一次退回意见拆成事实问题和表达问题。\n我分别记录了修改原因。",
+            "structured_data": {
+              "allowed_usages": [
+                "personal_ip_content"
+              ],
+              "privacy_level": "public"
+            },
+            "status": "approved",
+            "authorized_roles": [
+              "personal_ip"
+            ],
+            "source_uri": "https://evaluation.invalid/personal_ip/lesson_notes",
+            "source_tier": "official"
+          }
+        ],
+        "approved_proposal": {
+          "title": "我曾把一次退回意见拆成事实问题和表达问题。",
+          "angle": "从授权经历提炼可借鉴建议",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [
+            "我曾把一次退回意见拆成事实问题和表达问题。",
+            "我分别记录了修改原因。"
+          ],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": true
+        },
+        "claims": [
+          {
+            "text": "我曾把一次退回意见拆成事实问题和表达问题。",
+            "kind": "experience",
+            "evidence_ids": [
+              "eval-personal_ip-lesson_notes"
+            ],
+            "verification_status": "verified"
+          },
+          {
+            "text": "我分别记录了修改原因。",
+            "kind": "experience",
+            "evidence_ids": [
+              "eval-personal_ip-lesson_notes"
+            ],
+            "verification_status": "verified"
+          }
+        ],
+        "public_editorial_brief": {
+          "role_id": "personal_ip",
+          "objective": "从授权经历提炼可借鉴建议",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "从授权经历提炼可借鉴建议",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "personal_ip-working_values",
+      "role_id": "personal_ip",
+      "split": "tune",
+      "genre": "personal_reflection",
+      "expected": "scorecard_pass",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "表达真实观点，不制造客户与身份",
+        "topic": "我认为工具应当让负责人知道当前看的是什么版本。",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "personal_reflection",
+        "authorized_context": [
+          {
+            "record_id": "eval-personal_ip-working_values",
+            "space": "personal_approved",
+            "record_type": "experience",
+            "title": "离线演练资料：working_values",
+            "content": "我认为工具应当让负责人知道当前看的是什么版本。\n我不把模型的自评分当成人工认可。",
+            "structured_data": {
+              "allowed_usages": [
+                "personal_ip_content"
+              ],
+              "privacy_level": "public"
+            },
+            "status": "approved",
+            "authorized_roles": [
+              "personal_ip"
+            ],
+            "source_uri": "https://evaluation.invalid/personal_ip/working_values",
+            "source_tier": "official"
+          }
+        ],
+        "approved_proposal": {
+          "title": "我认为工具应当让负责人知道当前看的是什么版本。",
+          "angle": "表达真实观点，不制造客户与身份",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [
+            "我认为工具应当让负责人知道当前看的是什么版本。",
+            "我不把模型的自评分当成人工认可。"
+          ],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": true
+        },
+        "claims": [
+          {
+            "text": "我认为工具应当让负责人知道当前看的是什么版本。",
+            "kind": "experience",
+            "evidence_ids": [
+              "eval-personal_ip-working_values"
+            ],
+            "verification_status": "verified"
+          },
+          {
+            "text": "我不把模型的自评分当成人工认可。",
+            "kind": "experience",
+            "evidence_ids": [
+              "eval-personal_ip-working_values"
+            ],
+            "verification_status": "verified"
+          }
+        ],
+        "public_editorial_brief": {
+          "role_id": "personal_ip",
+          "objective": "表达真实观点，不制造客户与身份",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "表达真实观点，不制造客户与身份",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "personal_ip-progress_story",
+      "role_id": "personal_ip",
+      "split": "tune",
+      "genre": "founder_story",
+      "expected": "scorecard_pass",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "允许讲进展与困难，不拔高结果",
+        "topic": "我调整过一次稿件的开头顺序。",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "founder_story",
+        "authorized_context": [
+          {
+            "record_id": "eval-personal_ip-progress_story",
+            "space": "personal_approved",
+            "record_type": "experience",
+            "title": "离线演练资料：progress_story",
+            "content": "我调整过一次稿件的开头顺序。\n这次调整之后我仍请同伴重新阅读。",
+            "structured_data": {
+              "allowed_usages": [
+                "personal_ip_content"
+              ],
+              "privacy_level": "public"
+            },
+            "status": "approved",
+            "authorized_roles": [
+              "personal_ip"
+            ],
+            "source_uri": "https://evaluation.invalid/personal_ip/progress_story",
+            "source_tier": "official"
+          }
+        ],
+        "approved_proposal": {
+          "title": "我调整过一次稿件的开头顺序。",
+          "angle": "允许讲进展与困难，不拔高结果",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [
+            "我调整过一次稿件的开头顺序。",
+            "这次调整之后我仍请同伴重新阅读。"
+          ],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": true
+        },
+        "claims": [
+          {
+            "text": "我调整过一次稿件的开头顺序。",
+            "kind": "experience",
+            "evidence_ids": [
+              "eval-personal_ip-progress_story"
+            ],
+            "verification_status": "verified"
+          },
+          {
+            "text": "这次调整之后我仍请同伴重新阅读。",
+            "kind": "experience",
+            "evidence_ids": [
+              "eval-personal_ip-progress_story"
+            ],
+            "verification_status": "verified"
+          }
+        ],
+        "public_editorial_brief": {
+          "role_id": "personal_ip",
+          "objective": "允许讲进展与困难，不拔高结果",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "允许讲进展与困难，不拔高结果",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "personal_ip-missing_authorization",
+      "role_id": "personal_ip",
+      "split": "tune",
+      "genre": "personal_reflection",
+      "expected": "abstain",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "没有本人公开授权素材时等待短访谈",
+        "topic": "资料不足的演练",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "personal_reflection",
+        "authorized_context": [],
+        "approved_proposal": {
+          "title": "等待补充公开资料",
+          "angle": "没有本人公开授权素材时等待短访谈",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": true
+        },
+        "claims": [],
+        "public_editorial_brief": {
+          "role_id": "personal_ip",
+          "objective": "没有本人公开授权素材时等待短访谈",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "没有本人公开授权素材时等待短访谈",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "personal_ip-reflection_comparison",
+      "role_id": "personal_ip",
+      "split": "tune",
+      "genre": "comparison",
+      "expected": "scorecard_pass",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "比较本人实际做过的两种写法",
+        "topic": "我曾先写结论再补材料。",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "comparison",
+        "authorized_context": [
+          {
+            "record_id": "eval-personal_ip-reflection_comparison",
+            "space": "personal_approved",
+            "record_type": "experience",
+            "title": "离线演练资料：reflection_comparison",
+            "content": "我曾先写结论再补材料。\n另一次我先整理材料再写结论。",
+            "structured_data": {
+              "allowed_usages": [
+                "personal_ip_content"
+              ],
+              "privacy_level": "public"
+            },
+            "status": "approved",
+            "authorized_roles": [
+              "personal_ip"
+            ],
+            "source_uri": "https://evaluation.invalid/personal_ip/reflection_comparison",
+            "source_tier": "official"
+          }
+        ],
+        "approved_proposal": {
+          "title": "我曾先写结论再补材料。",
+          "angle": "比较本人实际做过的两种写法",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [
+            "我曾先写结论再补材料。",
+            "另一次我先整理材料再写结论。"
+          ],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": true
+        },
+        "claims": [
+          {
+            "text": "我曾先写结论再补材料。",
+            "kind": "experience",
+            "evidence_ids": [
+              "eval-personal_ip-reflection_comparison"
+            ],
+            "verification_status": "verified"
+          },
+          {
+            "text": "另一次我先整理材料再写结论。",
+            "kind": "experience",
+            "evidence_ids": [
+              "eval-personal_ip-reflection_comparison"
+            ],
+            "verification_status": "verified"
+          }
+        ],
+        "public_editorial_brief": {
+          "role_id": "personal_ip",
+          "objective": "比较本人实际做过的两种写法",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "比较本人实际做过的两种写法",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "personal_ip-heldout_small_choice",
+      "role_id": "personal_ip",
+      "split": "heldout",
+      "genre": "personal_reflection",
+      "expected": "scorecard_pass",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "新授权观点支持自然鲜明表达",
+        "topic": "我愿意把不确定的判断明确写成问题。",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "personal_reflection",
+        "authorized_context": [
+          {
+            "record_id": "eval-personal_ip-heldout_small_choice",
+            "space": "personal_approved",
+            "record_type": "experience",
+            "title": "离线演练资料：heldout_small_choice",
+            "content": "我愿意把不确定的判断明确写成问题。\n我认为这比补一段没有依据的结论更有用。",
+            "structured_data": {
+              "allowed_usages": [
+                "personal_ip_content"
+              ],
+              "privacy_level": "public"
+            },
+            "status": "approved",
+            "authorized_roles": [
+              "personal_ip"
+            ],
+            "source_uri": "https://evaluation.invalid/personal_ip/heldout_small_choice",
+            "source_tier": "official"
+          }
+        ],
+        "approved_proposal": {
+          "title": "我愿意把不确定的判断明确写成问题。",
+          "angle": "新授权观点支持自然鲜明表达",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [
+            "我愿意把不确定的判断明确写成问题。",
+            "我认为这比补一段没有依据的结论更有用。"
+          ],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": true
+        },
+        "claims": [
+          {
+            "text": "我愿意把不确定的判断明确写成问题。",
+            "kind": "experience",
+            "evidence_ids": [
+              "eval-personal_ip-heldout_small_choice"
+            ],
+            "verification_status": "verified"
+          },
+          {
+            "text": "我认为这比补一段没有依据的结论更有用。",
+            "kind": "experience",
+            "evidence_ids": [
+              "eval-personal_ip-heldout_small_choice"
+            ],
+            "verification_status": "verified"
+          }
+        ],
+        "public_editorial_brief": {
+          "role_id": "personal_ip",
+          "objective": "新授权观点支持自然鲜明表达",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "新授权观点支持自然鲜明表达",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "scenario_id": "personal_ip-heldout_new_story",
+      "role_id": "personal_ip",
+      "split": "heldout",
+      "genre": "founder_story",
+      "expected": "scorecard_pass",
+      "material_type": "synthetic_evaluation_only",
+      "request": {
+        "objective": "新授权经历保持人物、动作和结果边界",
+        "topic": "我在一次内部演示后撤回了一张不清楚来源的配图。",
+        "audience": "需要具体信息和真实判断的创作者",
+        "channels": [
+          "wechat_mp"
+        ],
+        "genre": "founder_story",
+        "authorized_context": [
+          {
+            "record_id": "eval-personal_ip-heldout_new_story",
+            "space": "personal_approved",
+            "record_type": "experience",
+            "title": "离线演练资料：heldout_new_story",
+            "content": "我在一次内部演示后撤回了一张不清楚来源的配图。\n我随后请提供者补上原始链接。",
+            "structured_data": {
+              "allowed_usages": [
+                "personal_ip_content"
+              ],
+              "privacy_level": "public"
+            },
+            "status": "approved",
+            "authorized_roles": [
+              "personal_ip"
+            ],
+            "source_uri": "https://evaluation.invalid/personal_ip/heldout_new_story",
+            "source_tier": "official"
+          }
+        ],
+        "approved_proposal": {
+          "title": "我在一次内部演示后撤回了一张不清楚来源的配图。",
+          "angle": "新授权经历保持人物、动作和结果边界",
+          "audience_value": "得到具体、可核验且有明确边界的信息",
+          "key_points": [
+            "我在一次内部演示后撤回了一张不清楚来源的配图。",
+            "我随后请提供者补上原始链接。"
+          ],
+          "suggested_formats": [
+            "wechat_mp"
+          ],
+          "first_person": true
+        },
+        "claims": [
+          {
+            "text": "我在一次内部演示后撤回了一张不清楚来源的配图。",
+            "kind": "experience",
+            "evidence_ids": [
+              "eval-personal_ip-heldout_new_story"
+            ],
+            "verification_status": "verified"
+          },
+          {
+            "text": "我随后请提供者补上原始链接。",
+            "kind": "experience",
+            "evidence_ids": [
+              "eval-personal_ip-heldout_new_story"
+            ],
+            "verification_status": "verified"
+          }
+        ],
+        "public_editorial_brief": {
+          "role_id": "personal_ip",
+          "objective": "新授权经历保持人物、动作和结果边界",
+          "audience": "需要具体信息和真实判断的创作者",
+          "reader_value": "可核验的事实与有用的解释",
+          "angle": "新授权经历保持人物、动作和结果边界",
+          "channels": [
+            "wechat_mp"
+          ]
+        },
+        "runtime_budget": {
+          "max_model_calls": 4,
+          "max_surface_revisions": 1,
+          "max_elapsed_seconds": 120,
+          "max_output_tokens": 4000
+        },
+        "as_of": "2026-10-23T00:00:00Z"
+      }
+    }
+  ]
+}
