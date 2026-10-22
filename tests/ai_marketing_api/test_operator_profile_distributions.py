@@ -58,7 +58,7 @@ def test_profile_configs_have_no_runtime_tool_or_memory_access():
         permissions = json.loads(
             (PROFILE_ROOT / role.value / "operator.json").read_text(encoding="utf-8")
         )
-        assert permissions["version"] == "1.1.0"
+        assert permissions["version"] == read_manifest(PROFILE_ROOT / role.value).version
         assert set(permissions["allowed_actions"]) == {"propose", "revise", "compose"}
         assert permissions["allowed_tools"] == []
         assert {"direct_database", "direct_cache", "filesystem_knowledge"}.issubset(

@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Literal, Optional, Sequence, Set
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field
-from ai_marketing_api.operator_style import StyleReference, style_context
+from ai_marketing_api.operator_style import PUBLIC_TUTORIAL_ATTRIBUTION_RE, PUBLIC_TUTORIAL_GENRE, StyleReference, style_context
 
 
 SCHEMA_VERSION = "operator.proposal.v1"
@@ -740,10 +740,43 @@ _PERSONAL_TYPES = {
 }
 
 
+def public_tutorial_contexts(contexts: Sequence[AuthorizedContext]) -> List[AuthorizedContext]:
+    """Explicit personal-role public facts, never testimony or image inference."""
+    return [context for context in contexts
+        if _enum_value(context.space) in {"company_public", "industry"}
+        and "personal_ip" in context.authorized_roles
+        and context.structured_data.get("publishable") is not False
+        and context.structured_data.get("e2e_only") is not True
+        and (_enum_value(context.space) != "industry" or context.source_tier in {
+            "official", "official_primary", "primary", "first_party", "first-party"})
+        and _context_text(context)
+        and not PUBLIC_TUTORIAL_ATTRIBUTION_RE.search(_context_text(context))]
+
+
+def _public_tutorial_fallback(request, contexts):
+    sources = public_tutorial_contexts(contexts)
+    if not sources:
+        return {"status": OutputStatus.NEEDS_INPUT.value, "proposal": None, "claims": [],
+            "questions": [_model_dump(_question("请补充已授权个人内容使用的官方工具说明或已批准企业公开事实。",
+                "公共教程不需要个人经历卡，但每个工具步骤或功能必须有可核验的公开事实；来源截图不能证明本人实测。"))],
+            "risk_flags": [_model_dump(_risk("public_tutorial_public_evidence_required",
+                "Public tutorials require authorized public facts, without personal attribution or unverified tests.", blocking=True))]}
+    claims = [_fact_claim(source) for source in sources[:8]]
+    return {"status": OutputStatus.PROPOSAL.value, "proposal": {
+        "title": _evidence_title(request, sources, role=OperatorRole.PERSONAL_IP),
+        "angle": "基于已授权的公开说明解释工具用法、适用条件与证据边界，不声称本人使用、实测或取得结果。",
+        "audience_value": request.audience.strip() or "帮助读者理解有公开依据的工具用法和选择条件。",
+        "key_points": [claim.text for claim in claims[:4]], "suggested_formats": _formats(request),
+        "cta": None, "first_person": False}, "claims": [_model_dump(claim) for claim in claims],
+        "questions": [], "risk_flags": []}
+
+
 def _personal_fallback(
     request: OperatorProposeRequest,
     contexts: Sequence[AuthorizedContext],
 ) -> Dict[str, Any]:
+    if request.genre == PUBLIC_TUTORIAL_GENRE:
+        return _public_tutorial_fallback(request, contexts)
     cards = [
         context
         for context in contexts
@@ -829,6 +862,7 @@ def _safe_model_proposal(
     fallback: Optional[Dict[str, Any]],
     candidate: Any,
     contexts: Sequence[AuthorizedContext],
+    genre: str = "",
 ) -> Optional[Dict[str, Any]]:
     if fallback is None or not isinstance(candidate, dict):
         return fallback
@@ -863,6 +897,8 @@ def _safe_model_proposal(
             # claim path, never through free-form model prose.
             return fallback
     if role is OperatorRole.PERSONAL_IP:
+        if genre == PUBLIC_TUTORIAL_GENRE:
+            return fallback if public_tutorial_contexts(contexts) else None
         cards = [context for context in contexts if _enum_value(context.space) == "personal_approved"]
         if not cards:
             return None
@@ -961,7 +997,7 @@ def normalize_output(
     claims, claim_risks = _normalize_model_claims(
         role, candidate.get("claims"), fallback_claims, contexts
     )
-    proposal = _safe_model_proposal(role, fallback.get("proposal"), candidate.get("proposal"), contexts)
+    proposal = _safe_model_proposal(role, fallback.get("proposal"), candidate.get("proposal"), contexts, request.genre)
     if proposal is not None:
         # Key points are presented to the owner as the factual basis of the
         # direction.  They must never retain prose whose corresponding model

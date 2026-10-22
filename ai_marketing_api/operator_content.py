@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 from pydantic import Field
 
 from ai_marketing_api.operator_editorial import EditorialReview, GenerationTrace, OwnerRevision, PublicEditorialBrief, QualityScorecard, RuntimeBudget
-from ai_marketing_api.operator_style import CURRENT_GENRE, MASTER_ONLY, editorial_scope, style_context
+from ai_marketing_api.operator_style import CURRENT_GENRE, MASTER_ONLY, PUBLIC_TUTORIAL_ATTRIBUTION_RE, PUBLIC_TUTORIAL_GENRE, editorial_scope, style_context
 from ai_marketing_api.operator_grounding import ClaimBindingReview
 
 from ai_marketing_api.operator_runtime import (
@@ -28,6 +28,7 @@ from ai_marketing_api.operator_runtime import (
     ProposalOutline,
     StrictModel,
     VerificationStatus,
+    public_tutorial_contexts,
 )
 
 
@@ -874,7 +875,19 @@ def _commercial_gate(
 def _personal_gate(
     blocks: Sequence[ContentBlock],
     contexts: Sequence[AuthorizedContext],
+    request: Optional[OperatorComposeRequest] = None,
 ) -> tuple[bool, str]:
+    if request is not None and request.genre == PUBLIC_TUTORIAL_GENRE:
+        if request.approved_proposal.first_person or any(PUBLIC_TUTORIAL_ATTRIBUTION_RE.search(block.text) for block in blocks):
+            return False, "public_tutorial_attribution_forbidden"
+        if any(_value(block.kind) != ContentBlockKind.FACT.value for block in blocks):
+            return False, "public_tutorial_fact_only"
+        sources = {context.record_id for context in public_tutorial_contexts(contexts)}
+        facts = [block for block in blocks if _value(block.kind) == ContentBlockKind.FACT.value]
+        if not facts or any(not block.source_exact or not block.evidence_ids
+                or not set(block.evidence_ids).issubset(sources) for block in facts):
+            return False, "public_tutorial_public_evidence_required"
+        return True, "public_tutorial_public_evidence_present"
     by_id = {context.record_id: context for context in contexts}
     for block in blocks:
         if _value(block.kind) not in {
@@ -1064,6 +1077,8 @@ def _safe_master_title(
                 and not _PERSONAL_EDITORIAL_ASSERTION_RE.search(value)
             )
         )
+        if role_value == OperatorRole.PERSONAL_IP.value and request.genre == PUBLIC_TUTORIAL_GENRE and PUBLIC_TUTORIAL_ATTRIBUTION_RE.search(value):
+            personal_safe = False
         # Preserve the existing title fence and its evaluation order. Reasons
         # are fixed codes; rejected text, entities and quantities never enter
         # diagnostics.
@@ -1280,7 +1295,7 @@ def build_content_fallback(
     elif role is OperatorRole.INDUSTRY:
         role_gate_ok, role_gate_message = _industry_gate(approved_blocks, contexts)
     else:
-        role_gate_ok, role_gate_message = _personal_gate(approved_blocks, contexts)
+        role_gate_ok, role_gate_message = _personal_gate(approved_blocks, contexts, request)
 
     errors = [*channel_errors, *claim_errors]
     if not role_gate_ok:
@@ -1400,6 +1415,8 @@ def _safe_candidate_blocks(
             return None, "evidence_forbidden"
         if _HTML_RE.search(text) or _URL_RE.search(text):
             return None, "markup_or_url_forbidden"
+        if role is OperatorRole.PERSONAL_IP and CURRENT_GENRE.get() == PUBLIC_TUTORIAL_GENRE and PUBLIC_TUTORIAL_ATTRIBUTION_RE.search(text):
+            return None, "first_person_forbidden"
         # A social hook may repeat a verified amount or date, but cannot invent
         # or recombine a numeric token that is absent from approved evidence.
         editorial_number_tokens = _number_tokens(text)
@@ -1740,6 +1757,7 @@ def _blocked_status(role: OperatorRole, errors: Sequence[str]) -> ContentStatus:
         "unique_public_business_offer_required",
         "business_offer_claim_missing",
         "approved_personal_card_required",
+        "public_tutorial_",
         "approved_publishable_claims_required",
     )
     if role in {OperatorRole.COMMERCIAL, OperatorRole.PERSONAL_IP} and any(
@@ -3261,7 +3279,7 @@ def content_request_payload(
             "key_points": public_key_points,
             "suggested_formats": list(request.channels),
             "cta": editorial_brief["cta"],
-            "first_person": role is OperatorRole.PERSONAL_IP,
+            "first_person": role is OperatorRole.PERSONAL_IP and request.genre != PUBLIC_TUTORIAL_GENRE,
         },
         "approved_editorial_brief": editorial_brief,
         "public_editorial_brief": _dump(public_brief) if public_brief else None,
@@ -3521,4 +3539,10 @@ def content_request_payload(
         rule = "Follow the requested genre and audience. A sourced event, figure, scene or comparison may lead. Use as many authored analytical blocks as the material needs; no mandatory hook position, paragraph count or CTA. Preserve every canonical factual reference and all evidence/disclosure restrictions."
         payload["response_contract"]["editorial_shape"] = {"genre": request.genre, "rule": rule}
         payload["response_contract"]["safety"][5] = rule
+    if role is OperatorRole.PERSONAL_IP and request.genre == PUBLIC_TUTORIAL_GENRE:
+        rule = "Write a non-first-person public tool tutorial using only the exact authorized public facts. No approved owner card is required for those facts. Do not claim personal use, hands-on tests, customer results, identity, biography or owner-attributed opinions. A source image is not evidence of an experiment performed by the owner. Unknown steps or outputs require more evidence, never invention."
+        payload["publication_brief"] = {"voice": "A clear public tutorial based on authorized documentation, without personal testimony.", "reader_outcome": "Understand documented steps and limitations without mistaking source material for the owner's own test."}
+        payload["publication_brief"]["authored_block_rule"] = rule
+        payload["publication_brief"]["thesis_contract"] = [rule]
+        payload["response_contract"]["safety"].append(rule)
     return payload

@@ -147,6 +147,16 @@ It never enters claims or authorized context. Known non-public excerpts are
 rejected before model dispatch. The orchestrator remains responsible for
 projecting safe review diagnostics rather than raw private source material.
 
+The personal operator has an explicit `genre=public_tutorial` mode for public
+tool tutorials. It can propose and compose without owner cards from approved
+`company_public` facts or primary/official `industry` facts explicitly
+authorized for `personal_ip`. Canonical claims remain fact-only, and the
+proposal must have `first_person=false`. It rejects personal attribution,
+invented hands-on testing, owner/client results and mixed identity, experience
+or owner-opinion claims. Source screenshots and generated illustrations never
+establish an experiment by the owner. Missing public evidence still yields
+`needs_input`; other genres retain the original personal-card requirements.
+
 For a request with genre or style references, the editor must return
 `quality_scorecard.v1`. Each `surfaces` row identifies `master` or an exact
 requested platform and contains integer 1–5 scores for `reader_relevance`,

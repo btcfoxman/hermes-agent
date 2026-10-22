@@ -3,6 +3,7 @@
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Annotated, Any
+import re
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -19,6 +20,10 @@ class StyleReference(BaseModel):
 
 CURRENT_GENRE: ContextVar[str] = ContextVar("marketing_editorial_genre", default="")
 MASTER_ONLY: ContextVar[bool] = ContextVar("marketing_master_only", default=False)
+PUBLIC_TUTORIAL_GENRE = "public_tutorial"
+PUBLIC_TUTORIAL_ATTRIBUTION_RE = re.compile(
+    r"(?:我|我们|本人|我司|亲测|亲自|亲身|自测|自用|实测|上手(?:体验|感受)|(?:测试|实验)后(?:发现|证明|效果)|"
+    r"\b(?:i|me|my|mine|we|us|our|personally|hands[- ]on|my customers?|our clients?)\b)", re.I)
 
 
 @contextmanager
