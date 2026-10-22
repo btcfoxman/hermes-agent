@@ -87,6 +87,8 @@ class ContentBlock(StrictModel):
     binding_hash: str = Field(default="", max_length=64)
     public_text: Optional[str] = Field(default=None, max_length=20000)
     public_text_verified: bool = False
+    # Server-derived presentation only; canonical fact/evidence never changes.
+    source_display: Literal["excerpt", "full_documentation"] = "excerpt"
 
 
 class PlatformVariant(StrictModel):
@@ -485,6 +487,10 @@ def _fact_display_text(block: ContentBlock, *, surface: str = "master") -> str:
     independently, so presentation never weakens evidence binding.
     """
 
+    if (block.source_display == "full_documentation" and block.source_exact
+            and _value(block.kind) == "fact" and _value(block.origin) == "approved_claim"
+            and block.locked and block.required):
+        return block.text.strip()
     if block.public_text_verified and block.public_text:
         return block.public_text
     text = block.text.strip()
@@ -765,6 +771,14 @@ def _build_approved_blocks(
                         else VerificationStatus.VERIFIED
                     ),
                     source_exact=True,
+                    source_display=("full_documentation" if (
+                        role is OperatorRole.PERSONAL_IP and request.genre == PUBLIC_TUTORIAL_GENRE
+                        and kind == ClaimKind.FACT.value and len(claim.text) >= 96
+                        and all(public_by_id[record_id].record_type in {"source_fact", "source_item"}
+                            and public_by_id[record_id].source_tier in {"official", "primary"}
+                            and public_by_id[record_id] in public_tutorial_contexts(authorized_contexts)
+                            for record_id in matching_ids)
+                    ) else "excerpt"),
                 ),
                 origin=ContentBlockOrigin.APPROVED_CLAIM,
                 locked=True,

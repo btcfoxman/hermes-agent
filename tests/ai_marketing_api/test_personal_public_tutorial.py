@@ -8,6 +8,12 @@ from tests.ai_marketing_api.test_operator_api import _request
 
 
 FACT = "公开工具允许负责人自行选择待审核稿件。"
+IMAGE_DOCUMENTATION = (FACT + "New API 官方文档列出 POST /v1/images/generations，使用 Bearer 认证，提示词字段为 prompt。"
+    "成功响应包含 created 和 data 图像数组。图像对象可含 url、b64_json 和 revised_prompt。"
+    "response_format 的 url 与 b64_json 示例主要针对 DALL·E 和 gpt-image-1，不能据此假设其他模型兼容。")
+USAGE_DOCUMENTATION = (FACT + "New API Token Usage 文档提供 GET /api/usage/token，使用 Authorization: Bearer 认证。"
+    "data 中 total_granted 是已使用和可用额度的合计。total_used 为已用额度，total_available 为剩余额度。"
+    "unlimited_quota 表示是否不限额，expires_at 为到期时间戳，0 表示永不到期。这些字段不能证明单次调用的实际费用。")
 
 
 def payload(space="industry"):
@@ -28,7 +34,7 @@ def candidate(body, *, invented_testimony=False):
             "title": "负责人如何选择审核稿件", "blocks": [*refs, *extra]} for platform in body["channels"]]}
 
 
-def install_model(monkeypatch, *, invented_testimony=False):
+def install_model(monkeypatch, *, invented_testimony=False, documentation=False):
     monkeypatch.setenv("HERMES_API_KEY", "operator-test-secret")
     calls = []
     async def model(system, body, fallback, *args, **kwargs):
@@ -44,7 +50,12 @@ def install_model(monkeypatch, *, invented_testimony=False):
         if "canonical_block_registry" in body:
             assert body["approved_proposal"]["first_person"] is False
             assert "public tool tutorial" in body["publication_brief"]["thesis_contract"][0]
-            return candidate(body, invented_testimony=invented_testimony)
+            result = candidate(body, invented_testimony=invented_testimony)
+            if documentation:
+                result["master_title"] = "待审核稿件与接口字段"
+                for variant in result["platform_variants"]:
+                    variant["title"] = "待审核稿件字段怎样核对"
+            return result
         # A model cannot convert an authorized public tutorial into a claimed
         # first-person experiment or replace the exact canonical source fact.
         return {"_model": "offline-author", "proposal": {"title": "我亲测得到了显著结果", "first_person": True},
@@ -143,3 +154,54 @@ def test_public_tutorial_discards_invented_testimony_from_title_and_prose(monkey
     assert "亲测" not in str({"title": composed["master_title"], "body": composed["master_content"],
         "variants": composed["platform_variants"]})
     assert any("first_person_forbidden" in warning for warning in composed["critic"]["warnings"])
+
+
+@pytest.mark.parametrize("tier", ["official", "primary"])
+@pytest.mark.parametrize("documentation", [IMAGE_DOCUMENTATION, USAGE_DOCUMENTATION])
+def test_public_tutorial_keeps_complete_canonical_api_documentation(monkeypatch, tier, documentation):
+    from ai_marketing_api.operator_content import ContentBlock, _binding_hash, _fact_display_text
+    from ai_marketing_api.operator_grounding import paraphrase_eligible
+    install_model(monkeypatch, documentation=True)
+    value = payload()
+    value["authorized_context"][0].update(content=documentation, source_tier=tier)
+    proposed = _request("POST", "/api/v1/operators/personal_ip/propose", json=value).json()
+    assert proposed["status"] == "proposal"
+    composed = _request("POST", "/api/v1/operators/personal_ip/compose", json={**value,
+        "approved_proposal": proposed["proposal"], "claims": proposed["claims"]}).json()
+    assert composed["status"] == "content_ready", composed["critic"]
+    assert composed["master_content"] == documentation
+    assert all(variant["body"] == documentation for variant in composed["platform_variants"])
+    for raw in [*composed["blocks"], *composed["platform_variants"][0]["blocks"]]:
+        assert raw["source_display"] == "full_documentation"
+        assert raw["text"] == documentation
+        assert raw["evidence_ids"] == ["public-source"]
+        assert raw["binding_hash"] == _binding_hash({**raw, "source_display": "excerpt"})
+        assert not paraphrase_eligible(ContentBlock(**raw), documentation)
+        legacy = ContentBlock(**{key: val for key, val in raw.items() if key != "source_display"})
+        assert len(_fact_display_text(legacy)) < len(documentation)
+
+
+@pytest.mark.parametrize("change", ["role", "genre", "tier", "record_type"])
+def test_complete_documentation_projection_is_minted_only_for_public_tutorial_sources(change):
+    from ai_marketing_api.operator_content import OperatorComposeRequest, _build_approved_blocks
+    from ai_marketing_api.operator_runtime import OperatorRole
+    value = payload()
+    context = value["authorized_context"][0]
+    context.update(space="company_public", record_type="source_fact", content=IMAGE_DOCUMENTATION)
+    role = OperatorRole.PERSONAL_IP
+    if change == "role":
+        role = OperatorRole.COMMERCIAL
+        context["authorized_roles"] = ["commercial"]
+    elif change == "genre":
+        value["genre"] = "personal_viewpoint"
+    elif change == "tier":
+        context["source_tier"] = "secondary"
+    else:
+        context["record_type"] = "capability"
+    request = OperatorComposeRequest(**{**value, "approved_proposal": {"title": "审核工具如何选择稿件", "angle": "说明文档字段",
+        "audience_value": "解释公开字段", "key_points": [IMAGE_DOCUMENTATION], "suggested_formats": ["wechat_mp"], "first_person": False},
+        "claims": [{"text": IMAGE_DOCUMENTATION, "kind": "fact", "evidence_ids": ["public-source"], "verification_status": "verified"}]})
+    blocks, errors = _build_approved_blocks(role, request, request.authorized_context)
+    assert not errors
+    assert len(blocks) == 1
+    assert blocks[0].source_display == "excerpt"
