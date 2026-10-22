@@ -90,6 +90,18 @@ class GenerationAttempt(StrictModel):
     provider_requests: list[dict[str, Any]] = Field(default_factory=list, max_length=8)
 
 
+class ReviewValidationIssue(StrictModel):
+    loc: list[str | int] = Field(default_factory=list, max_length=8)
+    type: str = Field(max_length=80)
+
+
+class ReviewValidationDiagnostic(StrictModel):
+    stage: str = Field(max_length=40)
+    code: str = Field(max_length=80)
+    candidate_sha256: str = Field(default="", max_length=64)
+    errors: list[ReviewValidationIssue] = Field(default_factory=list, max_length=10)
+
+
 class GenerationTrace(StrictModel):
     schema_version: Literal["operator.generation_trace.v1"] = (
         "operator.generation_trace.v1"
@@ -112,6 +124,7 @@ class GenerationTrace(StrictModel):
     human_review_required: Literal[True] = True
     attempts: list[GenerationAttempt] = Field(default_factory=list, max_length=8)
     provider_requests: list[dict[str, Any]] = Field(default_factory=list, max_length=32)
+    editorial_diagnostics: list[ReviewValidationDiagnostic] = Field(default_factory=list, max_length=8)
 
 
 class EditorialReview(StrictModel):
@@ -171,6 +184,10 @@ class BoundedModelRun:
         self.started = time.monotonic()
         self.attempts: list[GenerationAttempt] = []
         self.exhausted = False
+        # Private structured reviewer output is returned only by the internal
+        # staged endpoint, never by legacy compose or the public trace.
+        self.private_review_receipt: dict[str, Any] | None = None
+        self.review_diagnostics: list[ReviewValidationDiagnostic] = []
 
     @property
     def remaining_seconds(self) -> float:
@@ -291,4 +308,5 @@ class BoundedModelRun:
             editorial_review=review,
             attempts=self.attempts,
             provider_requests=[event for item in self.attempts for event in item.provider_requests][:32],
+            editorial_diagnostics=self.review_diagnostics[-8:],
         )

@@ -156,13 +156,17 @@ async def run_editorial_step(registry, role, step: EditorialStep, payload: Edito
                 "status": "artifact" if not output.critic.errors else "blocked",
                 "artifact": artifact, "artifact_signature": artifact_signature(artifact),
                 "publishable": False, "requires_human_review": True,
-                "generation_trace": trace.model_dump(mode="json")}
+                "generation_trace": trace.model_dump(mode="json"),
+                **({"private_review_receipt": run.private_review_receipt}
+                   if step == "review_editorial" and run.private_review_receipt is not None else {})}
     except ValueError as exc:
         code = str(exc) if str(exc) in {"stage_route_unavailable", "artifact_signature_invalid", "signed_master_required", "signed_candidate_required", "candidate_required", "master_evidence_invalid"} else "step_artifact_invalid"
         return {"schema_version": "operator.editorial_step.v1", "step": step,
             "status": "unavailable", "error_code": code, "artifact": None,
             "publishable": False, "requires_human_review": True,
-            "generation_trace": run.trace(blocked=True, review="not_requested", stop_reason=code).model_dump(mode="json")}
+            "generation_trace": run.trace(blocked=True, review="not_requested", stop_reason=code).model_dump(mode="json"),
+            **({"private_review_receipt": run.private_review_receipt}
+               if step == "review_editorial" and run.private_review_receipt is not None else {})}
     finally:
         MASTER_ONLY.reset(master_only)
         BUDGET_RESERVATION_ID.reset(reservation)
