@@ -764,7 +764,7 @@ def _public_tutorial_fallback(request, contexts):
     claims = [_fact_claim(source) for source in sources[:8]]
     return {"status": OutputStatus.PROPOSAL.value, "proposal": {
         "title": _evidence_title(request, sources, role=OperatorRole.PERSONAL_IP),
-        "angle": "基于已授权的公开说明解释工具用法、适用条件与证据边界，不声称本人使用、实测或取得结果。",
+        "angle": "基于已授权的公开说明，解释工具用法、适用条件与可核验的操作步骤。",
         "audience_value": request.audience.strip() or "帮助读者理解有公开依据的工具用法和选择条件。",
         "key_points": [claim.text for claim in claims[:4]], "suggested_formats": _formats(request),
         "cta": None, "first_person": False}, "claims": [_model_dump(claim) for claim in claims],

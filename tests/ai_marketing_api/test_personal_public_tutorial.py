@@ -71,6 +71,8 @@ def test_explicit_public_tutorial_proposes_and_composes_without_owner_cards(monk
     proposed = _request("POST", "/api/v1/operators/personal_ip/propose", json=value).json()
     assert proposed["status"] == "proposal", proposed
     assert proposed["proposal"]["first_person"] is False
+    from ai_marketing_api.operator_style import PUBLIC_TUTORIAL_ATTRIBUTION_RE
+    assert not PUBLIC_TUTORIAL_ATTRIBUTION_RE.search(proposed["proposal"]["angle"])
     assert [claim["text"] for claim in proposed["claims"]] == [FACT]
     assert all(claim["kind"] == "fact" for claim in proposed["claims"])
     composed = _request("POST", "/api/v1/operators/personal_ip/compose", json={**value,
