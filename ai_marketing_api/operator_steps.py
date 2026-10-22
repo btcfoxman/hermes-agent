@@ -63,7 +63,15 @@ def _normalized_candidate(registry, role, request, contexts, fallback, candidate
     return output
 
 
-async def run_editorial_step(registry, role, step: EditorialStep, payload: EditorialStepRequest, llm):
+async def run_editorial_step(registry, role, step: EditorialStep, payload: EditorialStepRequest, llm,
+                             *, timeout_seconds: float | None = None):
+    if timeout_seconds is not None:
+        # The provider timeout never extends the independent BoundedModelRun
+        # deadline or call budget. This header is limited by the HTTP schema.
+        original_llm = llm
+        async def timed_llm(*args, **kwargs):
+            return await original_llm(*args, timeout_seconds=str(timeout_seconds), **kwargs)
+        llm = timed_llm
     request = payload.compose
     contexts = registry.authorize(role, request.authorized_context, request.as_of)
     registry.authorize_preferences(role, request.approved_preferences)

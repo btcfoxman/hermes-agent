@@ -118,6 +118,8 @@ for path in (
 probe_schema_contract() {
   compose exec -T hermes-agent python -c '
 import json
+import os
+import urllib.error
 import urllib.request
 
 with urllib.request.urlopen("http://127.0.0.1:8095/openapi.json", timeout=20) as response:
@@ -131,6 +133,17 @@ for path in (
     "/api/v1/operators/{role_id}/editorial-steps/{step}",
 ):
     assert "post" in paths[path], path
+receipt_path = "/api/v1/operators/{role_id}/editorial-steps/{step}/receipts/{reservation_id}"
+assert "get" in paths[receipt_path]
+request = urllib.request.Request(
+    "http://127.0.0.1:8095/api/v1/operators/industry/editorial-steps/review_editorial/receipts/deployment_probe",
+    headers={"Authorization": "Bearer " + os.environ["HERMES_API_KEY"], "X-Hermes-Request-SHA256": "0" * 64},
+)
+try:
+    with urllib.request.urlopen(request, timeout=20):
+        raise AssertionError("A deployment probe must not match an existing paid receipt")
+except urllib.error.HTTPError as error:
+    assert error.code == 404
 definitions = schema["components"]["schemas"]
 assert {"genre", "style_references", "editorial_feedback"} <= set(definitions["OperatorComposeRequest"]["properties"])
 assert {"candidate", "candidate_signature", "budget_reservation_id"} <= set(definitions["EditorialStepRequest"]["properties"])

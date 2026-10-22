@@ -4,6 +4,7 @@ import io
 import shutil
 import subprocess
 import urllib.request
+import urllib.error
 
 import httpx
 import pytest
@@ -101,6 +102,8 @@ def test_deployment_probes_execute_real_read_only_contracts_without_model_calls(
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api.app)) as client:
                 return await client.get(url, headers=headers)
         response = asyncio.run(call())
+        if response.status_code >= 400:
+            raise urllib.error.HTTPError(url, response.status_code, "synthetic response", {}, io.BytesIO(response.content))
         assert response.status_code == 200
         result = io.BytesIO(response.content)
         result.status = response.status_code
@@ -111,7 +114,8 @@ def test_deployment_probes_execute_real_read_only_contracts_without_model_calls(
         fragment = script.split(function + "() {", 1)[1].split("\n}\n", 1)[0]
         source = fragment.split("python -c '\n", 1)[1].rsplit("\n'", 1)[0]
         exec(compile(source, "<deployment-readiness>", "exec"), {})
-    assert len(requests) == 6
+    assert len(requests) == 7
+    assert any("/receipts/deployment_probe" in url for url in requests)
 
 
 def test_container_healthcheck_authenticates_canonical_operator_readiness():

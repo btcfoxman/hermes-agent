@@ -3555,6 +3555,26 @@ def content_request_payload(
         rule = "Follow the requested genre and audience. A sourced event, figure, scene or comparison may lead. Use as many authored analytical blocks as the material needs; no mandatory hook position, paragraph count or CTA. Preserve every canonical factual reference and all evidence/disclosure restrictions."
         payload["response_contract"]["editorial_shape"] = {"genre": request.genre, "rule": rule}
         payload["response_contract"]["safety"][5] = rule
+    if role is OperatorRole.INDUSTRY and request.genre == "industry_analysis":
+        payload["publication_brief"]["thesis_contract"][0] = (
+            "Respect the public brief and owner_revision. Ground the opening in this article's specific subject "
+            "and reader task before using anaphora such as '这会'; a canonical sourced lead is valid. "
+            "State a subject-specific interpretation, not an interchangeable workflow slogan."
+        )
+        payload["publication_brief"]["thesis_contract"][2] = (
+            "The master and every requested platform, including short feeds, need original subject-specific "
+            "reasoning alongside canonical references; a sequence of facts alone is not analysis. "
+            "A clearly hypothetical workflow design, decision boundary or conditional reader question can "
+            "explain a tradeoff without claiming an unverified capability or outcome. Do not force a CTA, "
+            "paragraph count or opening position."
+        )
+        payload["publication_brief"]["authored_block_rule"] = (
+            "Write quantity-free original interpretation as kind=opinion or kind=transition objects with text "
+            "and evidence_ids=[]; omit claim_id and block_ref from these authored objects. Keep factual "
+            "reporting, numbers, dates and counted quantities in exact canonical block_ref objects instead "
+            "of restating them. Frame hypothetical designs naturally as suggestions or questions; unknown "
+            "capabilities and outcomes remain unknown."
+        )
     if role is OperatorRole.PERSONAL_IP and request.genre == PUBLIC_TUTORIAL_GENRE:
         rule = "Write a non-first-person public tool tutorial using only the exact authorized public facts. No approved owner card is required for those facts. Do not claim personal use, hands-on tests, customer results, identity, biography or owner-attributed opinions. A source image is not evidence of an experiment performed by the owner. Unknown steps or outputs require more evidence, never invention."
         payload["publication_brief"] = {"voice": "A clear public tutorial based on authorized documentation, without personal testimony.", "reader_outcome": "Understand documented steps and limitations without mistaking source material for the owner's own test."}

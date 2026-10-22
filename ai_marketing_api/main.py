@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 from typing import Any, Dict, List, Optional
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 
 from ai_marketing_api.operator_content import (
     ContentStatus,
@@ -44,6 +44,9 @@ from ai_marketing_api.operator_review import (
 from ai_marketing_api.operator_grounding import apply_grounded_paraphrases
 from ai_marketing_api.operator_planning import EditorialPlanRequest, plan_editorial
 from ai_marketing_api.operator_steps import EditorialStep, EditorialStepRequest, run_editorial_step
+from ai_marketing_api.operator_receipts import (
+    EditorialReceiptError, EditorialReceiptStore, execute_with_receipt,
+)
 from ai_marketing_api.operator_runtime import (
     CONTENT_SCHEMA_VERSION,
     SCHEMA_VERSION,
@@ -1472,16 +1475,44 @@ async def editorial_plan(
 
 @app.post("/api/v1/operators/{role_id}/editorial-steps/{step}")
 async def operator_editorial_step(role_id: OperatorRole, step: EditorialStep,
-    payload: EditorialStepRequest, request: Request,
-    authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+    payload: EditorialStepRequest, request: Request, response: Response,
+    authorization: Optional[str] = Header(default=None),
+    x_hermes_timeout_seconds: Optional[float] = Header(default=None, ge=1, le=600,
+        alias="X-Hermes-Timeout-Seconds")) -> Dict[str, Any]:
     _require_operator_auth(authorization)
+    response.headers["Cache-Control"] = "no-store"
     if any(name in request.headers for name in
         ("x-hermes-openai-base-url", "x-hermes-openai-api-key", "x-hermes-model")):
         raise HTTPException(status_code=400, detail={"code": "client_stage_override_forbidden"})
     try:
-        return await run_editorial_step(OPERATOR_REGISTRY, role_id, step, payload, _llm_json)
+        async def execute():
+            return await run_editorial_step(OPERATOR_REGISTRY, role_id, step, payload, _llm_json,
+                                           timeout_seconds=x_hermes_timeout_seconds)
+        if not payload.budget_reservation_id:
+            return await execute()
+        return await execute_with_receipt(role_id=role_id.value, step=step,
+            reservation_id=payload.budget_reservation_id, wire_payload=await request.json(), execute=execute)
+    except EditorialReceiptError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code},
+                            headers={"Cache-Control": "no-store"}) from None
     except ContextAuthorizationError as exc:
         raise HTTPException(status_code=403, detail={"code": exc.code, "record_id": exc.record_id}) from exc
+    except Exception:
+        raise HTTPException(status_code=503, detail={"code": "editorial_step_failed"},
+                            headers={"Cache-Control": "no-store"}) from None
+
+
+@app.get("/api/v1/operators/{role_id}/editorial-steps/{step}/receipts/{reservation_id}")
+def operator_editorial_receipt(role_id: OperatorRole, step: EditorialStep, reservation_id: str, response: Response,
+    authorization: Optional[str] = Header(default=None),
+    request_sha256: str = Header(alias="X-Hermes-Request-SHA256")) -> Dict[str, Any]:
+    _require_operator_auth(authorization)
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return EditorialReceiptStore().get(role_id.value, step, reservation_id, request_sha256)
+    except EditorialReceiptError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code},
+                            headers={"Cache-Control": "no-store"}) from None
 
 
 @app.post("/api/v1/operators/{role_id}/propose", response_model=OperatorOutput)
