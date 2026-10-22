@@ -175,17 +175,54 @@ _PROMISE_RE = re.compile(
     r"承诺.{0,12}(?:效果|交付)|guaranteed|risk[- ]?free)",
     re.IGNORECASE,
 )
+_COMMERCIAL_CLAUSE = r"[^，,。！？!?；;：:\n\r]"
+_COMMERCIAL_SUBJECT = r"(?:我司|我们|本公司|公司|团队|产品|平台|系统|服务(?!于))"
+_COMMERCIAL_CAPABILITY = r"(?:支持|能够|可以|具备|提供|擅长|实现|覆盖|帮助)"
+# Only a reader's verification action ends the product's subject scope. A new
+# reader subject alone cannot authorize '用户可以用它生成视频'. Prepositions
+# keep '专为开发者设计' a product description, not a new subject.
+_COMMERCIAL_READER_START = (
+    # A later action in the same sentence may continue after another comma.
+    r"(?![^。！？!?；;\n\r]*(?:用|通过|借助|依靠)"
+    r"(?:它|其|该(?:产品|平台|系统|服务|工具)|这(?:个|一)?(?:产品|平台|系统|服务|工具)))"
+    rf"(?:(?!(?:[为向给供由对在与]|通过|经过|基于|针对|面向)){_COMMERCIAL_CLAUSE}){{0,12}}"
+    r"(?:开发者|读者|客户|用户|使用者|创作者|采购方|受众|他们|你们|你|您)"
+    r"(?:重合|各自|据此|也|仍然|仍)?(?:可以|能够|需要|应当|应该)"
+    rf"(?:先?(?:核对|验证|检查|评估|确认)|围绕{_COMMERCIAL_CLAUSE}{{0,20}}"
+    r"(?:需求|目标|问题|条件|边界)(?:先|去|进行)?(?:核对|验证|检查|评估|确认)|"
+    rf"作为{_COMMERCIAL_CLAUSE}{{0,8}}(?:筛选|核对|验证|检查|评估|确认))"
+)
+_COMMERCIAL_EN_CLAUSE = r"[^,.;:!?\n\r]"
+_COMMERCIAL_EN_READER_START = (
+    r"(?![^.;!?\n\r]*\b(?:use|using|via|through|with)\s+"
+    r"(?:it|this\s+(?:product|platform|system|service|tool)|the\s+(?:product|platform|system|service|tool))\b)"
+    r"\s*(?:(?:the|these|those|target|potential|actual)\s+){0,2}"
+    r"(?:developers?|readers?|users?|customers?|creators?|buyers?|reviewers?|you|they)\b"
+    r"\s+(?:(?:also|still|then)\s+)?(?:can|could|should|may|might|must|need)\b"
+    r"\s+(?:first\s+)?(?:verify|check|evaluate|assess|confirm|compare|validate)\b"
+)
 _COMMERCIAL_ASSERTION_RE = re.compile(
     # Preserve the original stricter branch while matching downstream review's
     # additional subjects, reverse capability claims and English assertions.
     r"(?:"
-    r"(?:我们|本公司|公司|产品|服务|团队).{0,16}(?:提供|支持|具备|拥有|实现|帮助|保证|承诺)|"
-    r"(?:我司|我们|本公司|公司|团队|产品|平台|系统|服务).{0,20}"
-    r"(?:支持|能够|可以|具备|提供|擅长|实现|覆盖|帮助)|"
-    r"(?:支持|能够|可以|具备|提供|擅长|实现|覆盖).{0,20}"
+    rf"(?:我们|本公司|公司|产品|服务(?!于)|团队){_COMMERCIAL_CLAUSE}{{0,16}}(?:提供|支持|具备|拥有|实现|帮助|保证|承诺)|"
+    rf"{_COMMERCIAL_SUBJECT}{_COMMERCIAL_CLAUSE}{{0,20}}{_COMMERCIAL_CAPABILITY}|"
+    # A qualifier can continue the same product assertion across commas;
+    # a new reader subject cannot inherit the preceding product's subject.
+    rf"{_COMMERCIAL_SUBJECT}{_COMMERCIAL_CLAUSE}{{0,20}}[，,：:]\s*"
+    rf"(?:(?!{_COMMERCIAL_READER_START}){_COMMERCIAL_CLAUSE}{{1,32}}[，,]\s*){{0,2}}"
+    rf"(?!{_COMMERCIAL_READER_START}){_COMMERCIAL_CLAUSE}{{0,32}}{_COMMERCIAL_CAPABILITY}|"
+    # Do not bridge a verification-list heading such as '模型覆盖、接入方式'
+    # into the later noun '服务'. Explicit capability prose remains guarded.
+    rf"(?:支持|具备|提供|擅长|实现|覆盖)(?![、，,。！？!?；;：:\n\r]){_COMMERCIAL_CLAUSE}{{0,20}}"
     r"(?:能力|功能|服务|场景|客户)|"
-    r"\b(?:we|our|company|team|product|platform|system|service)\b.{0,40}"
-    r"\b(?:can|support|provide|offer|enable|deliver|capable)\b"
+    rf"(?:能够|可以){_COMMERCIAL_CLAUSE}{{0,20}}"
+    r"(?:能力|功能|服务|场景|客户)|"
+    r"\b(?:we|our|company|team|product|platform|system|service)\b[^,.;:!?\n\r]{0,40}"
+    r"\b(?:can|support|provide|offer|enable|deliver|capable)\b|"
+    r"\b(?:we|our|company|team|product|platform|system|service)\b[^,.;:!?\n\r]{0,40}[,:]\s*"
+    rf"(?:(?!{_COMMERCIAL_EN_READER_START}){_COMMERCIAL_EN_CLAUSE}{{1,40}},\s*){{0,2}}"
+    rf"(?!{_COMMERCIAL_EN_READER_START}){_COMMERCIAL_EN_CLAUSE}{{0,40}}\b(?:can|support|provide|offer|enable|deliver|capable)\b"
     r")",
     re.IGNORECASE,
 )
@@ -3578,6 +3615,46 @@ def content_request_payload(
             "of restating them. Frame hypothetical designs naturally as suggestions or questions; unknown "
             "capabilities and outcomes remain unknown."
         )
+    if role is OperatorRole.COMMERCIAL and request.genre == "use_case":
+        payload["publication_brief"]["thesis_contract"][2] = (
+            "Follow this public brief and the applicable editorial_feedback, rather than replacing a requested "
+            "use case with a generic product-selection slogan. You may develop an explicitly hypothetical "
+            "customer task: proposed input, desired output, human review and conditional choices. These are "
+            "reader requirements or a suggested evaluation design, never product capabilities or actual results. "
+            "Choose the task from the brief's real audience and objective; no fixed scenario, paragraph count or score."
+        )
+        payload["publication_brief"]["authored_block_rule"] = (
+            "Use kind=opinion or kind=transition, text and evidence_ids=[] for hypothetical tasks, desired "
+            "outputs, acceptance questions and human review conditions. Omit claim_id and block_ref from "
+            "these authored objects. Clearly mark proposed designs as hypothetical or conditional; do not "
+            "attribute them to a real customer or the owner. Keep all approved facts, capability and price "
+            "claims in unchanged canonical block_ref objects. Unknown implementation remains unknown."
+        )
+        payload["commercial_use_case_contract"] = {
+            "permission": "An explicitly hypothetical task/input/desired-output/review/choice framework is allowed. "
+                "Honor public_editorial_brief and editorial_feedback when present; they provide intent, not new factual authority.",
+            "boundary": "Do not invent interface steps, supported models or formats, API features, execution behavior, "
+                "performance, prices, savings, customer results or personal experience. Verification questions must "
+                "not imply these capabilities are already available. Conditional or negative phrasing cannot authorize a product claim.",
+            "examples_are_form_only": "Adapt the form to the actual brief. Do not copy a fixed scenario, force an "
+                "opening or paragraph count, or prefill an evaluation result or quality score.",
+            "examples": [
+                {"kind": "transition", "text": "假设客户要整理手头的材料，可先说明输入范围和希望交给人工讨论的输出，再检查缺少哪些依据。", "evidence_ids": []},
+                {"kind": "opinion", "text": "如果目标和材料范围仍不清楚，先澄清需求；进入工具评估后，再核对当前说明是否足以回答这些需求。具体实现和结果仍需验证。", "evidence_ids": []},
+            ],
+        }
+        if public_brief is not None:
+            payload["evidence_scope_contract"][1] = (
+                "Do not invent product features, interface steps, personal experience, customer results, prices or "
+                "quantified benefits. An explicitly marked hypothetical customer task, proposed input, desired output, "
+                "human review or conditional evaluation choice is allowed as a reader-side design, not a product claim."
+            )
+            payload["evidence_scope_contract"][2] = (
+                "Match depth to the actual use-case brief and applicable editorial_feedback. Develop the requested "
+                "task and decision conditions with original reasoning; a generic selection slogan need not satisfy "
+                "a request for a concrete hypothetical framework. Keep unknown implementation and outcomes unknown. "
+                "No fixed word count, scenario, paragraph count, forced CTA or quality score."
+            )
     if role is OperatorRole.PERSONAL_IP and request.genre == PUBLIC_TUTORIAL_GENRE:
         rule = "Write a non-first-person public tool tutorial using only the exact authorized public facts. No approved owner card is required for those facts. Do not claim personal use, hands-on tests, customer results, identity, biography or owner-attributed opinions. A source image is not evidence of an experiment performed by the owner. Unknown steps or outputs require more evidence, never invention."
         payload["publication_brief"] = {"voice": "A clear public tutorial based on authorized documentation, without personal testimony.", "reader_outcome": "Understand documented steps and limitations without mistaking source material for the owner's own test."}
