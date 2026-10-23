@@ -3883,7 +3883,17 @@ def content_request_payload(
             ("Build the thesis around the brief's actual genre, audience and purpose. Interpret established events, changes or approved experience without adding facts, and signal inference in natural prose. With sparse evidence, use a selection condition or verification question as a fallback; never assume an unsupported capability, causal improvement or result." if public_brief is not None else "Build the thesis as a direct subject-action-consequence relationship already present in the approved facts. Name the affected actor, changed rule or incentive, and observable consequence instead of using a rhetorical contrast or merely saying the event is important."),
             "Keep fact/opinion separation in block metadata, never as reader-facing wording. The published copy should not explain its own editorial process.",
             ("Use a natural, brief-aligned closing judgment or interpretation; with sparse evidence, a practical condition or verification question can close the draft. Do not force a CTA, disclaimer, unsupported firm consequence or generic observation list." if public_brief is not None else "Do not force a question, invitation, disclaimer, or CTA when a firm closing judgment is more natural."),
-            "The server keeps required factual blocks verbatim for audit and renders long ones as concise source-exact fact beats. Do not repeat the full announcement in editorial prose.",
+            (
+                "Canonical source text and evidence bindings remain immutable. Deterministic source-exact "
+                "rendering is not an automatic natural-language summary. For eligible facts in "
+                "grounded_paraphrase mode, you may add a faithful public_text proposal beside the original "
+                "block_ref, especially for a short surface. Preserve the fact's bounded scope and material "
+                "conditions. Use the proposed wording for display only after independent verification "
+                "supports it. "
+                "Do not repeat the full source passage in adjacent editorial prose."
+                if request.fact_expression_mode == "grounded_paraphrase"
+                else "The server keeps required factual blocks verbatim for audit and renders long ones as concise source-exact fact beats. Do not repeat the full announcement in editorial prose."
+            ),
             "Do not turn an approved fact into a near-verbatim authored paragraph before or after its canonical block. Editorial prose must add "
             + ("a supported interpretation, tradeoff or authorized viewpoint instead of repeating the source; a reader task, selection condition or verification question is a fallback when evidence is sparse." if public_brief is not None else "a mechanism, affected party, decision, or consequence instead of repeating the source."),
             "Make each requested platform variant meaningfully different in title, rhythm, depth, and reader action while preserving every required factual block reference.",
