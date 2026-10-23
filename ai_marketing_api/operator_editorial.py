@@ -20,6 +20,35 @@ from ai_marketing_api.operator_runtime import OperatorRole, StrictModel
 from ai_marketing_api.operator_routing import PROVIDER_EVENT_SINK
 
 
+class TopicEvidenceAnchor(StrictModel):
+    opportunity_id: str = Field(min_length=1, max_length=160, strict=True)
+    quote: str = Field(min_length=1, max_length=4000, strict=True)
+
+    @field_validator("opportunity_id", "quote")
+    @classmethod
+    def nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("topic evidence anchors must not be blank")
+        return value
+
+
+class TopicValueContract(StrictModel):
+    """An editorial hypothesis, never additional factual or publishing authority."""
+
+    reader_problem: str = Field(min_length=1, max_length=1000, strict=True)
+    thesis: str = Field(min_length=1, max_length=2000, strict=True)
+    evidence_anchor: TopicEvidenceAnchor
+    decision_delta: str = Field(min_length=1, max_length=2000, strict=True)
+    counterargument: str = Field(min_length=1, max_length=2000, strict=True)
+
+    @field_validator("reader_problem", "thesis", "decision_delta", "counterargument")
+    @classmethod
+    def nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("topic value fields must not be blank")
+        return value
+
+
 class PublicEditorialBrief(StrictModel):
     schema_version: Literal["operator.editorial_brief.v1"] = (
         "operator.editorial_brief.v1"
@@ -35,6 +64,7 @@ class PublicEditorialBrief(StrictModel):
     constraints: list[str] = Field(default_factory=list, max_length=30)
     product_id: str = Field(default="", max_length=160)
     landing_url: str = Field(default="", max_length=2000)
+    value_contract: TopicValueContract | None = None
 
     @field_validator("landing_url")
     @classmethod
