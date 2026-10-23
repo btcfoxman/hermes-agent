@@ -164,6 +164,10 @@ requested platform and contains integer 1–5 scores for `reader_relevance`,
 plus explicit `major_issues` and optional actionable `issues`. Every surface
 must occur exactly once. All five scores must be at least 4 and major issues
 must be empty; means and author-supplied pass flags are insufficient.
+The four boolean review checks must also pass and `failed_surfaces` must be
+empty. Ordinary actionable `issues` remain visible at both review and surface
+level and do not turn a qualifying scored review into a rejection. Legacy
+reviews without a scorecard still require an empty `issues` list.
 
 The server stamps `passed` and `content_sha256`. The hash covers the UTF-8,
 sorted-key, compact JSON projection `{master_title, master_content,

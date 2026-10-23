@@ -140,16 +140,16 @@ class EditorialReview(StrictModel):
 
     @property
     def passed(self) -> bool:
-        return (
-            all((
-                self.relevant_to_brief,
-                self.useful_to_reader,
-                self.clear_and_specific,
-                self.platform_fit,
-            ))
-            and not self.issues
-            and (self.quality_scorecard is None or self.quality_scorecard.passed)
-        )
+        if not all((self.relevant_to_brief, self.useful_to_reader,
+                    self.clear_and_specific, self.platform_fit)) or self.failed_surfaces:
+            return False
+        if self.quality_scorecard is None:
+            return not self.issues
+        # Scored reviews retain actionable suggestions at publication quality.
+        # Recheck the rows as well as the server-computed aggregate, so a stale
+        # or constructed pass flag cannot waive a low score or a major issue.
+        return (self.quality_scorecard.passed and bool(self.quality_scorecard.surfaces)
+                and all(surface.passed for surface in self.quality_scorecard.surfaces))
 
 
 class SurfaceQuality(StrictModel):
