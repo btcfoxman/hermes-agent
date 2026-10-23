@@ -104,13 +104,28 @@ def _normalized_candidate(registry, role, request, contexts, fallback, candidate
     # expressions. Never trust incoming verified flags on an unsigned draft.
     if signature and hmac.compare_digest(artifact_signature(candidate), signature):
         signed = OperatorContentOutput.model_validate(candidate)
-        old_blocks = {b.binding_hash: b for b in signed.blocks}
+        old_blocks = {("master", b.binding_hash): b for b in signed.blocks}
         for variant in signed.platform_variants:
-            old_blocks.update({b.binding_hash: b for b in variant.blocks})
-        for block in [*output.blocks, *[b for v in output.platform_variants for b in v.blocks]]:
-            old = old_blocks.get(block.binding_hash)
-            if old and old.public_text_verified and old.text == block.text:
-                block.public_text, block.public_text_verified = old.public_text, True
+            old_blocks.update({(variant.platform, b.binding_hash): b for b in variant.blocks})
+        for surface, blocks in [("master", output.blocks), *[(v.platform, v.blocks) for v in output.platform_variants]]:
+            for block in blocks:
+                old = old_blocks.get((surface, block.binding_hash))
+                if old and old.public_text_verified and old.text == block.text:
+                    # A claim is shared across surfaces; its accepted public
+                    # expression is not. Restore only this surface's sentence
+                    # with its actual independent support attestation.
+                    supported = old.public_text and any(
+                        review.claim_id == block.claim_id
+                        and review.evidence_ids == block.evidence_ids
+                        and review.source_sha256 == hashlib.sha256(block.text.encode("utf-8")).hexdigest()
+                        and review.public_text_sha256 == hashlib.sha256(old.public_text.encode("utf-8")).hexdigest()
+                        and review.verdict == "supported"
+                        and review.review_model.strip().lower() not in {"", "fallback", "unavailable", "deterministic"}
+                        for review in signed.claim_binding_reviews
+                    )
+                    if not supported:
+                        raise ValueError("artifact_public_expression_invalid")
+                    block.public_text, block.public_text_verified = old.public_text, True
         from ai_marketing_api.operator_content import _render
         output.master_content = _render(output.blocks, surface="master")
         for variant in output.platform_variants:
@@ -252,7 +267,7 @@ async def run_editorial_step(registry, role, step: EditorialStep, payload: Edito
                 "generation_trace": trace.model_dump(mode="json")}
             return capture.attach(result, run.private_review_receipt if step == "review_editorial" else None)
     except ValueError as exc:
-        code = str(exc) if str(exc) in {"stage_route_unavailable", "artifact_signature_invalid", "signed_master_required", "signed_candidate_required", "candidate_required", "master_evidence_invalid", "master_writer_not_completed"} else "step_artifact_invalid"
+        code = str(exc) if str(exc) in {"stage_route_unavailable", "artifact_signature_invalid", "artifact_public_expression_invalid", "signed_master_required", "signed_candidate_required", "candidate_required", "master_evidence_invalid", "master_writer_not_completed"} else "step_artifact_invalid"
         result = {"schema_version": "operator.editorial_step.v1", "step": step,
             "status": "unavailable", "error_code": code, "artifact": None,
             "publishable": False, "requires_human_review": True,
