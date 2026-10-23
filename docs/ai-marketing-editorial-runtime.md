@@ -74,6 +74,16 @@ commitments, identity, experiences and unsafe/ambiguous expressions. Failed or
 unavailable support checks use the exact source expression and report that
 decision. New facts cannot be introduced by classifying them as editorial prose.
 
+An explicit narrow exception applies only to `industry` with
+`genre=industry_analysis`: the exact standalone identifier `Seedance 2.5` may
+remain in both source and proposed expression without its version digits alone
+making that ordinary fact ineligible. Changed or omitted identifiers, additional
+numbers, quantities, dates, currency, prices, fees and commitments retain the
+existing exact-wording rule. A unit-adjacent value such as `Seedance 2.5元` is not
+a model identifier. This exception only permits an independent support check;
+it never sets verified flags or bypasses that check. Unknown, contradicted or
+unavailable verification still renders the canonical source.
+
 An accepted block keeps `text`, `claim_id`, `evidence_ids`, `source_exact` and
 `binding_hash` unchanged, adding `public_text` and server-set
 `public_text_verified=true`. The actual `master_content` and variant `body` are
@@ -86,6 +96,22 @@ Orchestration must consume this only from the authenticated compose result,
 validate the hashes, issue its own persistent provenance certificate and repeat
 evidence/freshness gates before approval and handoff. Client edits must never
 be able to mint, mutate or silently reuse that certificate for changed text.
+
+## Optional paragraph layout
+
+Canonical reference objects and authored blocks may include `paragraph_id`.
+An ID starts with an ASCII letter and contains at most 48 ASCII letters, digits,
+underscores or hyphens. Invalid IDs reject the candidate. Only consecutive blocks
+with the same nonempty ID render as one natural paragraph, joined by a single
+space. Different IDs and absent IDs retain the existing double newline. A reused
+nonconsecutive ID does not reorder or merge separated blocks.
+
+Layout changes neither canonical text, references, required/locked flags nor
+evidence binding hashes. Every required fact remains present. Layout is covered
+by the whole-artifact signature and its rendered result by the editorial content
+hash, so changing it needs fresh review. With no ID, serialized blocks omit the
+new field and legacy rendered bytes remain unchanged. Existing receipts are not
+rewritten or re-signed.
 
 ## Owner revisions
 

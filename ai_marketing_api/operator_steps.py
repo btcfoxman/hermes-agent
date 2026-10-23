@@ -210,7 +210,9 @@ async def run_editorial_step(registry, role, step: EditorialStep, payload: Edito
                         proposed = {raw.get("block_ref"): raw.get("public_text") for raw in (raw_surfaces.get(surface) or []) if isinstance(raw, dict)}
                         for block in blocks:
                             text = proposed.get(block.binding_hash)
-                            if isinstance(text, str) and paraphrase_eligible(block, text):
+                            if isinstance(text, str) and paraphrase_eligible(block, text,
+                                    allow_seedance_version=(getattr(role, "value", role) == "industry"
+                                        and request.genre == "industry_analysis")):
                                 block.public_text, block.public_text_verified = text, False
             else:
                 if not payload.candidate:

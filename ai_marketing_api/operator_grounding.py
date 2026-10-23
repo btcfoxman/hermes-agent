@@ -35,13 +35,42 @@ _SENSITIVE = re.compile(
 _UNSAFE = re.compile(
     r"<[^>]+>|https?://|\b(?:ignore|system prompt|api.key|password)\b", re.I
 )
+_SEEDANCE_VERSION_RE = re.compile(
+    r"(?<![A-Za-z0-9_.])Seedance (?P<version>2\.5)(?![A-Za-z0-9_.])"
+)
+_SEEDANCE_VERSION_UNIT_RE = re.compile(
+    r"\s*(?:[¥￥$€£%]|元|美元|人民币|万元|折|倍|年|月|日|天|小时|分钟|秒|家|个|次|项|万|亿)"
+)
+
+
+def _paraphrase_sensitive(source: str, text: str, *, allow_seedance_version: bool = False) -> bool:
+    """Mask only a matching model identifier's numeric span, never quantities.
+
+    This is eligibility for a real independent support review, not a factual
+    authorization. Unit-adjacent numbers cannot impersonate a version token.
+    """
+    if not allow_seedance_version:
+        return bool(_SENSITIVE.search(source) or _SENSITIVE.search(text))
+    matches = [[match for match in _SEEDANCE_VERSION_RE.finditer(value)
+                if not _SEEDANCE_VERSION_UNIT_RE.match(value[match.end():])]
+               for value in (source, text)]
+    if not all(matches):
+        return bool(_SENSITIVE.search(source) or _SENSITIVE.search(text))
+    masked = []
+    for value, spans in zip((source, text), matches):
+        chars = list(value)
+        for match in spans:
+            start, end = match.span("version")
+            chars[start:end] = " " * (end - start)
+        masked.append("".join(chars))
+    return bool(_SENSITIVE.search(masked[0]) or _SENSITIVE.search(masked[1]))
 
 
 def digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def paraphrase_eligible(block: Any, text: str) -> bool:
+def paraphrase_eligible(block: Any, text: str, *, allow_seedance_version: bool = False) -> bool:
     return (
         block.kind == "fact"
         and block.origin == "approved_claim"
@@ -49,8 +78,7 @@ def paraphrase_eligible(block: Any, text: str) -> bool:
         and bool(block.claim_id)
         and bool(block.evidence_ids)
         and 3 <= len(text.strip()) <= 4000
-        and not _SENSITIVE.search(block.text)
-        and not _SENSITIVE.search(text)
+        and not _paraphrase_sensitive(block.text, text, allow_seedance_version=allow_seedance_version)
         and not _UNSAFE.search(text)
     )
 
@@ -96,6 +124,7 @@ async def apply_grounded_paraphrases(
     # A local editorial revision may retain already verified expressions on
     # other surfaces. Their certificates must travel with the unchanged text.
     reviews: list[ClaimBindingReview] = list(output.claim_binding_reviews)
+    allow_seedance_version = output.role_id == "industry" and output.genre == "industry_analysis"
     for surface, blocks in surfaces.items():
         for block in blocks:
             text = proposed.get((surface, block.binding_hash))
@@ -106,7 +135,7 @@ async def apply_grounded_paraphrases(
             if key in pairs:
                 continue
             pairs[key] = (block, text)
-            if not paraphrase_eligible(block, text):
+            if not paraphrase_eligible(block, text, allow_seedance_version=allow_seedance_version):
                 reviews.append(
                     ClaimBindingReview(
                         claim_id=block.claim_id or "",
@@ -121,7 +150,7 @@ async def apply_grounded_paraphrases(
     eligible = {
         key: (block, text)
         for key, (block, text) in pairs.items()
-        if paraphrase_eligible(block, text)
+        if paraphrase_eligible(block, text, allow_seedance_version=allow_seedance_version)
     }
     if not eligible:
         return output.model_copy(update={"claim_binding_reviews": reviews[:100]})

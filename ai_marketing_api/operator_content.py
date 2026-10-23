@@ -7,7 +7,7 @@ from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Sequence
 from urllib.parse import urlparse
 
-from pydantic import Field
+from pydantic import Field, field_validator, model_serializer
 
 from ai_marketing_api.operator_editorial import EditorialReview, GenerationTrace, OwnerRevision, PublicEditorialBrief, QualityScorecard, RuntimeBudget
 from ai_marketing_api.operator_style import CURRENT_GENRE, MASTER_ONLY, PUBLIC_TUTORIAL_ATTRIBUTION_RE, PUBLIC_TUTORIAL_GENRE, editorial_scope, style_context
@@ -73,6 +73,9 @@ class OperatorComposeRequest(OperatorProposeRequest):
     editorial_feedback: str = Field(default="", max_length=6000)
 
 
+_PARAGRAPH_ID_RE = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,47}")
+
+
 class ContentBlock(StrictModel):
     block_id: str = Field(min_length=1, max_length=100)
     kind: ContentBlockKind
@@ -89,6 +92,21 @@ class ContentBlock(StrictModel):
     public_text_verified: bool = False
     # Server-derived presentation only; canonical fact/evidence never changes.
     source_display: Literal["excerpt", "full_documentation"] = "excerpt"
+    paragraph_id: Optional[str] = Field(default=None, strict=True, min_length=1, max_length=48)
+
+    @field_validator("paragraph_id")
+    @classmethod
+    def validate_paragraph_id(cls, value):
+        if value is not None and not _PARAGRAPH_ID_RE.fullmatch(value):
+            raise ValueError("paragraph_id_invalid")
+        return value
+
+    @model_serializer(mode="wrap")
+    def serialize_layout(self, handler):
+        data = handler(self)
+        if self.paragraph_id is None:
+            data.pop("paragraph_id", None)
+        return data
 
 
 class PlatformVariant(StrictModel):
@@ -1135,13 +1153,18 @@ def _render(
     *,
     surface: str = "master",
 ) -> str:
-    return "\n\n".join(
-        _fact_display_text(block, surface=surface)
-        if block.source_exact
-        else block.text.strip()
-        for block in blocks
-        if block.text.strip()
-    )
+    paragraphs: List[str] = []
+    previous_id = None
+    for block in blocks:
+        if not block.text.strip():
+            continue
+        text = _fact_display_text(block, surface=surface) if block.source_exact else block.text.strip()
+        if block.paragraph_id is not None and block.paragraph_id == previous_id and paragraphs:
+            paragraphs[-1] += " " + text
+        else:
+            paragraphs.append(text)
+        previous_id = block.paragraph_id
+    return "\n\n".join(paragraphs)
 
 
 def _safe_master_title(
@@ -1699,6 +1722,11 @@ def _safe_candidate_blocks(
         nested = raw.get("one_of")
         if isinstance(nested, dict):
             raw = nested
+        paragraph_id = raw.get("paragraph_id")
+        if paragraph_id is not None and (not isinstance(paragraph_id, str)
+                or not _PARAGRAPH_ID_RE.fullmatch(paragraph_id)):
+            errors.append(f"invalid_model_paragraph_id:{prefix}-{index}")
+            continue
         block_ref = str(
             raw.get("block_ref")
             or raw.get("canonical_block_ref")
@@ -1715,7 +1743,7 @@ def _safe_candidate_blocks(
             if echo_is_tampered(raw, canonical):
                 errors.append(f"tampered_model_block_ref:{prefix}-{index}")
                 continue
-            selected.append(canonical)
+            selected.append(canonical.model_copy(update={"paragraph_id": paragraph_id}))
             continue
 
         raw_kind = str(
@@ -1758,7 +1786,7 @@ def _safe_candidate_blocks(
                 warnings.append(
                     f"model_canonical_echo_normalized:{prefix}-{index}"
                 )
-            selected.append(canonical)
+            selected.append(canonical.model_copy(update={"paragraph_id": paragraph_id}))
             continue
 
         editorial, reason = safe_editorial(
@@ -1772,7 +1800,7 @@ def _safe_candidate_blocks(
             if (role is OperatorRole.INDUSTRY and CURRENT_GENRE.get() == "industry_analysis"
                     and _INDUSTRY_PAIRED_CONTRAST_RE.search(text)):
                 warnings.append(f"editorial_style_review_required:{prefix}-{index}:paired_contrast")
-            selected.append(editorial)
+            selected.append(editorial.model_copy(update={"paragraph_id": paragraph_id}))
             continue
         if kind in {
             ContentBlockKind.OPINION.value,
@@ -3568,6 +3596,13 @@ def content_request_payload(
             'transition, or cta, never pipe-joined names; do not copy this description or '
             "return a one_of/schema wrapper"
         ),
+        "paragraph_layout": (
+            "An optional paragraph_id may be added to a block_ref object or an authored block. "
+            "Use an ASCII letter followed by at most 47 ASCII letters, digits, underscores or hyphens. "
+            "Only consecutive blocks with the same nonempty id share one paragraph, separated by a single space. "
+            "This changes layout only: never change block text, order, required facts, references or evidence bindings. "
+            "Omit the field to keep each block in its own paragraph."
+        ),
         "platform_variants": [
             {
                 "platform": "one requested channel",
@@ -3652,6 +3687,16 @@ def content_request_payload(
             "The server independently verifies it; never claim it is already verified."
         )
         payload["response_contract"]["safety"][1] = payload["constraints"][0]
+        if role is OperatorRole.INDUSTRY and request.genre == "industry_analysis":
+            version_rule = (
+                " For industry_analysis only, public_text may preserve the exact standalone model "
+                "identifier Seedance 2.5 while rephrasing an otherwise non-sensitive fact. "
+                "The same identifier must remain in both source and proposal. Other numbers, "
+                "amounts, prices, costs, commitments and sensitive terms remain source-exact. "
+                "This is only eligibility: an independent verifier must still confirm support."
+            )
+            payload["constraints"][0] += version_rule
+            payload["response_contract"]["safety"][1] = payload["constraints"][0]
     if public_brief is not None:
         payload["evidence_scope_contract"] = [
             "The public brief supplies audience and editing intent, not additional facts. A positioning statement is not independent testing, demonstrated ease of use, or measured performance.",
