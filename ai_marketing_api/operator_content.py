@@ -3728,6 +3728,30 @@ def content_request_payload(
             "of restating them. Frame hypothetical designs naturally as suggestions or questions; unknown "
             "capabilities and outcomes remain unknown."
         )
+        payload["industry_narration_contract"] = [
+            "Write natural, specific reader-facing prose, not a research report or an audit of your own evidence. "
+            "Develop a concrete observation, explicitly hypothetical situation or supported judgment through its "
+            "consequences for this reader. Do not force a scene, opening position, paragraph count or CTA.",
+            "Avoid repeated self-explanations such as 本次证据不足 or 本文无法判断, abstract chains of 前者/后者 "
+            "and 是否/能否, template pivots and generic 同行不妨交流 endings when they add no reader value. "
+            "These are editorial concerns, not a word blacklist: keep a precise limitation when it matters to "
+            "the reader's decision. An accurate boundary must not be hidden or replaced with a stronger claim.",
+            "Do not invent the motives, habits or preferences of 很多人, 多数团队 or other broad groups. "
+            "Use approved canonical evidence for factual population claims; clearly mark a suggested scenario "
+            "as hypothetical and never turn it into owner experience or a claimed test result.",
+            "Naturalness never licenses a stronger claim: do not expand a bounded input list into all inputs "
+            "or infer the only possible workflow. For a paid-preview cost judgment, compare expected avoided "
+            "rework against the extra preview fee and human review effort before generation; do not assert "
+            "guaranteed savings or a lower total cost merely because a preview found an error.",
+            "Use the existing optional paragraph_id to connect adjacent canonical fact references and authored "
+            "reasoning into natural paragraphs. Preserve every required reference, canonical text and evidence "
+            "binding. A public_text proposal remains unverified until the independent verifier supports it; "
+            "never set verified flags yourself or repeat a full source passage in surrounding commentary.",
+            "When owner_revision or editorial_feedback is present, address the actual writing concern in the "
+            "current draft rather than adding a statement that it has been fixed. These fields convey editing "
+            "intent, not permission to add facts, choose review scores or approve publication. A natural closing "
+            "judgment may end the article without an invitation or a repeated summary.",
+        ]
     if role is OperatorRole.COMMERCIAL and request.genre == "use_case":
         payload["publication_brief"]["thesis_contract"][2] = (
             "Follow this public brief and the applicable editorial_feedback, rather than replacing a requested "
