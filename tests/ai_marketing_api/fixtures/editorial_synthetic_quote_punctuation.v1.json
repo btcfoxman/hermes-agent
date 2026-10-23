@@ -1,0 +1,93 @@
+{
+  "schema_version": "editorial.synthetic_quote_reference.v1",
+  "purpose": "Fictional short sentences and scripted grades for exact-reference protocol tests only.",
+  "draft": {
+    "master_title": "青鸟便笺：先理句意，再调格式",
+    "master_content": "先把句意说清楚，再调整格式。格式顺眼，不等于意思清楚；读者仍需要连贯的理由。",
+    "platform_variants": [
+      {
+        "platform": "wechat_mp",
+        "title": "青鸟便笺该先处理什么？",
+        "body": "先整理要表达的意思，再处理排版。段落是否清楚，仍要回到句子检查。"
+      },
+      {
+        "platform": "wechat_moments",
+        "title": "青鸟便笺先看哪里？",
+        "body": "先说明这段文字想回答什么，再检查句子是否连贯。"
+      },
+      {
+        "platform": "weitoutiao",
+        "title": "青鸟便笺：先有意思，再有版式",
+        "body": "先确认想说的意思，再调整文字的格式；排版不能补上缺少的理由。"
+      }
+    ]
+  },
+  "assessment_fields": {
+    "relevant_to_brief": true,
+    "useful_to_reader": true,
+    "clear_and_specific": true,
+    "platform_fit": true,
+    "issues": ["Synthetic review observation."],
+    "failed_surfaces": [],
+    "quality_scorecard": {
+      "schema_version": "quality_scorecard.v1",
+      "surfaces": [
+        {
+          "surface": "master",
+          "reader_relevance": 4,
+          "information_gain": 4,
+          "analytical_depth": 4,
+          "natural_expression": 4,
+          "platform_fit": 4,
+          "major_issues": [],
+          "issues": []
+        },
+        {
+          "surface": "wechat_mp",
+          "reader_relevance": 4,
+          "information_gain": 4,
+          "analytical_depth": 4,
+          "natural_expression": 4,
+          "platform_fit": 4,
+          "major_issues": [],
+          "issues": []
+        },
+        {
+          "surface": "wechat_moments",
+          "reader_relevance": 4,
+          "information_gain": 4,
+          "analytical_depth": 3,
+          "natural_expression": 4,
+          "platform_fit": 4,
+          "major_issues": [],
+          "issues": ["Synthetic depth needs development."]
+        },
+        {
+          "surface": "weitoutiao",
+          "reader_relevance": 4,
+          "information_gain": 4,
+          "analytical_depth": 4,
+          "natural_expression": 4,
+          "platform_fit": 4,
+          "major_issues": [],
+          "issues": []
+        }
+      ]
+    }
+  },
+  "quote_spans": {
+    "master": [
+      {"source": "title", "quote": "先理句意,再调格式", "role": "thesis"},
+      {"source": "body", "quote": "读者仍需要连贯的理由", "role": "reason"}
+    ],
+    "wechat_mp": [
+      {"source": "body", "quote": "先整理要表达的意思,再处理排版", "role": "thesis"}
+    ],
+    "wechat_moments": [
+      {"source": "body", "quote": "先说明这段文字想回答什么，再检查句子是否连贯", "role": "reason"}
+    ],
+    "weitoutiao": [
+      {"source": "body", "quote": "再调整文字的格式;排版不能补上缺少的理由", "role": "limit"}
+    ]
+  }
+}

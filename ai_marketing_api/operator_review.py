@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import re
 import hashlib
 import json
@@ -86,6 +87,58 @@ def editorial_content_hash(output: Any) -> str:
         separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
+def _narrative_span_bank(output: Any) -> dict:
+    """Identify exact current-text slices without adding an author's answer."""
+    sources = {"master": {"title": output.master_title, "body": output.master_content}, **{
+        v.platform: {"title": v.title, "body": v.body} for v in output.platform_variants}}
+    bank = {}
+    for surface, fields in sources.items():
+        bank[surface] = {}
+        for source, text in fields.items():
+            text = text or ""
+            source_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            spans, start = [], 0
+            while start < len(text):
+                end = min(start + 500, len(text))
+                if end < len(text):
+                    newline = text.rfind("\n", start, end)
+                    if newline > start:
+                        end = newline + 1
+                identity = json.dumps([surface, source, source_hash, start, end],
+                                      ensure_ascii=False, separators=(",", ":"))
+                spans.append({"span_id": "span_" + hashlib.sha256(identity.encode()).hexdigest()[:24],
+                              "text": text[start:end]})
+                start = end
+            bank[surface][source] = spans
+    return bank
+
+
+def _bind_narrative_span_refs(raw: dict, output: Any) -> dict:
+    """Resolve only exact, surface-local IDs; legacy quotes remain literal."""
+    bound = deepcopy(raw)
+    bank = _narrative_span_bank(output)
+    surfaces = bound.get("surfaces")
+    if not isinstance(surfaces, list):
+        return bound  # The existing strict model reports the schema fault.
+    for surface in surfaces:
+        if not isinstance(surface, dict) or not isinstance(surface.get("supporting_spans"), list):
+            continue
+        for index, span in enumerate(surface["supporting_spans"]):
+            if not isinstance(span, dict) or "span_id" not in span:
+                continue
+            if (set(span) != {"source", "span_id", "role"}
+                    or type(span["source"]) is not str or type(span["span_id"]) is not str
+                    or type(surface.get("surface")) is not str):
+                raise ValueError("narrative span invalid")
+            available = bank.get(surface["surface"], {}).get(span["source"], [])
+            matched = next((row for row in available if row["span_id"] == span["span_id"]), None)
+            if matched is None:
+                raise ValueError("narrative span invalid")
+            surface["supporting_spans"][index] = {"source": span["source"],
+                "quote": matched["text"], "role": span["role"]}
+    return bound
+
+
 def _reader_payload(output: Any, brief: dict, *, scorecard_required: bool) -> dict:
     expected = ["master", *[v.platform for v in output.platform_variants]]
     surface_fields = ["surface", "reader_relevance", "information_gain", "analytical_depth",
@@ -120,8 +173,10 @@ def _reader_payload(output: Any, brief: dict, *, scorecard_required: bool) -> di
                 "reader benefit cannot be reconstructed, leave the relevant text empty, mark the relevant "
                 "coherent/thesis_focus checks false, and describe the problem. Never fill the gap with a "
                 "product fact, an assumed author intention or a generic lesson absent from the draft.",
-                "Explain how the actual reasons support that meaning. Quote exact current title/body spans, "
-                "including at least one body span. For an unclear draft, quote the confusing wording and "
+                "Explain how the actual reasons support that meaning. Select source_span_bank IDs from "
+                "the same surface and title/body source, including at least one body span. Return "
+                "source/span_id/role only; the server supplies the exact original quotation. Do not "
+                "retype, translate or normalize quotations. For an unclear draft, select its confusing wording and "
                 "explain why it does not yield a clear takeaway. Mark unrelated parallel topics, conclusions "
                 "that do not follow, or a rule list that displaces the article's point as material when they "
                 "prevent understanding. Do not equate having multiple paragraphs or necessary qualifications "
@@ -154,8 +209,9 @@ def _reader_payload(output: Any, brief: dict, *, scorecard_required: bool) -> di
                 "surface_fields": surface_fields,
                 "narrative_report_fields": ["schema_version", "surfaces"],
                 "narrative_surface_fields": narrative_fields,
-                "supporting_span_fields": ["source", "quote", "role"],
+                "supporting_span_fields": ["source", "span_id", "role"],
             },
+            "source_span_bank": _narrative_span_bank(output),
             "draft": {
                 "master_title": output.master_title,
                 "master_content": output.master_content,
@@ -173,7 +229,7 @@ def _reader_payload(output: Any, brief: dict, *, scorecard_required: bool) -> di
                 "summary": "meaning actually communicated by this surface, or empty if unclear",
                 "reader_takeaway": "understanding or decision this text enables, or empty if unclear",
                 "reasoning": "how the quoted actual wording supports the meaning, or why it does not",
-                "supporting_spans": [{"source": "title or body", "quote": "exact current text substring", "role": "thesis or reason or limit"}],
+                "supporting_spans": [{"source": "title or body", "span_id": "exact ID from this surface and source in source_span_bank", "role": "thesis or reason or limit"}],
                 "coherent": "boolean", "thesis_focus": "boolean", "issues": ["specific current-text comprehension issue"],
             }]}} if scorecard_required else {}),
             "relevant_to_brief": "boolean", "useful_to_reader": "boolean", "clear_and_specific": "boolean",
@@ -186,7 +242,8 @@ def _reader_payload(output: Any, brief: dict, *, scorecard_required: bool) -> di
 def _bind_narrative_report(raw: Any, output: Any, expected: list[str]) -> NarrativeReport:
     if not isinstance(raw, dict):
         raise ValueError("narrative report missing")
-    report = NarrativeReport.model_validate({**raw, "passed": False, "content_sha256": ""})
+    bound = _bind_narrative_span_refs(raw, output)
+    report = NarrativeReport.model_validate({**bound, "passed": False, "content_sha256": ""})
     actual = [surface.surface for surface in report.surfaces]
     if set(actual) != set(expected) or len(actual) != len(expected):
         raise ValueError("narrative surface mismatch")
