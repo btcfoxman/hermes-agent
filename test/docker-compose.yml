@@ -9,6 +9,9 @@ services:
       - my-shared-net
     env_file:
       - ./.env
+    environment:
+      # The orchestration repository deploys this same canonical service.
+      HERMES_HOME: /data/hermes
     ports:
       - "192.168.3.6:8095:8095"
     volumes:

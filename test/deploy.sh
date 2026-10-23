@@ -76,6 +76,45 @@ compose() {
     "$@"
 }
 
+validate_hermes_receipt_home() {
+  local env_file="$1" line value
+  local assignment='^[[:space:]]*(export[[:space:]]+)?HERMES_HOME([[:space:]]*=|[[:space:]]*(#.*)?$)'
+  local canonical_bare='^/data/hermes([[:space:]]+(#.*)?)?$'
+  local canonical_double='^"/data/hermes"[[:space:]]*(#.*)?$'
+  local canonical_single="^'/data/hermes'[[:space:]]*(#.*)?$"
+  if [ "${HERMES_HOME+x}" = x ] && [ "${HERMES_HOME}" != "/data/hermes" ]; then
+    log "Hermes HERMES_HOME must be /data/hermes for durable editorial receipts"
+    return 1
+  fi
+  [ -f "${env_file}" ] || return 0
+  # Never source credentials. Check every declaration, including duplicate or
+  # explicit empty values, rather than accepting only the first occurrence.
+  while IFS= read -r line || [ -n "${line}" ]; do
+    line="${line%$'\r'}"
+    [[ "${line}" =~ ${assignment} ]] || continue
+    value="${line#*=}"
+    value="${value#"${value%%[![:space:]]*}"}"
+    if [[ ! "${value}" =~ ${canonical_bare} && ! "${value}" =~ ${canonical_double} && ! "${value}" =~ ${canonical_single} ]]; then
+      log "Hermes HERMES_HOME must be /data/hermes for durable editorial receipts"
+      return 1
+    fi
+  done < "${env_file}"
+}
+
+verify_hermes_receipt_mount() {
+  local container_name="$1" receipt_mount canonical_home
+  receipt_mount="$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/data/hermes/marketing_api"}}{{.Type}}|{{.Name}}{{end}}{{end}}' "${container_name}" 2>/dev/null)" || return 1
+  [ "${receipt_mount}" = "volume|hermes-editorial-receipts" ] || {
+    log "Hermes durable editorial receipt volume is missing or unexpected"
+    return 1
+  }
+  canonical_home="$(docker inspect --format '{{range .Config.Env}}{{if eq . "HERMES_HOME=/data/hermes"}}canonical{{end}}{{end}}' "${container_name}" 2>/dev/null)" || return 1
+  [ "${canonical_home}" = canonical ] || {
+    log "Hermes durable editorial receipt home is unexpected"
+    return 1
+  }
+}
+
 probe_service_health() {
   compose exec -T hermes-agent python -c '
 import urllib.request
@@ -175,6 +214,7 @@ if [ ! -f "${APP_DIR}/.env" ]; then
   log "Canonical ${APP_DIR}/.env is required; deployment does not create or replace model credentials"
   exit 1
 fi
+validate_hermes_receipt_home "${APP_DIR}/.env" || exit 1
 
 log "Syncing canonical deployment compose while preserving the existing .env"
 cp -f "${SCRIPT_DIR}/docker-compose.yml" "${COMPOSE_FILE}"
@@ -213,6 +253,7 @@ retry 5 10 compose pull hermes-agent
 
 log "Starting canonical shared Hermes service"
 compose up -d --remove-orphans hermes-agent
+verify_hermes_receipt_mount hermes-agent || exit 1
 
 log "Waiting for canonical service and operator contracts"
 for i in $(seq 1 30); do
