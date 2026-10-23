@@ -11,7 +11,7 @@ from pydantic import Field, field_validator, model_serializer
 
 from ai_marketing_api.operator_editorial import EditorialReview, GenerationTrace, OwnerRevision, PublicEditorialBrief, QualityScorecard, RuntimeBudget
 from ai_marketing_api.operator_style import CURRENT_GENRE, MASTER_ONLY, PUBLIC_TUTORIAL_ATTRIBUTION_RE, PUBLIC_TUTORIAL_GENRE, editorial_scope, style_context
-from ai_marketing_api.operator_grounding import ClaimBindingReview
+from ai_marketing_api.operator_grounding import ClaimBindingReview, _SEEDANCE_VERSION_RE, _SEEDANCE_VERSION_UNIT_RE
 
 from ai_marketing_api.operator_runtime import (
     CONTENT_SCHEMA_VERSION,
@@ -359,6 +359,24 @@ _INDUSTRY_CREATIVE_INPUT_ALREADY_RE = re.compile(
     r"(?:[ \t]*(?:、|和|与|及)[ \t]*(?:主体|动作|镜头安排|素材|提示词|参考素材)){0,5})"
     r"(?P<creative>已经)确定(?=$|[时，,。！？!?；;：:\s])"
 )
+_INDUSTRY_DIRECTION_ALREADY_RE = re.compile(
+    r"(?:^|[，,。！？!?；;：:\n])[ \t]*(?:但|不过)?(?:"
+    r"(?:如果|若|当)方向(?P<conditional_direction>已经)清楚(?:时)?|"
+    r"方向(?P<temporal_direction>已经)清楚时"
+    r")(?=$|[，,。！？!?；;：:\s])"
+)
+_INDUSTRY_NONSTAT_COUNT_RE = re.compile(
+    r"(?:"
+    r"这给样片划出了(?P<boundary>一条)边界|"
+    r"更像为[^，,。！？!?；;：:\n]{1,24}买(?P<opportunity>一次)判断机会|"
+    r"更像(?P<gate>一次)方向闸门|"
+    r"(?:^|[，,。！？!?；;：:\n])[ \t]*没有这类待验证问题时[，,][ \t]*"
+    r"样片增加的是(?P<review>一次)审看和(?P<task>一次)付费任务"
+    r")(?=$|[，,。！？!?；;：:\s])"
+)
+_INDUSTRY_READER_JUDGMENT_TASK_RE = re.compile(
+    r"提交前(?:可以)?先写下它要排除的(?P<task>判断[：:])"
+)
 _GENERIC_EDITORIAL_META_RE = re.compile(
     r"(?:"
     r"先把.{0,16}事实.{0,16}(?:判断|观点).{0,8}分开|"
@@ -531,10 +549,38 @@ def _number_tokens(value: str) -> set[str]:
     return {match.group(0) for match in _NUMBER_RE.finditer(value)}
 
 
+def _industry_editorial_number_matches(
+    text: str, approved_fact_texts: Sequence[str] = (), *, allow_industry_analysis: bool = False,
+) -> List[re.Match[str]]:
+    allowed_spans = set()
+    if allow_industry_analysis:
+        source_has_version = any(
+            not _SEEDANCE_VERSION_UNIT_RE.match(source[match.end():])
+            for source in approved_fact_texts for match in _SEEDANCE_VERSION_RE.finditer(source)
+        )
+        if source_has_version:
+            for match in _SEEDANCE_VERSION_RE.finditer(text):
+                if not _SEEDANCE_VERSION_UNIT_RE.match(text[match.end():]):
+                    allowed_spans.add(match.span("version"))
+        for context in _INDUSTRY_NONSTAT_COUNT_RE.finditer(text):
+            for group, value in context.groupdict().items():
+                if value is not None:
+                    allowed_spans.add(context.span(group))
+    return [match for match in _NUMBER_RE.finditer(text) if match.span() not in allowed_spans]
+
+
+def _generic_editorial_meta_matches(
+    text: str, *, allow_industry_reader_task: bool = False,
+) -> List[re.Match[str]]:
+    allowed_spans = {match.span("task") for match in _INDUSTRY_READER_JUDGMENT_TASK_RE.finditer(text)} if allow_industry_reader_task else set()
+    return [match for match in _GENERIC_EDITORIAL_META_RE.finditer(text) if match.span() not in allowed_spans]
+
+
 def _unsupported_editorial_assertion_matches(
     text: str,
     *,
     allow_industry_hypothetical: bool = False,
+    allow_industry_direction_condition: bool = False,
 ) -> List[re.Match[str]]:
     allowed_spans = set()
     if allow_industry_hypothetical:
@@ -546,6 +592,11 @@ def _unsupported_editorial_assertion_matches(
             if any(term in context.group("inputs")
                    for term in ("镜头安排", "素材", "提示词", "参考素材")):
                 allowed_spans.add(context.span("creative"))
+    if allow_industry_direction_condition:
+        for context in _INDUSTRY_DIRECTION_ALREADY_RE.finditer(text):
+            for group, value in context.groupdict().items():
+                if value is not None:
+                    allowed_spans.add(context.span(group))
     return [
         match for match in _UNSUPPORTED_EDITORIAL_ASSERTION_RE.finditer(text)
         if not (match.group(0) == "已经" and match.span() in allowed_spans)
@@ -1552,7 +1603,10 @@ def _safe_candidate_blocks(
             return None, "first_person_forbidden"
         # A social hook may repeat a verified amount or date, but cannot invent
         # or recombine a numeric token that is absent from approved evidence.
-        editorial_number_tokens = _number_tokens(text)
+        allow_industry_analysis = (role is OperatorRole.INDUSTRY and CURRENT_GENRE.get() == "industry_analysis"
+            and kind in {ContentBlockKind.OPINION.value, ContentBlockKind.TRANSITION.value})
+        editorial_number_tokens = {match.group(0) for match in _industry_editorial_number_matches(
+            text, approved_fact_texts, allow_industry_analysis=allow_industry_analysis)}
         if not editorial_number_tokens.issubset(approved_number_tokens):
             return None, "number_ungrounded"
         if (
@@ -1568,10 +1622,11 @@ def _safe_candidate_blocks(
                     role is OperatorRole.INDUSTRY
                     and CURRENT_GENRE.get() == "industry_analysis"
                 ),
+                allow_industry_direction_condition=allow_industry_analysis,
             )
         ):
             return None, "assertion_forbidden"
-        if _GENERIC_EDITORIAL_META_RE.search(text):
+        if _generic_editorial_meta_matches(text, allow_industry_reader_task=allow_industry_analysis):
             return None, "generic_meta_copy_forbidden"
         if role is OperatorRole.INDUSTRY and _industry_blocking_contrast_matches(
             text, allow_paired_contrast=CURRENT_GENRE.get() == "industry_analysis",
@@ -1600,9 +1655,11 @@ def _safe_candidate_blocks(
             return None, "mixed_language_phrase_forbidden"
         # A matching token is not a matching fact: a model can repurpose a
         # date as a count or relabel penalty amounts as prices/percentiles.
-        # Industry numbers therefore stay in canonical evidence blocks (and
-        # evidence-checked titles) only. Authored prose explains mechanisms
-        # without restating or reinterpreting them. Run this after the more
+        # Industry quantities therefore stay in canonical evidence blocks (and
+        # evidence-checked titles). The narrow industry-analysis spans above
+        # identify a grounded model name or non-statistical framing, never a
+        # new quantity. Authored prose cannot reinterpret other numeric tokens.
+        # Run this after the more
         # specific cliche/restatement checks so diagnostics retain their
         # actionable cause.
         if role is OperatorRole.INDUSTRY and editorial_number_tokens:
