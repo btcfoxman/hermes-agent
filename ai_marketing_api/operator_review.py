@@ -97,6 +97,9 @@ async def assess_editorial(
     scorecard_required: bool = False,
 ) -> tuple[EditorialReview | None, str]:
     expected_surfaces = ["master", *[variant.platform for variant in output.platform_variants]]
+    # Keep editorial_feedback in the caller contract for writer revisions and
+    # historical receipts. An independent assessment must not see earlier AI
+    # grades or verdicts; it scores the current draft, brief and owner concern.
     candidate = await run.call(
         llm,
         EDITOR_SYSTEM_PROMPT if scorecard_required else system,
@@ -120,7 +123,6 @@ async def assess_editorial(
                 ),
                 "public_editorial_brief": brief,
                 "style_context": style_context or {},
-                "editorial_feedback": editorial_feedback,
                 "genre_review_rule": "Judge the supplied genre, audience and reference expression. A sourced event or data may lead; do not require an authored hook, a fixed paragraph count, artificial padding or a CTA. Style references never authorize facts or lived experience.",
                 "scorecard_rubric": "1 unusable, 2 major rewrite, 3 useful but needs revision, 4 publication-quality, 5 exceptional. Each surface needs all five >=4 and zero major issues. Depth is genre-appropriate specificity, not length. Evaluate independently; do not rubber-stamp.",
                 "dimension_anchors": {

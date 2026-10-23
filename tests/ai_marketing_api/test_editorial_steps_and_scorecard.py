@@ -143,7 +143,7 @@ def test_genre_and_references_reach_focused_editorial_repair(monkeypatch):
     repair = next(body for body in calls if "editorial_revision" in body)
     assert repair["style_context"] == calls[0]["style_context"]
     assert repair["editorial_feedback"] == value["editorial_feedback"]
-    assert all(item["editorial_review"]["editorial_feedback"] == value["editorial_feedback"] for item in reviews)
+    assert reviews and all("editorial_feedback" not in item["editorial_review"] for item in reviews)
     assert data["quality_scorecard"]["passed"] is True
 
 
