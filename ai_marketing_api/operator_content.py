@@ -335,6 +335,12 @@ _INDUSTRY_HYPOTHETICAL_ALREADY_RE = re.compile(
     r"(?=$|[时但，,。！？!?；;：:\s])"
     r")"
 )
+_INDUSTRY_CREATIVE_INPUT_ALREADY_RE = re.compile(
+    r"(?:^|[，,。！？!?；;：:\n])[ \t]*(?:但|不过)?(?:如果|若|当)"
+    r"(?P<inputs>(?:主体|动作|镜头安排|素材|提示词|参考素材)"
+    r"(?:[ \t]*(?:、|和|与|及)[ \t]*(?:主体|动作|镜头安排|素材|提示词|参考素材)){0,5})"
+    r"(?P<creative>已经)确定(?=$|[时，,。！？!?；;：:\s])"
+)
 _GENERIC_EDITORIAL_META_RE = re.compile(
     r"(?:"
     r"先把.{0,16}事实.{0,16}(?:判断|观点).{0,8}分开|"
@@ -384,6 +390,17 @@ _INDUSTRY_CONTRAST_CLICHE_RE = re.compile(
     r"一个很具体的变化|"
     r"(?:经营者|酒店|商家).{0,12}最怕"
     r")"
+)
+_INDUSTRY_PAIRED_CONTRAST_RE = re.compile(
+    r"(?:不是|并非|未必是)[^。！？!?；;\n]{1,48}(?:而是|更是)"
+)
+# Keep the legacy expression fence intact. Scanning the non-paired branches
+# independently also catches a meta wrapper nested inside a paired phrase;
+# filtering non-overlapping matches from the original regex would hide it.
+_INDUSTRY_NON_PAIRED_CONTRAST_RE = re.compile(
+    _INDUSTRY_CONTRAST_CLICHE_RE.pattern.replace(
+        _INDUSTRY_PAIRED_CONTRAST_RE.pattern, r"(?!)", 1
+    )
 )
 _INTERNAL_EDITORIAL_DIRECTION_RE = re.compile(
     r"(?:区分.{0,24}事实.{0,24}(?:观点|判断)|"
@@ -507,10 +524,22 @@ def _unsupported_editorial_assertion_matches(
             for group in ("negated", "conditional"):
                 if context.group(group) is not None:
                     allowed_spans.add(context.span(group))
+        for context in _INDUSTRY_CREATIVE_INPUT_ALREADY_RE.finditer(text):
+            if any(term in context.group("inputs")
+                   for term in ("镜头安排", "素材", "提示词", "参考素材")):
+                allowed_spans.add(context.span("creative"))
     return [
         match for match in _UNSUPPORTED_EDITORIAL_ASSERTION_RE.finditer(text)
         if not (match.group(0) == "已经" and match.span() in allowed_spans)
     ]
+
+
+def _industry_blocking_contrast_matches(
+    text: str, *, allow_paired_contrast: bool = False,
+) -> List[re.Match[str]]:
+    pattern = (_INDUSTRY_NON_PAIRED_CONTRAST_RE if allow_paired_contrast
+               else _INDUSTRY_CONTRAST_CLICHE_RE)
+    return list(pattern.finditer(text))
 
 
 def _source_restatement_ratio(value: str, source: str) -> float:
@@ -1521,7 +1550,9 @@ def _safe_candidate_blocks(
             return None, "assertion_forbidden"
         if _GENERIC_EDITORIAL_META_RE.search(text):
             return None, "generic_meta_copy_forbidden"
-        if role is OperatorRole.INDUSTRY and _INDUSTRY_CONTRAST_CLICHE_RE.search(text):
+        if role is OperatorRole.INDUSTRY and _industry_blocking_contrast_matches(
+            text, allow_paired_contrast=CURRENT_GENRE.get() == "industry_analysis",
+        ):
             return None, "generic_meta_copy_forbidden"
         if _restates_approved_source(text, approved_fact_texts):
             return None, "source_restatement_forbidden"
@@ -1738,6 +1769,9 @@ def _safe_candidate_blocks(
             evidence_ids=evidence_ids,
         )
         if editorial is not None:
+            if (role is OperatorRole.INDUSTRY and CURRENT_GENRE.get() == "industry_analysis"
+                    and _INDUSTRY_PAIRED_CONTRAST_RE.search(text)):
+                warnings.append(f"editorial_style_review_required:{prefix}-{index}:paired_contrast")
             selected.append(editorial)
             continue
         if kind in {

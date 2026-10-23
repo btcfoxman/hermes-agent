@@ -108,7 +108,9 @@ def test_one_safe_already_span_does_not_exempt_other_assertions_or_safety_gates(
     "这未必是结果，更是规则变化的信号。",
 ])
 def test_paired_generic_contrast_remains_forbidden(text):
-    output, _ = _normalize(text)
+    # Legacy copy retains the old lexical style fence; industry_analysis now
+    # sends a paired contrast to the independent value/expression review.
+    output, _ = _normalize(text, genre="digest")
     assert text not in output.master_content
     assert all(text not in variant.body for variant in output.platform_variants)
     assert any(w.endswith(":generic_meta_copy_forbidden") for w in output.critic.warnings)
