@@ -646,11 +646,45 @@ def _generic_editorial_meta_matches(
     return [match for match in _GENERIC_EDITORIAL_META_RE.finditer(text) if match.span() not in allowed_spans]
 
 
+_INDUSTRY_PENDING_ACCEPTANCE_RE = re.compile(
+    r"(?:^|[，,。！？!?；;：:\n])[ \t]*"
+    r"(?:画面|成片|输出|生成结果|生成内容|视频|音频)(?:最终)?(?:是否|能否)"
+    r"(?P<acceptance>达到)(?:制作|画质|质量|验收|使用)?(?:要求|标准|目标)"
+    r"[，,][ \t]*(?:仍|还|尚)(?:需要|要|需|待)(?:看|验证|检查|评估|验收)"
+    r"[^，,。！？!?；;：:\n]{0,40}(?=$|[，,。！？!?；;：:\n])"
+)
+_INDUSTRY_UNPROVEN_RESULT_RE = re.compile(
+    r"(?:^|[，,。！？!?；;：:\n])[ \t]*(?:但|不过|然而)?"
+    r"(?:不能|无法|不足以)(?:(?:据此|直接){0,2})(?:推断|证明|认定|说明)"
+    r"(?P<target>[^，,。！？!?；;：:\n]{1,100})(?=$|[，,。！？!?；;：:\n])"
+)
+_UNPROVEN_TARGET_AMBIGUITY_RE = re.compile(
+    r"不|没|未|无|非|否|但|而|却|其实|实际|相反|因此|所以|从而|可是|并|且|同时|则"
+)
+_UNPROVEN_RESULT_WORDS = frozenset({"达到", "下降", "增长", "上涨", "下跌"})
+
+
+def _industry_pending_reasoning_spans(text: str) -> set[tuple[int, int]]:
+    """Exempt an uncertain predicate, never its paragraph or other assertions."""
+    spans = {m.span("acceptance") for m in _INDUSTRY_PENDING_ACCEPTANCE_RE.finditer(text)}
+    for clause in _INDUSTRY_UNPROVEN_RESULT_RE.finditer(text):
+        target = clause.group("target")
+        if _UNPROVEN_TARGET_AMBIGUITY_RE.search(target):
+            continue
+        predicates = list(_UNSUPPORTED_EDITORIAL_ASSERTION_RE.finditer(target))
+        if len(predicates) == 1 and predicates[0].group(0) in _UNPROVEN_RESULT_WORDS:
+            begin, end = predicates[0].span()
+            offset = clause.start("target")
+            spans.add((offset + begin, offset + end))
+    return spans
+
+
 def _unsupported_editorial_assertion_matches(
     text: str,
     *,
     allow_industry_hypothetical: bool = False,
     allow_industry_direction_condition: bool = False,
+    allow_industry_pending_reasoning: bool = False,
 ) -> List[re.Match[str]]:
     allowed_spans = set()
     if allow_industry_hypothetical:
@@ -667,9 +701,11 @@ def _unsupported_editorial_assertion_matches(
             for group, value in context.groupdict().items():
                 if value is not None:
                     allowed_spans.add(context.span(group))
+    reasoning_spans = _industry_pending_reasoning_spans(text) if allow_industry_pending_reasoning else set()
     return [
         match for match in _UNSUPPORTED_EDITORIAL_ASSERTION_RE.finditer(text)
         if not (match.group(0) == "已经" and match.span() in allowed_spans)
+        and match.span() not in reasoning_spans
     ]
 
 
@@ -1695,6 +1731,7 @@ def _safe_candidate_blocks(
                     and CURRENT_GENRE.get() == "industry_analysis"
                 ),
                 allow_industry_direction_condition=allow_industry_analysis,
+                allow_industry_pending_reasoning=allow_industry_analysis,
             )
         ):
             return None, "assertion_forbidden"
