@@ -830,9 +830,14 @@ async def _run_operator(
 
 
 async def _run_compose(*args, **kwargs) -> OperatorContentOutput:
+    from ai_marketing_api.operator_analysis import DEFER_EDITORIAL_ANALYSIS
     payload = args[1] if len(args) > 1 else kwargs["payload"]
-    with editorial_scope(payload.genre):
-        return await _run_compose_impl(*args, **kwargs)
+    token = DEFER_EDITORIAL_ANALYSIS.set(True)
+    try:
+        with editorial_scope(payload.genre):
+            return await _run_compose_impl(*args, **kwargs)
+    finally:
+        DEFER_EDITORIAL_ANALYSIS.reset(token)
 
 
 async def _run_compose_impl(
@@ -867,6 +872,15 @@ async def _run_compose_impl(
         ) from exc
 
     run = BoundedModelRun(payload.runtime_budget)
+    def pending_analysis_response(value):
+        # Legacy compose/revise have no separately durable verifier boundary.
+        # Check every writer/repair result, before any further paid operation.
+        blocked = enforce_social_publishability(value)
+        return blocked.model_copy(update={"master_title": None, "master_content": None,
+            "blocks": [], "platform_variants": [], "evidence_refs": [],
+            "generation_trace": run.trace(blocked=False, review="not_requested",
+                stop_reason="analysis_verification_required")})
+
     fallback = build_content_fallback(OPERATOR_REGISTRY, role_id, payload, contexts)
     compose_payload: Dict[str, Any] = {}
     if fallback.get("_fallback_errors"):
@@ -899,6 +913,8 @@ async def _run_compose_impl(
     normalized_attempts = [normalized]
     raw_candidates = [candidate]
     output = enforce_social_publishability(normalized)
+    if normalized.pending_editorial_analysis:
+        return pending_analysis_response(normalized)
     candidate_model = str(
         candidate.get("_model") or candidate.get("model") or "fallback"
     ).strip().lower()
@@ -1339,6 +1355,8 @@ async def _run_compose_impl(
             fallback,
             candidate,
         )
+        if normalized.pending_editorial_analysis:
+            return pending_analysis_response(normalized)
         normalized_attempts.append(normalized)
         raw_candidates.append(candidate)
         combined = combine_publishable_surfaces(normalized_attempts)
@@ -1356,6 +1374,7 @@ async def _run_compose_impl(
             output=output, raw_candidates=raw_candidates, run=run, llm=_llm_json,
             system=profile.system_prompt,
             model_args=(openai_base_url, openai_api_key, model_name, timeout_seconds),
+            approved_claims=payload.claims,
         )
     review_required = payload.public_editorial_brief is not None or payload.owner_revision is not None or bool(payload.genre or payload.style_references)
     review_state = "not_completed" if review_required else "not_requested"
@@ -1436,6 +1455,8 @@ async def _run_compose_impl(
             repaired = normalize_content_output(
                 OPERATOR_REGISTRY, role_id, payload, contexts, fallback, scoped_candidate,
             )
+            if repaired.pending_editorial_analysis:
+                return pending_analysis_response(repaired)
             repair_diagnostics: Dict[str, Any] = {}
             combined = replace_editorial_surfaces(
                 output, repaired, repairable, diagnostics=repair_diagnostics,
@@ -1448,6 +1469,7 @@ async def _run_compose_impl(
                         output=output, raw_candidates=[scoped_candidate], run=run, llm=_llm_json,
                         system=profile.system_prompt,
                         model_args=(openai_base_url, openai_api_key, model_name, timeout_seconds),
+                        approved_claims=payload.claims,
                     )
                 review, review_state = await assess_editorial(
                     output=output, brief=compose_payload.get("public_editorial_brief") or compose_payload.get("approved_editorial_brief", {}), run=run, llm=_llm_json,

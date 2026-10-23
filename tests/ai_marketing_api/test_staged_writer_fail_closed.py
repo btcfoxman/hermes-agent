@@ -192,5 +192,6 @@ def test_stage_specific_prompts_preserve_feedback_and_canonical_master_with_sing
     assert [variant['platform'] for variant in adapt_contract['platform_variants']] == ['wechat_mp']
     assert adapt_contract['platform_variants'][0]['format'] == 'article'
     assert 'master_title' not in adapt_contract and 'blocks' not in adapt_contract
-    assert seen[1][1]['master_draft'] == {'title':master['artifact']['master_title'],'body':master['artifact']['master_content']}
+    assert seen[1][1]['master_draft']['title'] == master['artifact']['master_title']
+    assert seen[1][1]['master_draft']['body'] == master['artifact']['master_content']
     assert len(calls) == 2

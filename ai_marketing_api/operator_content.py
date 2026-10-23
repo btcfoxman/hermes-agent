@@ -14,6 +14,10 @@ from pydantic import Field, field_validator, model_serializer
 from ai_marketing_api.operator_editorial import EditorialReview, GenerationTrace, OwnerRevision, PublicEditorialBrief, QualityScorecard, RuntimeBudget
 from ai_marketing_api.operator_style import CURRENT_GENRE, MASTER_ONLY, PUBLIC_TUTORIAL_ATTRIBUTION_RE, PUBLIC_TUTORIAL_GENRE, editorial_scope, style_context
 from ai_marketing_api.operator_grounding import ClaimBindingReview, _SEEDANCE_VERSION_RE, _SEEDANCE_VERSION_UNIT_RE
+from ai_marketing_api.operator_analysis import (
+    AnalysisBindingReview, PendingEditorialAnalysis, DEFER_EDITORIAL_ANALYSIS,
+    derive_pending, soft_eligible,
+)
 
 from ai_marketing_api.operator_runtime import (
     CONTENT_SCHEMA_VERSION,
@@ -96,6 +100,7 @@ class ContentBlock(StrictModel):
     # Server-derived presentation only; canonical fact/evidence never changes.
     source_display: Literal["excerpt", "full_documentation"] = "excerpt"
     paragraph_id: Optional[str] = Field(default=None, strict=True, min_length=1, max_length=48)
+    analysis_pending: bool = Field(default=False, strict=True)
 
     @field_validator("paragraph_id")
     @classmethod
@@ -109,6 +114,8 @@ class ContentBlock(StrictModel):
         data = handler(self)
         if self.paragraph_id is None:
             data.pop("paragraph_id", None)
+        if not self.analysis_pending:
+            data.pop("analysis_pending", None)
         return data
 
 
@@ -156,12 +163,17 @@ class OperatorContentOutput(StrictModel):
     quality_scorecard: Optional[QualityScorecard] = None
     genre: str = ""
     surface_fact_plan_sha256: Optional[str] = None
+    pending_editorial_analysis: List[PendingEditorialAnalysis] = Field(default_factory=list, max_length=100)
+    analysis_binding_reviews: List[AnalysisBindingReview] = Field(default_factory=list, max_length=100)
 
     @model_serializer(mode="wrap")
     def serialize_fact_plan(self, handler):
         data = handler(self)
         if self.surface_fact_plan_sha256 is None:
             data.pop("surface_fact_plan_sha256", None)
+        for key in ("pending_editorial_analysis", "analysis_binding_reviews"):
+            if not getattr(self, key):
+                data.pop(key, None)
         return data
 
 
@@ -1338,6 +1350,8 @@ def _render(
     paragraphs: List[str] = []
     previous_id = None
     for block in blocks:
+        if block.analysis_pending:
+            continue
         if not block.text.strip():
             continue
         text = _fact_display_text(block, surface=surface) if block.source_exact else block.text.strip()
@@ -1742,6 +1756,14 @@ def _safe_candidate_blocks(
             text, approved_fact_texts, allow_industry_analysis=allow_industry_analysis)}
         if not editorial_number_tokens.issubset(approved_number_tokens):
             return None, "number_ungrounded"
+        soft_assertions = _unsupported_editorial_assertion_matches(
+            text, allow_industry_hypothetical=(role is OperatorRole.INDUSTRY
+                and CURRENT_GENRE.get() == "industry_analysis"),
+            allow_industry_direction_condition=allow_industry_analysis,
+            allow_industry_pending_reasoning=allow_industry_analysis,
+            allow_industry_creative_condition=allow_industry_analysis)
+        deferred_analysis = (DEFER_EDITORIAL_ANALYSIS.get() and allow_industry_analysis
+            and soft_eligible(text, soft_assertions))
         if (
             (
                 role is not OperatorRole.INDUSTRY
@@ -1749,16 +1771,7 @@ def _safe_candidate_blocks(
             )
             or _PROMISE_RE.search(text)
             or _DELIVERY_COMMITMENT_RE.search(text)
-            or _unsupported_editorial_assertion_matches(
-                text,
-                allow_industry_hypothetical=(
-                    role is OperatorRole.INDUSTRY
-                    and CURRENT_GENRE.get() == "industry_analysis"
-                ),
-                allow_industry_direction_condition=allow_industry_analysis,
-                allow_industry_pending_reasoning=allow_industry_analysis,
-                allow_industry_creative_condition=allow_industry_analysis,
-            )
+            or (soft_assertions and not deferred_analysis)
         ):
             return None, "assertion_forbidden"
         if _generic_editorial_meta_matches(text, allow_industry_reader_task=allow_industry_analysis):
@@ -1848,6 +1861,7 @@ def _safe_candidate_blocks(
                     evidence_ids=[],
                     verification_status=VerificationStatus.OPINION,
                     source_exact=False,
+                    analysis_pending=bool(deferred_analysis),
                 ),
                 origin=ContentBlockOrigin.MODEL_EDITORIAL,
                 locked=False,
@@ -2545,8 +2559,11 @@ def _normalize_content_output(
 def normalize_content_output(registry, role_id, request, contexts, fallback, candidate):
     with editorial_scope(request.genre):
         output = _normalize_content_output(registry, role_id, request, contexts, fallback, candidate)
-    return output.model_copy(update={"genre": request.genre,
+    output = output.model_copy(update={"genre": request.genre,
         "surface_fact_plan_sha256": (request.surface_fact_plan or {}).get("plan_sha256")})
+    if DEFER_EDITORIAL_ANALYSIS.get():
+        output.pending_editorial_analysis = derive_pending(output, request.claims)
+    return output
 
 
 def enforce_social_publishability(output: OperatorContentOutput) -> OperatorContentOutput:
@@ -2565,6 +2582,11 @@ def _enforce_social_publishability(
     exposes a generic fallback as ``content_ready``.
     """
 
+    if output.pending_editorial_analysis or any(b.analysis_pending for b in output.blocks) or any(
+            b.analysis_pending for v in output.platform_variants for b in v.blocks):
+        critic = output.critic.model_copy(update={"passed": False,
+            "errors": [*output.critic.errors, "analysis_verification_required"][:50]})
+        return output.model_copy(update={"status": ContentStatus.QUALITY_INSUFFICIENT, "critic": critic})
     if _value(output.status) != ContentStatus.CONTENT_READY.value:
         return output
 

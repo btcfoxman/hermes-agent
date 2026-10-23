@@ -155,6 +155,14 @@ class PrivateGenerationCapture:
                 and candidate.get("_model") not in {None, "", "fallback", "unavailable", "deterministic"}
                 and not candidate.get("_error") else "fallback"}
 
+    def analysis_verifier(self, candidate):
+        """Keep the real structured verifier reply before binding decisions."""
+        clean = {key: value for key, value in candidate.items() if not str(key).startswith("_")} if isinstance(candidate, dict) else candidate
+        self.data["analysis_verifier_candidate"] = {**self._value(clean),
+            "source": "model" if isinstance(candidate, dict)
+                and candidate.get("_model") not in {None, "", "fallback", "unavailable", "deterministic"}
+                and not candidate.get("_error") else "fallback"}
+
     def attach(self, response, review_receipt=None):
         private = {"private_generation_receipt": deepcopy(self.data)}
         if review_receipt is not None:
@@ -168,6 +176,7 @@ class PrivateGenerationCapture:
         for row in private["private_generation_receipt"]["provider_responses"]:
             removable.extend([row.get("body"), row.get("content")])
         removable.append(private["private_generation_receipt"].get("writer_candidate"))
+        removable.append(private["private_generation_receipt"].get("analysis_verifier_candidate"))
         for item in removable:
             if len(encoded(private)) <= MAX_PRIVATE_BUNDLE_BYTES:
                 break
