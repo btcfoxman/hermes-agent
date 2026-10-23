@@ -559,7 +559,8 @@ def test_owner_revision_is_editing_intent_not_evidence(monkeypatch):
     assert calls[0]["owner_revision"] == payload["owner_revision"]
     assert all("99%" not in item["text"] for item in calls[0]["claims"])
     assert "99%" not in data["master_content"]
-    assert calls[1]["editorial_review"]["owner_revision"] == payload["owner_revision"]
+    assert "owner_revision" not in calls[1]["editorial_review"]
+    assert calls[1]["editorial_review"]["draft"]["master_content"] == data["master_content"]
     assert data["requires_human_review"] is True
 
 
@@ -815,8 +816,10 @@ def test_sparse_evidence_brief_and_editor_do_not_demand_invented_product_tutoria
         calls.append(body)
         if "editorial_review" in body:
             review = body["editorial_review"]
-            assert review["canonical_claims"]
-            assert "sparse positioning evidence" in review["instruction"]
+            assert "canonical_claims" not in review
+            assert "public_editorial_brief" not in review
+            assert "Do not force novelty" in review["genre_review_rule"]
+            assert "cannot earn information_gain" in " ".join(review["comprehension_checks"])
             return _review()
         assert len(body["evidence_scope_contract"]) == 4
         assert "not additional facts" in body["evidence_scope_contract"][0]

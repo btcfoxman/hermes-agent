@@ -14,7 +14,7 @@ import re
 from typing import Any, Awaitable, Callable, Literal
 from urllib.parse import urlsplit
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_serializer
 
 from ai_marketing_api.operator_runtime import OperatorRole, StrictModel
 from ai_marketing_api.operator_routing import PROVIDER_EVENT_SINK
@@ -157,6 +157,39 @@ class GenerationTrace(StrictModel):
     editorial_diagnostics: list[ReviewValidationDiagnostic] = Field(default_factory=list, max_length=8)
 
 
+class NarrativeSupportingSpan(StrictModel):
+    source: Literal["title", "body"]
+    quote: str = Field(min_length=1, max_length=500, strict=True)
+    role: Literal["thesis", "reason", "limit"]
+
+
+class SurfaceNarrativeReport(StrictModel):
+    surface: str = Field(min_length=1, max_length=80, strict=True)
+    summary: str = Field(max_length=1000, strict=True)
+    reader_takeaway: str = Field(max_length=1000, strict=True)
+    reasoning: str = Field(max_length=2000, strict=True)
+    supporting_spans: list[NarrativeSupportingSpan] = Field(max_length=12)
+    coherent: bool = Field(strict=True)
+    thesis_focus: bool = Field(strict=True)
+    issues: list[str] = Field(default_factory=list, max_length=20)
+
+    @property
+    def passed(self) -> bool:
+        return bool(self.summary.strip() and self.reader_takeaway.strip()
+                    and self.reasoning.strip() and self.coherent and self.thesis_focus
+                    and any(span.source == "body" and span.quote.strip()
+                            for span in self.supporting_spans))
+
+
+class NarrativeReport(StrictModel):
+    """A reader's reconstruction of the supplied text, never factual authority."""
+
+    schema_version: Literal["narrative_report.v1"] = "narrative_report.v1"
+    content_sha256: str = Field(default="", max_length=64, strict=True)
+    surfaces: list[SurfaceNarrativeReport] = Field(min_length=1, max_length=21)
+    passed: bool = Field(default=False, strict=True)
+
+
 class EditorialReview(StrictModel):
     """A separate editorial assessment, never authority to waive evidence gates."""
 
@@ -167,11 +200,24 @@ class EditorialReview(StrictModel):
     issues: list[str] = Field(default_factory=list, max_length=8)
     failed_surfaces: list[str] = Field(default_factory=list, max_length=21)
     quality_scorecard: "QualityScorecard | None" = None
+    narrative_report: NarrativeReport | None = None
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_report_shape(self, handler):
+        value = handler(self)
+        if self.narrative_report is None:
+            value.pop("narrative_report", None)
+        return value
 
     @property
     def passed(self) -> bool:
         if not all((self.relevant_to_brief, self.useful_to_reader,
                     self.clear_and_specific, self.platform_fit)) or self.failed_surfaces:
+            return False
+        if self.narrative_report is not None and (
+            not self.narrative_report.passed
+            or not all(surface.passed for surface in self.narrative_report.surfaces)
+        ):
             return False
         if self.quality_scorecard is None:
             return not self.issues

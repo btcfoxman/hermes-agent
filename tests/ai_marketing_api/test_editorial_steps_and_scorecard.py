@@ -46,7 +46,17 @@ def review(body, *, low=None, missing=False):
         rows.append({"surface": surface, "reader_relevance": 4,
             "information_gain": 3 if low == surface else 4, "analytical_depth": 4,
             "natural_expression": 4, "platform_fit": 4, "major_issues": [], "issues": []})
-    return {**_review(True), "quality_scorecard": {"schema_version": "quality_scorecard.v1", "surfaces": rows}}
+    # Scripted transport fixture only: these statements are not model grades.
+    texts = {"master": draft["master_content"], **{v["platform"]: v["body"] for v in draft["platform_variants"]}}
+    report = {"schema_version": "narrative_report.v1", "surfaces": [{
+        "surface": surface, "summary": "Synthetic current-text summary.",
+        "reader_takeaway": "Synthetic current-text reader understanding.",
+        "reasoning": "Synthetic protocol fixture, not semantic calibration.",
+        "supporting_spans": [{"source": "body", "quote": text[:180], "role": "reason"}],
+        "coherent": True, "thesis_focus": True, "issues": [],
+    } for surface, text in texts.items()]}
+    return {**_review(True), "quality_scorecard": {"schema_version": "quality_scorecard.v1", "surfaces": rows},
+            "narrative_report": report}
 
 
 def fact_first(body):
@@ -78,7 +88,7 @@ def test_style_references_never_become_evidence_in_propose_or_compose(monkeypatc
     assert data["status"] == "content_ready", json.dumps({"critic":data["critic"], "trace": data["generation_trace"]})
     assert data["quality_scorecard"]["passed"] is True
     assert len(data["quality_scorecard"]["content_sha256"]) == 64
-    assert calls[1]["editorial_review"]["style_context"] == calls[0]["style_context"]
+    assert "style_context" not in calls[1]["editorial_review"]
     assert data["blocks"][0]["source_exact"] is True
     assert "9999" not in data["master_content"]
 

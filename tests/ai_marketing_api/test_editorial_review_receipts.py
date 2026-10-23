@@ -26,6 +26,9 @@ def draft():
 def reviewer_result():
     return {"_model": "offline-editor", "relevant_to_brief": True, "useful_to_reader": True,
         "clear_and_specific": True, "platform_fit": True, "issues": [], "failed_surfaces": [],
+        "narrative_report": review({"editorial_review": {"draft": {
+            "master_title": draft().master_title, "master_content": draft().master_content,
+            "platform_variants": []}}})["narrative_report"],
         "quality_scorecard": {"schema_version": "quality_scorecard.v1", "surfaces": [{
             "surface": "master", "reader_relevance": 4, "information_gain": 4,
             "analytical_depth": 4, "natural_expression": 4, "platform_fit": 4,

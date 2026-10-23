@@ -246,7 +246,8 @@ def assess_with_scripted_grade(output, score, brief):
     async def scripted_editor(system, body, fallback, *args, **kwargs):
         seen.append(body)
         surfaces = body["editorial_review"]["output_rules"]["expected_surfaces"]
-        return {"_model": "offline-assessment-stub", "relevant_to_brief": True,
+        from tests.ai_marketing_api.test_editorial_steps_and_scorecard import review as scripted_review
+        return {"_model": "offline-assessment-stub", "narrative_report": scripted_review(body)["narrative_report"], "relevant_to_brief": True,
             "useful_to_reader": score >= 4, "clear_and_specific": True, "platform_fit": True,
             "issues": [] if score >= 4 else ["受众定位与通用假设未给出有依据的新判断。"],
             "failed_surfaces": [] if score >= 4 else surfaces,
@@ -273,11 +274,12 @@ def test_original_owner_rejected_article_reaches_stricter_review_and_low_grade_b
     assert instructions["draft"] == fixture["draft"]
     assert set(instructions["dimension_anchors"]) == {
         "reader_relevance", "information_gain", "analytical_depth", "natural_expression", "platform_fit"}
-    assert "source-specific" in instructions["dimension_anchors"]["analytical_depth"]
-    rules = " ".join(instructions["reader_value_checks"])
-    assert "at most 3" in rules and "major issue" in rules
-    assert "product and its audience" in rules
-    assert "untrusted hypothesis" in rules
+    assert "actual takeaway" in instructions["dimension_anchors"]["analytical_depth"]
+    rules = " ".join(instructions["comprehension_checks"])
+    assert "at most 3" in rules and "material problem" in rules
+    assert "replacing its product name" in rules
+    assert "no specific fact in this text" in rules
+    assert "canonical_claims" not in instructions
     assert "value_contract" not in body["response_contract"]
     assert state == "failed" and review is not None and not review.passed
     assert blocked.status == "quality_insufficient" and not blocked.critic.passed
@@ -293,7 +295,8 @@ def test_supported_specific_judgment_can_pass_without_changing_claim_authority()
     brief = {**_brief("commercial"), "value_contract": contract()}
     original = output.model_dump(mode="json")
     review, state, accepted, body = assess_with_scripted_grade(output, 4, brief)
-    assert body["editorial_review"]["public_editorial_brief"]["value_contract"] == contract()
+    assert "public_editorial_brief" not in body["editorial_review"]
+    assert contract()["thesis"] in body["editorial_review"]["draft"]["master_content"]
     assert state == "passed" and review.passed and accepted.critic.passed
     assert accepted.blocks == output.blocks
     assert accepted.master_content == original["master_content"]

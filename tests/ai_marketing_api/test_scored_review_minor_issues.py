@@ -35,7 +35,9 @@ def replay(fixture, assessment):
         return {**copy.deepcopy(assessment), "_model": "offline-recorded-review"}
 
     review, state = asyncio.run(assess_editorial(output=output, brief={}, run=run,
-        llm=recorded_assessment, system="offline", model_args=(), scorecard_required=True))
+        # Historical assessment replay retains its original optional-report
+        # contract; it must not synthesize a new reader report for old grades.
+        llm=recorded_assessment, system="offline", model_args=(), scorecard_required=False))
     return review, state, apply_editorial_assessment(output, review), calls
 
 

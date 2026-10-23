@@ -10,6 +10,7 @@ from ai_marketing_api import operator_content as content
 from ai_marketing_api.operator_editorial import BoundedModelRun, RuntimeBudget
 from ai_marketing_api.operator_review import apply_editorial_assessment, assess_editorial
 from tests.ai_marketing_api.test_industry_conditional_editorial import _canonical, _normalize
+from tests.ai_marketing_api.test_editorial_steps_and_scorecard import review as scripted_review
 
 
 ROUND18_CREATIVE_CONDITION = (
@@ -120,7 +121,7 @@ def test_empty_contrast_does_not_bypass_independent_quality_review():
     async def independent_low_grade(_system, body, _fallback, **_kwargs):
         surfaces = body["editorial_review"]["output_rules"]["expected_surfaces"]
         assert text in body["editorial_review"]["draft"]["master_content"]
-        return {"_model": "offline-review-protocol", "relevant_to_brief": True,
+        return {"_model": "offline-review-protocol", "narrative_report": scripted_review(body)["narrative_report"], "relevant_to_brief": True,
             "useful_to_reader": False, "clear_and_specific": False, "platform_fit": True,
             "issues": ["空泛对比缺少具体判断。"], "failed_surfaces": surfaces,
             "quality_scorecard": {"surfaces": [{"surface": surface,

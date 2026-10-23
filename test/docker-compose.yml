@@ -16,6 +16,7 @@ services:
       - "192.168.3.6:8095:8095"
     volumes:
       - ./logs/hermes-agent:/app/logs
+      - hermes_server_config:/data/hermes
       - hermes_editorial_receipts:/data/hermes/marketing_api
     healthcheck:
       test: ["CMD", "python", "-c", "import json, os, urllib.request; req=urllib.request.Request('http://127.0.0.1:8095/api/v1/operators/health', headers={'Authorization': 'Bearer ' + os.environ['HERMES_API_KEY']}); data=json.load(urllib.request.urlopen(req, timeout=5)); assert data['status']=='ok' and all(item['ready'] for item in data['roles'].values())"]
@@ -29,5 +30,7 @@ networks:
     external: true
 
 volumes:
+  hermes_server_config:
+    name: hermes-server-config
   hermes_editorial_receipts:
     name: hermes-editorial-receipts

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
+import os
 import re
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Sequence
@@ -71,6 +73,7 @@ class OperatorComposeRequest(OperatorProposeRequest):
     fact_expression_mode: Literal["exact", "grounded_paraphrase"] = "exact"
     owner_revision: Optional[OwnerRevision] = None
     editorial_feedback: str = Field(default="", max_length=6000)
+    surface_fact_plan: Optional[Dict[str, Any]] = None
 
 
 _PARAGRAPH_ID_RE = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,47}")
@@ -152,6 +155,73 @@ class OperatorContentOutput(StrictModel):
     editorial_assessment: Optional[EditorialReview] = None
     quality_scorecard: Optional[QualityScorecard] = None
     genre: str = ""
+    surface_fact_plan_sha256: Optional[str] = None
+
+    @model_serializer(mode="wrap")
+    def serialize_fact_plan(self, handler):
+        data = handler(self)
+        if self.surface_fact_plan_sha256 is None:
+            data.pop("surface_fact_plan_sha256", None)
+        return data
+
+
+_SURFACE_DEPENDENCIES = {
+    "billing": re.compile(r"付费|计费|费用|价格|省钱|节省|成本|收费|免费|\b(?:pay|paid|billing|cost|price|saving)\b", re.I),
+    "input_constraints": re.compile(r"(?:提示词|素材|宽高比|种子|音频|参数|输入).{0,24}(?:复用|重传|重新传|报错|不能改|不可改)|(?:复用|重传|重新传).{0,24}(?:提示词|素材|参数|输入)|(?:不能|不可|不支持|不得|禁止|无法).{0,8}(?:修改|改动|更换|换|改).{0,16}(?:提示词|素材|参数|输入)|(?:提示词|素材|参数|输入).{0,16}(?:不能|不可|不支持|不得|禁止|无法).{0,8}(?:修改|改动|更换|换|改)|\b(?:reuse|resubmit|input restrictions)\b", re.I),
+}
+
+
+def _plan_digest(value):
+    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True,
+        separators=(",", ":"), default=str).encode()).hexdigest()
+
+
+def _validated_surface_fact_plan(request):
+    plan = request.surface_fact_plan
+    if plan is None:
+        return None
+    body = {k: v for k, v in plan.items() if k not in {"signature", "certificate", "plan_sha256"}}
+    secret = os.getenv("HERMES_API_KEY", "").strip()
+    expected = hmac.new(secret.encode(), ("surface_fact_plan.v1\n" + _plan_digest(body)).encode(), hashlib.sha256).hexdigest()
+    scope = body.get("scope") or {}
+    pool = [{"claim_id": f"claim-{i + 1}", "kind": _claim_kind(c.kind),
+        "text_sha256": hashlib.sha256(c.text.encode()).hexdigest(), "evidence_ids": list(c.evidence_ids)}
+        for i, c in enumerate(request.claims)]
+    surfaces, roles = body.get("surfaces"), body.get("fact_roles")
+    ids = {c["claim_id"] for c in pool}
+    invalid = (not secret or plan.get("plan_sha256") != _plan_digest(body)
+        or not hmac.compare_digest(str(plan.get("signature") or ""), expected)
+        or body.get("schema_version") != "surface_fact_plan.v1" or request.genre != "industry_analysis"
+        or scope.get("role_id") != "industry" or scope.get("genre") != request.genre
+        or scope.get("objective_sha256") != hashlib.sha256(request.objective.encode()).hexdigest()
+        or body.get("claim_pool") != pool or body.get("narrative_required") is not True
+        or not isinstance(surfaces, dict) or not {"master", *request.channels}.issubset(surfaces)
+        or not isinstance(roles, dict) or set(roles) != {"anchor", *_SURFACE_DEPENDENCIES})
+    if invalid:
+        raise ContextAuthorizationError("surface_fact_plan_invalid", "surface_fact_plan", "A matching server-signed display plan is required.")
+    def refs(value):
+        return isinstance(value, list) and all(isinstance(x, str) and x in ids for x in value) and len(value) == len(set(value))
+    classified = [x for values in roles.values() if isinstance(values, list) for x in values]
+    if (not roles["anchor"] or any(not refs(v) for v in roles.values())
+            or len(classified) != len(set(classified)) or set(classified) != ids
+            or any(not refs(v) or not set(v).intersection(roles["anchor"])
+                or (s in {"master", "wechat_mp", "toutiao"} and set(v) != ids) for s, v in surfaces.items())):
+        raise ContextAuthorizationError("surface_fact_plan_invalid", "surface_fact_plan", "Required claim IDs cannot be downgraded by the candidate.")
+    return body
+
+
+def _surface_required_ids(plan, surface, raw_blocks, title=""):
+    if plan is None:
+        return None
+    required = set(plan["surfaces"][surface])
+    text = title + " " + " ".join(str(b.get("text") or b.get("public_text") or "") for b in (raw_blocks or []) if isinstance(b, dict))
+    text = re.sub(r"\s+", " ", text)
+    for role, pattern in _SURFACE_DEPENDENCIES.items():
+        if pattern.search(text):
+            if not plan["fact_roles"][role]:
+                raise ContextAuthorizationError("surface_fact_plan_dependency_evidence_missing", surface, "The topic needs approved evidence for this condition.")
+            required.update(plan["fact_roles"][role])
+    return required
 
 
 SUPPORTED_CHANNEL_FORMATS: Dict[str, str] = {
@@ -1540,6 +1610,7 @@ def _safe_candidate_blocks(
     prefix: str,
     template_blocks: Sequence[ContentBlock] = (),
     allow_legacy_canonical: bool = False,
+    required_claim_ids: Optional[set[str]] = None,
 ) -> tuple[List[ContentBlock], List[str], List[str]]:
     selected: List[ContentBlock] = []
     errors: List[str] = []
@@ -1558,7 +1629,8 @@ def _safe_candidate_blocks(
         (_value(block.kind), block.text, tuple(block.evidence_ids)): block
         for block in canonical_blocks
     }
-    required_blocks = [block for block in approved_blocks if block.required]
+    required_blocks = [block for block in approved_blocks if block.required
+        and (required_claim_ids is None or block.claim_id in required_claim_ids)]
 
     if raw_blocks is None:
         return selected, errors, warnings
@@ -2191,6 +2263,7 @@ def _normalize_content_output(
     candidate: Dict[str, Any],
 ) -> OperatorContentOutput:
     role = role_id if isinstance(role_id, OperatorRole) else OperatorRole(role_id)
+    fact_plan = _validated_surface_fact_plan(request)
     profile: OperatorProfile = registry.get(role)
     approved_blocks, claim_errors = _build_approved_blocks(role, request, contexts)
     fallback_errors = [str(value) for value in fallback.get("_fallback_errors") or []]
@@ -2209,6 +2282,7 @@ def _normalize_content_output(
         prefix="master",
         template_blocks=base_blocks,
         allow_legacy_canonical=allow_legacy_canonical,
+        required_claim_ids=_surface_required_ids(fact_plan, "master", raw_master_blocks, str(candidate.get("master_title") or "")),
     )
     errors.extend(master_errors)
     warnings.extend(master_warnings)
@@ -2287,6 +2361,7 @@ def _normalize_content_output(
             prefix=f"variant-{platform}",
             template_blocks=base_variant_blocks,
             allow_legacy_canonical=allow_legacy_canonical,
+            required_claim_ids=_surface_required_ids(fact_plan, platform, raw_variant_blocks, str(raw.get("title") or "")),
         )
         errors.extend(variant_errors)
         warnings.extend(variant_warnings)
@@ -2407,7 +2482,8 @@ def _normalize_content_output(
 def normalize_content_output(registry, role_id, request, contexts, fallback, candidate):
     with editorial_scope(request.genre):
         output = _normalize_content_output(registry, role_id, request, contexts, fallback, candidate)
-    return output.model_copy(update={"genre": request.genre})
+    return output.model_copy(update={"genre": request.genre,
+        "surface_fact_plan_sha256": (request.surface_fact_plan or {}).get("plan_sha256")})
 
 
 def enforce_social_publishability(output: OperatorContentOutput) -> OperatorContentOutput:
@@ -3238,6 +3314,9 @@ def content_request_payload(
     contexts: Sequence[AuthorizedContext],
 ) -> Dict[str, Any]:
     role = role_id if isinstance(role_id, OperatorRole) else OperatorRole(role_id)
+    fact_plan = _validated_surface_fact_plan(request)
+    if fact_plan is not None and role is not OperatorRole.INDUSTRY:
+        raise ContextAuthorizationError("surface_fact_plan_role_denied", "surface_fact_plan", "The signed plan belongs to industry.")
     visible = disclosable_contexts(role, request, contexts)
     visible_ids = {context.record_id for context in visible}
     public_brief = request.public_editorial_brief
@@ -3855,4 +3934,40 @@ def content_request_payload(
         payload["publication_brief"]["authored_block_rule"] = rule
         payload["publication_brief"]["thesis_contract"] = [rule]
         payload["response_contract"]["safety"].append(rule)
+    if request.owner_revision is not None:
+        # The signed input remains an exact audit of the approved direction.
+        # An old AI thesis is not the owner's instruction for this revision.
+        for key in ("angle", "audience_value"):
+            payload["approved_proposal"].pop(key, None)
+        payload.pop("approved_editorial_brief", None)
+        if payload.get("public_editorial_brief"):
+            payload["public_editorial_brief"] = {k: v for k, v in payload["public_editorial_brief"].items()
+                if k not in {"angle", "reader_value", "value_contract"}}
+        payload["owner_revision_contract"] += (
+            " The former AI angle, value contract and reader-value hypothesis have been removed from this "
+            "writer view. Choose a coherent main point in response to the actual latest owner concern; "
+            "do not preserve an obsolete thesis merely because it appeared in the prior draft. "
+            "The audience, objective, genre, factual restrictions and authorized evidence remain binding."
+        )
+    if fact_plan is not None:
+        payload["surface_fact_plan"] = {k: fact_plan[k] for k in ("surfaces", "fact_roles", "editorial_intent")}
+        payload["surface_fact_plan_rule"] = (
+            "The registry is the complete authorized evidence pool, not a display quota on every surface. "
+            "Use the server's required claim IDs for this surface. All long-form surfaces retain the full pool; "
+            "a short surface develops its own focused main point. Mentioning payment or cost additionally "
+            "requires billing evidence; explaining input-reuse restrictions requires the complete input-constraints "
+            "evidence. You cannot disable a required reference, change the plan, or turn a public_text proposal "
+            "into verified evidence. The new AI editorial intent is a writing hypothesis, not owner feedback or facts."
+        )
+        target = "master" if MASTER_ONLY.get() or not request.channels else request.channels[0] if len(request.channels) == 1 else None
+        for block in payload["canonical_block_registry"]:
+            block["required_on_surfaces"] = [surface for surface, ids in fact_plan["surfaces"].items() if block["claim_id"] in ids]
+            if target:
+                block["required"] = block["claim_id"] in fact_plan["surfaces"][target]
+        payload["response_contract"]["safety"][2] = payload["surface_fact_plan_rule"]
+        payload["response_contract"]["editorial_shape"]["rule"] = (
+            "Write a coherent subject-specific article for this genre and reader. Preserve the server's "
+            "required references for each surface and every triggered dependency; optional pool references "
+            "need not be repeated. All factual and disclosure restrictions remain unchanged."
+        )
     return payload

@@ -5,6 +5,7 @@ import pytest
 
 import ai_marketing_api.main as api
 from tests.ai_marketing_api.test_operator_api import _request
+from tests.ai_marketing_api.test_editorial_steps_and_scorecard import review
 
 
 FACT = "公开工具允许负责人自行选择待审核稿件。"
@@ -42,7 +43,7 @@ def install_model(monkeypatch, *, invented_testimony=False, documentation=False)
         if "editorial_review" in body:
             draft = body["editorial_review"]["draft"]
             assert "我亲测" not in str(draft)
-            return {"_model": "offline-independent-editor", "quality_scorecard": {
+            return {"_model": "offline-independent-editor", "narrative_report": review(body)["narrative_report"], "quality_scorecard": {
                 "schema_version": "quality_scorecard.v1", "surfaces": [{"surface": surface,
                     "reader_relevance": 4, "information_gain": 4, "analytical_depth": 4,
                     "natural_expression": 4, "platform_fit": 4, "major_issues": [], "issues": []}
