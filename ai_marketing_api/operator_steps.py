@@ -12,7 +12,7 @@ from pydantic import Field
 
 from ai_marketing_api.operator_content import (
     OperatorComposeRequest, OperatorContentOutput, build_content_fallback,
-    content_request_payload, normalize_content_output,
+    content_request_payload, normalize_content_output, SUPPORTED_CHANNEL_FORMATS,
 )
 from ai_marketing_api.operator_editorial import BoundedModelRun
 from ai_marketing_api.operator_grounding import apply_grounded_paraphrases, paraphrase_eligible
@@ -24,6 +24,63 @@ from ai_marketing_api.operator_private_receipts import PRIVATE_GENERATION_CAPTUR
 
 
 EditorialStep = Literal["draft_master", "adapt_platform", "verify_claims", "review_editorial"]
+
+_WRITER_JSON_PROTOCOL = (
+    "\n\nInternal staged writer output protocol: Return exactly one strict JSON object. "
+    "Do not wrap it in Markdown fences and do not add prose before or after the object. "
+    "Inside JSON text strings, use Chinese quotation marks such as 「」 or correctly JSON-escape "
+    "ASCII quotation marks and control characters. Never put unescaped ASCII double quotes "
+    "inside a text string. Follow only the current stage_writer_contract output surfaces; "
+    "instructions for later stages in editorial_feedback do not expand this stage's scope. "
+    "All canonical evidence and disclosure restrictions remain mandatory."
+)
+
+
+def _writer_trace_completed(candidate):
+    trace = candidate.get("generation_trace") if isinstance(candidate, dict) else None
+    attempts = trace.get("attempts") if isinstance(trace, dict) else None
+    return (isinstance(attempts, list) and len(attempts) == 1
+        and trace.get("origin") == "model" and isinstance(attempts[0], dict)
+        and attempts[0].get("stage") == "compose" and attempts[0].get("outcome") == "returned"
+        and not attempts[0].get("error_code")
+        and str(candidate.get("model") or "").strip().lower() not in {"", "fallback", "unavailable", "deterministic"})
+
+
+def _writer_shape_present(candidate, step, surface):
+    def manuscript(value):
+        blocks = value.get("blocks")
+        title = value.get("master_title" if step == "draft_master" else "title")
+        return (isinstance(title, str) and bool(title.strip()) and isinstance(blocks, list) and bool(blocks)
+            and all(isinstance(block, dict) for block in blocks)
+            and any((isinstance(block.get("block_ref"), str) and block["block_ref"].strip())
+                or (isinstance(block.get("kind"), str) and block["kind"] in {"opinion", "transition", "cta"}
+                    and isinstance(block.get("text"), str) and block["text"].strip()) for block in blocks))
+    variants = candidate.get("platform_variants", [])
+    if not isinstance(variants, list):
+        return False
+    if step == "draft_master":
+        return not variants and manuscript(candidate)
+    return (len(variants) == 1 and isinstance(variants[0], dict)
+        and variants[0].get("platform") == surface and manuscript(variants[0]))
+
+
+def _stage_writer_contract(body, step, surface):
+    contract = body["response_contract"]
+    if step == "draft_master":
+        contract["platform_variants"] = []
+        contract["safety"][2] = "The master must include every canonical registry block marked required. platform_variants must be []."
+        contract["safety"][4] = "Write only the master_title and master blocks. Keep the canonical factual title anchor; do not write any platform variant."
+        scope = "Write only the master manuscript. Return master_title, blocks and platform_variants=[]. Do not draft any platform yet."
+    else:
+        blocks_contract = contract.pop("blocks")
+        contract.pop("master_title")
+        contract["platform_variants"] = [{"platform": surface, "format": SUPPORTED_CHANNEL_FORMATS[surface],
+            "title": "a distinct factual-anchor title for this target only", "blocks": blocks_contract}]
+        contract["safety"][4] = "Do not rewrite master_draft. Write a distinct factual-anchor title and blocks only for the exact requested platform."
+        scope = "Preserve master_draft as immutable context. Return only one platform_variants entry for the exact target_surface; do not emit or rewrite master fields or any other platform."
+    body["stage_writer_contract"] = {"step": step, "target_surface": "master" if step == "draft_master" else surface,
+        "permitted_output_surfaces": ["master"] if step == "draft_master" else [surface], "rule": scope,
+        "feedback_scope": "Keep editorial_feedback unchanged and honor its applicable writing advice. Platform advice belongs only to its own later adaptation step; it never expands this step's outputs."}
 
 
 class EditorialStepRequest(StrictModel):
@@ -120,10 +177,31 @@ async def run_editorial_step(registry, role, step: EditorialStep, payload: Edito
                             MASTER_ONLY.reset(token)
                         if prior.critic.errors:
                             raise ValueError("master_evidence_invalid")
+                        if not _writer_trace_completed(payload.candidate):
+                            raise ValueError("master_writer_not_completed")
                         body["master_draft"] = {"title": prior.master_title, "body": prior.master_content}
-                    candidate = await run.call(llm, registry.get(role).system_prompt, body, fallback, stage=stage)
+                        fallback = {**fallback, "master_title": prior.master_title, "master_content": prior.master_content,
+                            "blocks": [block.model_dump(mode="json") for block in prior.blocks]}
+                    _stage_writer_contract(body, step, payload.surface)
+                    candidate = await run.call(llm, registry.get(role).system_prompt + _WRITER_JSON_PROTOCOL, body, fallback, stage=stage)
                     capture.writer(candidate)
+                    if (len(run.attempts) != 1 or run.attempts[0].outcome != "returned" or candidate.get("_error")
+                            or str(candidate.get("_model") or candidate.get("model") or "fallback").strip().lower()
+                                in {"fallback", "unavailable", "deterministic"}
+                            or not _writer_shape_present(candidate, step, payload.surface)):
+                        code = "writer_model_not_completed"
+                        trace = run.trace(blocked=not run.attempts, review="not_requested", stop_reason=code)
+                        if request.fact_expression_mode == "grounded_paraphrase":
+                            trace.evidence_mode = "grounded_paraphrase"
+                        return capture.attach({"schema_version": "operator.editorial_step.v1", "step": step,
+                            "status": "unavailable", "error_code": code, "artifact": None,
+                            "publishable": False, "requires_human_review": True,
+                            "generation_trace": trace.model_dump(mode="json")})
                     output = normalize_content_output(registry, role, scoped, contexts, fallback, candidate)
+                    if step == "adapt_platform":
+                        # This step owns only the requested variant. Its signed
+                        # master remains the exact successful previous artifact.
+                        output.master_title, output.master_content, output.blocks = prior.master_title, prior.master_content, prior.blocks
                     # Keep proposals as unverified metadata; rendered text remains
                     # canonical until the separately budgeted verifier accepts it.
                     raw_surfaces = {"master": candidate.get("blocks", [])}
@@ -172,11 +250,11 @@ async def run_editorial_step(registry, role, step: EditorialStep, payload: Edito
                 "generation_trace": trace.model_dump(mode="json")}
             return capture.attach(result, run.private_review_receipt if step == "review_editorial" else None)
     except ValueError as exc:
-        code = str(exc) if str(exc) in {"stage_route_unavailable", "artifact_signature_invalid", "signed_master_required", "signed_candidate_required", "candidate_required", "master_evidence_invalid"} else "step_artifact_invalid"
+        code = str(exc) if str(exc) in {"stage_route_unavailable", "artifact_signature_invalid", "signed_master_required", "signed_candidate_required", "candidate_required", "master_evidence_invalid", "master_writer_not_completed"} else "step_artifact_invalid"
         result = {"schema_version": "operator.editorial_step.v1", "step": step,
             "status": "unavailable", "error_code": code, "artifact": None,
             "publishable": False, "requires_human_review": True,
-            "generation_trace": run.trace(blocked=True, review="not_requested", stop_reason=code).model_dump(mode="json")}
+            "generation_trace": run.trace(blocked=not run.attempts, review="not_requested", stop_reason=code).model_dump(mode="json")}
         return capture.attach(result, run.private_review_receipt if step == "review_editorial" else None)
     finally:
         PRIVATE_GENERATION_CAPTURE.reset(private_token)
