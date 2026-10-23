@@ -435,17 +435,36 @@ _INDUSTRY_DIRECTION_ALREADY_RE = re.compile(
     r"方向(?P<temporal_direction>已经)清楚时"
     r")(?=$|[，,。！？!?；;：:\s])"
 )
+# A conditional creative state is not a claim about a deployed capability.
+# Capture only its predicate: other events, quantities and outcomes still scan.
+_INDUSTRY_CREATIVE_CONDITION_ALREADY_RE = re.compile(
+    r"(?:^|[，,。！？!?；;：:\n])[ \t]*(?:但|不过)?(?:假设|如果|若|当)(?:"
+    r"(?:创作输入|输入|提示词|参考素材|素材|镜头安排)"
+    r"(?:[ \t]*(?:、|和|与|及)[ \t]*(?:创作输入|输入|提示词|参考素材|素材|镜头安排)){0,5}"
+    r"(?P<input_ready>已经)(?:确定|定下)|"
+    r"(?:样片|预览画面|镜头|画面)(?:中|里)?(?P<sample_intent>已经)"
+    r"(?:表达|呈现|表现|拍)(?:出(?:了)?|了)(?:预期的|所需的|设定的|想要的)?"
+    r"(?:创作意图|表达意图|情绪|情感|犹豫|迟疑|紧张|期待|不舍)|"
+    r"(?:预期的|所需的|设定的|想要的)?"
+    r"(?:创作意图|表达意图|情绪|情感|犹豫|迟疑|紧张|期待|不舍)"
+    r"(?P<depicted_intent>已经)(?:表达|呈现|表现|拍)出来(?:了)?"
+    r")(?:时)?(?=$|[，,。！？!?；;：:\n])"
+)
 _INDUSTRY_NONSTAT_COUNT_RE = re.compile(
     r"(?:"
-    r"这给样片划出了(?P<boundary>一条)边界|"
+    r"(?:这|这项约束|这种用法)给(?:样片|预览|审看|创作方案|创作取舍)"
+    r"划出了(?P<boundary>一条)(?:实用|明确|清晰|操作|使用|判断){0,2}(?:边界|界线)|"
     r"更像为[^，,。！？!?；;：:\n]{1,24}买(?P<opportunity>一次)判断机会|"
     r"更像(?P<gate>一次)方向闸门|"
+    r"(?:更像|可看作|可以看作|可视为|可以视为)(?P<conceptual_check>一次)"
+    r"(?:有(?:明确|具体)(?:问题|目标|范围)的)?(?:检查|核对|判断|预览)|"
     r"(?:^|[，,。！？!?；;：:\n])[ \t]*没有这类待验证问题时[，,][ \t]*"
     r"样片增加的是(?P<review>一次)审看和(?P<task>一次)付费任务"
     r")(?=$|[，,。！？!?；;：:\s])"
 )
 _INDUSTRY_READER_JUDGMENT_TASK_RE = re.compile(
-    r"提交前(?:可以)?先写下它要排除的(?P<task>判断[：:])"
+    r"(?:提交前(?:可以)?先写下它要排除的|(?:帮|帮助)(?:你|读者)|用来|用于)"
+    r"(?P<task>判断[：:])"
 )
 _GENERIC_EDITORIAL_META_RE = re.compile(
     r"(?:"
@@ -685,6 +704,7 @@ def _unsupported_editorial_assertion_matches(
     allow_industry_hypothetical: bool = False,
     allow_industry_direction_condition: bool = False,
     allow_industry_pending_reasoning: bool = False,
+    allow_industry_creative_condition: bool = False,
 ) -> List[re.Match[str]]:
     allowed_spans = set()
     if allow_industry_hypothetical:
@@ -698,6 +718,11 @@ def _unsupported_editorial_assertion_matches(
                 allowed_spans.add(context.span("creative"))
     if allow_industry_direction_condition:
         for context in _INDUSTRY_DIRECTION_ALREADY_RE.finditer(text):
+            for group, value in context.groupdict().items():
+                if value is not None:
+                    allowed_spans.add(context.span(group))
+    if allow_industry_creative_condition:
+        for context in _INDUSTRY_CREATIVE_CONDITION_ALREADY_RE.finditer(text):
             for group, value in context.groupdict().items():
                 if value is not None:
                     allowed_spans.add(context.span(group))
@@ -1732,6 +1757,7 @@ def _safe_candidate_blocks(
                 ),
                 allow_industry_direction_condition=allow_industry_analysis,
                 allow_industry_pending_reasoning=allow_industry_analysis,
+                allow_industry_creative_condition=allow_industry_analysis,
             )
         ):
             return None, "assertion_forbidden"

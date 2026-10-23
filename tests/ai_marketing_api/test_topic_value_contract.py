@@ -277,8 +277,16 @@ def test_original_owner_rejected_article_reaches_stricter_review_and_low_grade_b
     assert "actual takeaway" in instructions["dimension_anchors"]["analytical_depth"]
     rules = " ".join(instructions["comprehension_checks"])
     assert "at most 3" in rules and "material problem" in rules
-    assert "replacing its product name" in rules
-    assert "no specific fact in this text" in rules
+    current = {"master": {"title": output.master_title, "body": output.master_content}, **{
+        variant.platform: {"title": variant.title, "body": variant.body}
+        for variant in output.platform_variants}}
+    bank = instructions["source_span_bank"]
+    assert set(bank) == set(current)
+    for surface, fields in current.items():
+        for source, text in fields.items():
+            assert "".join(span["text"] for span in bank[surface][source]) == text
+    assert all(surface.information_gain == 2 and surface.analytical_depth == 2
+               for surface in review.quality_scorecard.surfaces)
     assert "canonical_claims" not in instructions
     assert "value_contract" not in body["response_contract"]
     assert state == "failed" and review is not None and not review.passed

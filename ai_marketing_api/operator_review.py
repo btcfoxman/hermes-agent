@@ -186,11 +186,28 @@ def _reader_payload(output: Any, brief: dict, *, scorecard_required: bool) -> di
                 "A claim that a problem was fixed is not proof. The server independently blocks a false "
                 "narrative report even if numeric scores are high; do not conceal a material problem among "
                 "minor suggestions. Preserve every actual issue without inventing supporting evidence.",
-                "Use only the draft for the product-substitution test: if replacing its product name leaves "
-                "generic advice and no specific fact in this text changes the reader's understanding or "
-                "judgment, a vivid example or smooth prose alone cannot earn information_gain or "
-                "analytical_depth 4. This does not require a novel opinion; a clear supported explanation "
-                "of a concrete fact or task can be valuable for its genre.",
+                "Test the text's fact-to-consequence connection: identify a concrete premise explicitly "
+                "stated here and explain how it supports the reader's understanding or judgment. If that "
+                "premise were removed, would the conclusion lose its stated support? Generic restatement "
+                "or an unsupported conclusion remains insufficient. A specific, useful supported "
+                "explanation need not establish an exclusive product feature, competitor comparison, "
+                "quantified costs or a real case. Renaming the product does not show that its constraints "
+                "are universal. Do not invent outside product behavior or demand missing data unless the "
+                "text's actual conclusion depends on it.",
+                "Independently compare each title with its own body: preserve the actor, before/after "
+                "order, negation, causal direction and stated conditions. A title that reverses the body's "
+                "sequence or meaning is a substantive contradiction, even if you can infer an intended "
+                "correction. Identify the conflicting title and body wording using their source-span IDs "
+                "and report the actual contradiction in issues; do not silently repair it in the summary. "
+                "Fail the relevant comprehension checks and quality dimensions when the contradiction "
+                "materially changes what a reader understands or decides.",
+                "Check the body's premises and decision chain. Do not accept an either/or conclusion "
+                "unless its stated conditions support excluding other compatible choices; identify a "
+                "missing premise, false dichotomy or unsupported causal step without supplying it for "
+                "the author. A clearly labeled hypothetical can provide useful reasoning when its "
+                "conditions, reasons and conditional takeaway form a complete chain; it need not be a "
+                "real case. Judge that bounded claim rather than requiring it to settle every possible "
+                "situation. A vivid scenario alone cannot replace the missing reasoning.",
             ],
             "scorecard_rubric": "1 unusable, 2 major rewrite, 3 useful but needs revision, 4 publication-quality, 5 exceptional. Every surface needs all five >=4 and zero major issues. Score the current text independently; evidence compliance or completeness alone earns no quality score.",
             "dimension_anchors": {

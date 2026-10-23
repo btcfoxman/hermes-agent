@@ -819,7 +819,6 @@ def test_sparse_evidence_brief_and_editor_do_not_demand_invented_product_tutoria
             assert "canonical_claims" not in review
             assert "public_editorial_brief" not in review
             assert "Do not force novelty" in review["genre_review_rule"]
-            assert "cannot earn information_gain" in " ".join(review["comprehension_checks"])
             return _review()
         assert len(body["evidence_scope_contract"]) == 4
         assert "not additional facts" in body["evidence_scope_contract"][0]
@@ -843,6 +842,27 @@ def test_sparse_evidence_brief_and_editor_do_not_demand_invented_product_tutoria
 
     monkeypatch.setattr(api, "_llm_json", fake)
     data = _request("POST", "/api/v1/operators/commercial/compose", json=payload).json()
+    review = next(body["editorial_review"] for body in calls if "editorial_review" in body)
+    draft = review["draft"]
+    assert draft == {
+        "master_title": data["master_title"], "master_content": data["master_content"],
+        "platform_variants": [{key: variant[key] for key in ("platform", "title", "body")}
+                              for variant in data["platform_variants"]],
+    }
+    assert review["reader_context"] == {
+        "audience": payload["public_editorial_brief"]["audience"],
+        "genre": data["genre"],
+        "platforms": ["master", *payload["channels"]],
+    }
+    current = {"master": {"title": draft["master_title"], "body": draft["master_content"]}, **{
+        variant["platform"]: {"title": variant["title"], "body": variant["body"]}
+        for variant in draft["platform_variants"]}}
+    bank = review["source_span_bank"]
+    assert set(bank) == set(current)
+    for surface, fields in current.items():
+        for source, text in fields.items():
+            assert "".join(span["text"] for span in bank[surface][source]) == text
+    assert payload["claims"][0]["text"] in draft["master_content"]
     assert data["status"] == "content_ready", data
     assert len(calls) == 2
     assert "按眼前的创作任务" in data["master_content"]
