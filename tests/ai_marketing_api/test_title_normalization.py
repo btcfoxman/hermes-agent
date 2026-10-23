@@ -51,7 +51,7 @@ def _title_warnings(output):
     ("version www.invalid", "forbidden_url"),
     ("version guaranteed value", "forbidden_promise"),
     ("编辑说明：version 的选择", "forbidden_meta"),
-    ("不是 version 的全部变化", "forbidden_wrapper"),
+    ("不是 version 的变化，而是规则", "forbidden_wrapper"),
     ("version 3 reader note", "ungrounded_number"),
     ("陌生平台 version 判断", "ungrounded_entity"),
     ("Generic poetic framing", "missing_fact_anchor"),

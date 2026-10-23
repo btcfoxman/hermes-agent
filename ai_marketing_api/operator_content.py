@@ -324,6 +324,17 @@ _UNSUPPORTED_EDITORIAL_ASSERTION_RE = re.compile(
     r")",
     re.IGNORECASE,
 )
+# These are denials or material-readiness conditions, not reports of an
+# external event. Only the exact "already" token is exempted; every other
+# assertion in the same paragraph still goes through the original guard.
+_INDUSTRY_HYPOTHETICAL_ALREADY_RE = re.compile(
+    r"(?:^|[，,。！？!?；;：:\n])\s*(?:"
+    r"(?:不是|并非)(?P<negated>已经)(?:实现的功能(?:或测试结果)?|完成的测试结果)"
+    r"(?=$|[，,。！？!?；;：:\s])|"
+    r"(?:如果|若|当)(?:资料|材料)(?P<conditional>已经)(?:齐备|齐全|备齐)"
+    r"(?=$|[时但，,。！？!?；;：:\s])"
+    r")"
+)
 _GENERIC_EDITORIAL_META_RE = re.compile(
     r"(?:"
     r"先把.{0,16}事实.{0,16}(?:判断|观点).{0,8}分开|"
@@ -345,12 +356,12 @@ _GENERIC_EDITORIAL_META_RE = re.compile(
 )
 _INDUSTRY_CONTRAST_CLICHE_RE = re.compile(
     r"(?:"
-    r"不(?:只|仅)?是|并非|未必是|只是(?:结果|表面|数字|开始|第一步)|"
+    r"不(?:只|仅)是|(?:不是|并非|未必是)[^。！？!?；;\n]{1,48}(?:而是|更是)|"
+    r"只是(?:结果|表面|数字|开始|第一步)|"
     r"不(?:只|仅)?在.{0,48}(?:更在|而在)|"
     r"不在.{0,48}而在|"
     r"不(?:能|该|应)?只(?:看|盯|关注)|"
     r"别(?:只|光)(?:看|盯|关注)|"
-    r"(?:如果|若).{1,100}[；;](?:如果|若)|"
     r"越.{1,48}越难只靠|"
     r"(?:接下来|后续).{0,12}(?:最|更)?值得(?:看|关注|观察|盯)|"
     r"最值得注意的?是|"
@@ -483,6 +494,23 @@ def _binding_hash(data: Dict[str, Any]) -> str:
 
 def _number_tokens(value: str) -> set[str]:
     return {match.group(0) for match in _NUMBER_RE.finditer(value)}
+
+
+def _unsupported_editorial_assertion_matches(
+    text: str,
+    *,
+    allow_industry_hypothetical: bool = False,
+) -> List[re.Match[str]]:
+    allowed_spans = set()
+    if allow_industry_hypothetical:
+        for context in _INDUSTRY_HYPOTHETICAL_ALREADY_RE.finditer(text):
+            for group in ("negated", "conditional"):
+                if context.group(group) is not None:
+                    allowed_spans.add(context.span(group))
+    return [
+        match for match in _UNSUPPORTED_EDITORIAL_ASSERTION_RE.finditer(text)
+        if not (match.group(0) == "已经" and match.span() in allowed_spans)
+    ]
 
 
 def _source_restatement_ratio(value: str, source: str) -> float:
@@ -1482,7 +1510,13 @@ def _safe_candidate_blocks(
             )
             or _PROMISE_RE.search(text)
             or _DELIVERY_COMMITMENT_RE.search(text)
-            or _UNSUPPORTED_EDITORIAL_ASSERTION_RE.search(text)
+            or _unsupported_editorial_assertion_matches(
+                text,
+                allow_industry_hypothetical=(
+                    role is OperatorRole.INDUSTRY
+                    and CURRENT_GENRE.get() == "industry_analysis"
+                ),
+            )
         ):
             return None, "assertion_forbidden"
         if _GENERIC_EDITORIAL_META_RE.search(text):
