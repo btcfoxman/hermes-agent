@@ -208,6 +208,78 @@ templates do not become authored content. Legacy requests without these new
 fields retain the boolean-review contract. Scored review uses a dedicated,
 stable independent-editor system prompt rather than the writing prompt.
 
+## Industry analysis as a core writing capability
+
+Reference learning is part of the shared planning, drafting and review method,
+not a capability that appears only when a particular `style_notes` example is
+selected. Learn how a reference establishes an event, reaches a conclusion,
+explains its mechanism and consequences, and limits its advice. Do not imitate
+its biography, interviews, alleged customers, phrasing or results. Editorial
+judgment can appear in the `industry` role; it does not require the `personal_ip`
+role, first-person narration, a contrarian position or a fixed article layout.
+
+The learning loop is: read and record actual coverage; extract a transferable
+method; calibrate with positive and negative examples; independently read the
+actual new copy; compare it with genuine owner feedback. This is a reasoning
+workflow, not a mandatory paragraph sequence. A news anchor needs an event,
+actor, date and scope. An author conclusion must go beyond a feature recap.
+Its mechanism must connect evidence to a concrete reader's choices or costs,
+with conditions under which the conclusion would change. Plausible scenes are
+labeled illustrations, never evidence of fieldwork or product testing.
+
+The owner supplied a [Sina news reference](https://finance.sina.com.cn/tech/digi/2026-09-22/doc-inistewx8830403.shtml)
+and an [AI Post Hub explainer](https://www.aiposthub.com/seedance-2-5-draft-mode-2/),
+read on 2026-10-25. The former is an IT Home republication: learn precise event
+framing and conditional figures. The latter demonstrates turning documented
+constraints into a choice. Neither is this project's experiment. Their copy,
+examples and complete tutorial structure are not reusable factual authority.
+Do not describe a September release as today's launch.
+
+Style learning records use the content service's actual feature keys: `hook`,
+`structure`, `tone`, `paragraph_rhythm`, `ending`, `title_strategy`,
+`argumentation`, `information_density`, `narrative_distance`, `avoid_patterns`
+and `tags`. Map opening and paragraph observations to `hook` and
+`paragraph_rhythm`; do not invent `openings` or `paragraphs` storage keys. A
+short stored excerpt has `coverage.text=partial`, even if more was read during
+research. Uninspected images and videos remain `unread`. Keep source dates,
+scope and the distinction between observation and editorial inference.
+
+Technical evidence remains separate: for this topic, use the
+[official Volcengine tutorial](https://docs.volcengine.com/docs/ark/seedance-2-5?lang=en)
+and [official billing documentation](https://docs.volcengine.com/docs/ark/model-pricing?lang=zh),
+with region and version scope. An original example of a bounded argument is:
+"A paid draft is worthwhile when it replaces enough final-generation attempts;
+adding it to an already successful single attempt adds a fee." This is an
+inference from separate billing, not a measured saving, an obligatory thesis
+or the owner's personal experience.
+
+### New industry narrative reports
+
+New industry analysis requires `narrative_report.v2`. Each surface adds an
+`analysis` object with `news_value`, `author_conclusion`, `causal_explanation`,
+`affected_reader`, `decision_consequence`, `limits`, `source_restatement_only`
+and `supported`. The reader reconstructs these from the actual rendered body,
+rather than inferring intent from the brief or supplying a missing conclusion
+from the title. Body supporting spans can use `news`, `thesis`, `reason`,
+`impact` and `limit`; these are evidence roles, not a prescribed layout.
+
+Required fields and well-formed span roles establish a contract, not writing
+quality. Conclusions need actual body support, a reasoned effect on a specific
+reader, and material limits. A feature restatement must not pass as analysis
+merely because the model fills every field or returns `supported`. Existing
+evidence checks, current per-surface quality gates and independent verification
+still apply. A successful report is not owner consent or publication authority.
+
+For calibration, retain the actual shallow industry draft and genuine owner
+feedback, preserving whether it came from chat or a formal review decision.
+Give its frozen copy to a genuine independent reader without the
+expected verdict, then compare the new report with the owner feedback. Keep
+the new evaluation's model, text hash and result separately; never replace the
+old score or label a synthetic fixture as a real read. Historical
+`narrative_report.v1` records remain unchanged and do not acquire v2 approval
+through backfilled fields. Only a newly qualified draft can produce a new owner
+review notification; subsequent rejection returns to research and revision.
+
 ## Internal single-call editorial steps
 
 `POST /api/v1/operators/{role_id}/editorial-steps/{step}` uses the existing

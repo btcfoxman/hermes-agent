@@ -1,0 +1,158 @@
+"""Versioned industry writing craft, never a source of facts or owner authority."""
+from __future__ import annotations
+
+INDUSTRY_METHOD_VERSION = "industry_interpretation.v1"
+INDUSTRY_NARRATIVE_SCHEMA = "narrative_report.v2"
+INDUSTRY_BODY_ROLES = frozenset({"news", "thesis", "reason", "impact", "limit"})
+
+
+def requires_industry_interpretation(output) -> bool:
+    role = getattr(output, "role_id", "")
+    return getattr(role, "value", role) == "industry" and getattr(output, "genre", "") == "industry_analysis"
+
+
+# Original transferable methods distilled from owner-supplied reading. Reference
+# reporting, figures, personal experience and conclusions are deliberately absent.
+INDUSTRY_METHOD_RULES = (
+    "Establish what actually changed and why this reader should care. Use the authorized subject, "
+    "event or update date, reporting attribution and platform/version scope when the approved facts "
+    "contain them. Distinguish a dated report from today's news; never invent a date, attribution, "
+    "interview, hands-on test, customer, result or industry-wide habit to create realism.",
+    "Make one defensible author conclusion explicit early enough to guide the article. Explain what "
+    "the reader should understand or decide differently and why. A feature description, a promise "
+    "that something is useful, or a question with no answer is not an industry interpretation.",
+    "Connect a specific approved observation to the conclusion through an explained mechanism, "
+    "a concrete affected participant and a consequence for that participant's decision. State "
+    "inference as inference. Show what this reasoning adds beyond the source's own description; "
+    "do not manufacture novelty, a competitor comparison, a number or a firm outcome.",
+    "For a cost or speed judgment, explain the tradeoff between added charges or effort, expected "
+    "avoided work and human review. A lower-priced intermediate step alone does not prove lower total "
+    "cost or faster delivery. Keep fee scope, assumptions and unmeasured results distinct.",
+    "Examine the strongest relevant alternative or condition that could change the judgment. "
+    "Explain the limit rather than listing unknowns. A reasonable boundary need not be a forced "
+    "opposition or a claim that a real opponent exists. Do not claim universal benefits.",
+    "Use verified details and meaningful tradeoffs for specificity. A clearly hypothetical scene "
+    "can illustrate an already supported argument; it cannot replace reported evidence, a causal "
+    "explanation or the author's conclusion. Never turn a reference author's experience into the owner's.",
+    "If the authorized material cannot support this analysis, stop for more research or return an "
+    "insufficient-evidence draft for revision. Do not promote a generic selection checklist, "
+    "verification question or invented workflow into a qualified industry analysis. A separate "
+    "news brief or tutorial needs its own authorized genre; do not silently change this request.",
+    "Write connected reader-facing prose with a clear priority. Keep only paragraphs that supply "
+    "evidence, reasoning, a meaningful alternative or a consequence. Do not imitate an author's "
+    "catchphrases, add fake first-person experience, force a scene, five sections, a CTA or a "
+    "contrarian position. One short paragraph may serve several argumentative functions. "
+    "Judge natural expression in context, not a word blacklist; a precise necessary limitation is useful. "
+    "A clear concluding judgment can end without an invitation.",
+)
+
+
+def industry_reader_method() -> dict:
+    """Generic method only: blind readers never receive an author's intended answer."""
+    return {"version": INDUSTRY_METHOD_VERSION, "authority": "Writing and reading method only; "
+        "not factual evidence, an intended answer, owner feedback or publication authority.",
+        "rules": list(INDUSTRY_METHOD_RULES),
+        "reader_rule": "Reconstruct news value, the author's conclusion, causal explanation, affected "
+        "reader, decision consequence and limits only from this surface's actual text. Leave a missing "
+        "answer empty and set supported=false; never complete it from outside knowledge. Mark "
+        "source_restatement_only=true when the supposed analysis only repeats features or reporting. "
+        "An illustrative scene, safe wording, fluent prose or high numeric scores cannot supply a "
+        "missing judgment. Cite body spans for news, thesis, reason, impact and limit; one exact span "
+        "may serve multiple roles and short posts need no fixed paragraph count."}
+
+
+def apply_industry_writer_method(payload: dict) -> None:
+    """Replace system-generated sparse-material fallbacks, never user/evidence data."""
+    payload["industry_editorial_method"] = industry_reader_method()
+    payload["industry_editorial_method"].pop("reader_rule")
+    publication = payload["publication_brief"]
+    publication.update(
+        voice="An industry writer who reports verified details and argues a clear, bounded interpretation.",
+        reader_outcome="Understand the sourced change, the author's conclusion and its justified consequence for a concrete reader.",
+        thesis_contract=[
+            "Follow industry_editorial_method: one explicit, supported author conclusion with its "
+            "mechanism, affected participant, decision consequence and meaningful limit.",
+            "Keep facts, attribution, dates, numbers and scope in canonical references. Distinguish "
+            "original inference from reported facts and preserve all evidence and safety gates.",
+            "Insufficient material requires research or revision; questions and invented scenes cannot "
+            "substitute for a missing industry argument."],
+        role_thesis="An industry analysis needs a supported author conclusion, an explained mechanism, "
+            "a concrete affected participant and a bounded decision consequence beyond source restatement.",
+        authored_block_rule="Write original quantity-free interpretation as opinion/transition blocks with "
+            "evidence_ids=[] and no claim_id/block_ref. Keep facts, attribution, numbers, dates and scope in "
+            "their canonical references. A proposed public_text still needs independent verification. "
+            "Conclude from evidence without inventing capabilities, causal outcomes or personal experience.",
+    )
+    platform_modes = {
+        "wechat_moments": "Concise personal-feed commentary",
+        "wechat_mp": "Readable analysis article",
+        "wechat_channels": "Spoken analysis script",
+        "douyin": "Compact spoken analysis script",
+        "kuaishou": "Plainspoken analysis script",
+        "xiaohongshu": "Scan-friendly analytical note",
+        "toutiao": "Evidence-led analysis article",
+        "weitoutiao": "Compact news commentary",
+    }
+    payload["platform_editorial_briefs"] = {channel: f"{platform_modes.get(channel, 'Reader-facing analysis')}: "
+        "retain the essential verified reporting and a clear author conclusion with its reason, reader "
+        "consequence and meaningful limit. Adapt rhythm and depth; shortness cannot excuse a missing "
+        "argument. No fixed section count, opening position or CTA."
+        for channel in payload["platform_editorial_briefs"]}
+    if "evidence_scope_contract" in payload:
+        payload["evidence_scope_contract"] = [
+            "The public brief and chat editing instruction supply intent, never additional factual "
+            "authority. Keep every claim within the authorized source, date, platform and version scope.",
+            "Do not invent functionality, interface steps, customer results, personal experience, "
+            "prices, comparisons or measured benefits. Specificity must come from supplied verified "
+            "details and original bounded reasoning rather than fabricated reporting.",
+            "Insufficient evidence requires research or revision. An industry analysis cannot become "
+            "qualified merely by ending with questions, a generic selection criterion or a vivid scenario. "
+            "Keep the text concise and honest; do not pad it to a platform word-count target."]
+    contract = payload["response_contract"]
+    contract["editorial_shape"] = {"genre": "industry_analysis", "method_version": INDUSTRY_METHOD_VERSION,
+        "rule": "Follow industry_editorial_method. Several functions may share one paragraph. Preserve "
+        "all required factual references and safety gates. Insufficient material requires research or "
+        "revision, never a qualified article made only of questions or hypothetical scenes."}
+    # Only this program's own generated instructions are replaced. The brief,
+    # owner revisions, canonical registry and authorized contexts stay byte-exact.
+    contract["safety"] = [rule for rule in contract.get("safety", []) if not any(
+        phrase in rule.lower() for phrase in ("sparse evidence", "evidence is sparse", "selection condition or verification question"))]
+    method_gate = ("Follow industry_editorial_method without changing factual, role, personal or publication "
+        "authority. Missing evidence or reasoning requires research or revision, not invented reporting.")
+    if method_gate not in contract["safety"]:
+        contract["safety"].append(method_gate)
+    payload["industry_narration_contract"] = [
+        "Apply industry_editorial_method in natural connected prose, without narrating the method to the reader.",
+        "Use optional paragraph_id to join adjacent canonical references and original reasoning naturally; "
+        "keep every canonical text, required reference and evidence binding. Do not repeat source passages "
+        "in surrounding commentary or expose the internal review process. A proposed public_text needs "
+        "the independent verifier; never set verified flags yourself."]
+    if "quality_retry" in payload:
+        retry = payload["quality_retry"]
+        retry["instruction"] = (
+            "Revise exactly focus_surface under industry_editorial_method and the original canonical "
+            "block contract. Address actual current-text diagnostics, including editorial_instruction "
+            "when supplied, without copying diagnostic text into the article. Preserve all other surfaces. "
+            "Return top-level blocks/master_title only for master, otherwise exactly the requested variant. "
+            "Do not fill missing reporting or a missing conclusion with a hypothetical or a question. "
+            "Facts, dates, attribution and quantities stay in canonical references. No new factual, "
+            "personal, capability, price, result or publication authority is granted by a repair. "
+            "If the argument cannot be supported, leave the draft insufficient for research or revision.")
+        retry["required_shape"] = [payload["response_contract"]["editorial_shape"]["rule"]]
+        retry["positive_pattern"] = {"do_not_copy_literal_placeholders": True,
+            "argument": "A specific authorized observation -> explicit author conclusion -> explained "
+                "mechanism -> affected reader's consequence -> meaningful applicability limit.",
+            "bad_shapes": ["source-only feature restatement", "an unanswered verification question",
+                "an invented scene replacing evidence", "a conclusion with no explained support"]}
+        for contract in retry.get("surface_contracts", {}).values():
+            contract["positive_writing_recipe"] = [
+                "Follow industry_editorial_method for the requested surface, keeping canonical facts "
+                "unchanged and developing an explicit supported conclusion with its consequence and limit."]
+    if "editorial_revision" in payload:
+        payload["editorial_revision"]["instruction"] = (
+            "Revise exactly focus_surfaces under industry_editorial_method, preserving already accepted "
+            "surfaces and every canonical reference and safety gate. Address the independent reader's "
+            "actual observations using a clear supported author conclusion and explained consequence. "
+            "Return top-level blocks/master_title only when master is listed and exactly the requested "
+            "channels otherwise. Missing evidence requires research or revision, never an invented fact, "
+            "hypothetical scene or verification question substituted for the missing argument.")

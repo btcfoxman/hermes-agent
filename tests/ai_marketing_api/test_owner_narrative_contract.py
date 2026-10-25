@@ -46,14 +46,14 @@ def test_industry_writer_contract_keeps_facts_and_owner_intent_separate_from_nat
     before = deepcopy(request.model_dump(mode="json"))
     contexts = registry.authorize("industry", request.authorized_context, request.as_of)
     body = content_request_payload("industry", request, contexts)
-    narration = " ".join(body["industry_narration_contract"])
+    narration = " ".join([*body["industry_editorial_method"]["rules"], *body["industry_narration_contract"]])
     assert "not a word blacklist" in narration
-    assert "Do not force a scene" in narration and "without an invitation" in narration
+    assert "force a scene" in narration and "without an invitation" in narration
     assert "paragraph_id" in narration and "independent verifier" in narration
-    assert "Do not invent the motives" in narration
-    assert "expected avoided" in narration and "human review effort before generation" in narration
-    assert "do not assert guaranteed savings" in narration
-    assert "do not expand a bounded input list" in narration
+    assert "industry-wide habit" in narration
+    assert "expected avoided" in narration and "human review" in narration
+    assert "does not prove lower total cost" in narration
+    assert "platform/version scope" in narration
     assert body["owner_revision"]["instruction"] == OWNER_NOTE
     assert body["owner_revision"]["platform_variants"] == []
     assert request.model_dump(mode="json") == before

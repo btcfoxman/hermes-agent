@@ -12,6 +12,7 @@ from ai_marketing_api.operator_editorial import BoundedModelRun, RuntimeBudget
 from ai_marketing_api.operator_review import (
     EDITOR_SYSTEM_PROMPT, _reader_payload, apply_editorial_assessment, assess_editorial,
 )
+from tests.ai_marketing_api.test_editorial_steps_and_scorecard import scripted_analysis
 
 
 # Entirely fictional texts exercise transport without copying a live draft or verdict.
@@ -49,12 +50,13 @@ def scripted_assessment(payload):
         "quality_scorecard": {"schema_version": "quality_scorecard.v1", "surfaces": [
             {"surface": surface, **{key: 4 for key in dimensions}, "major_issues": [], "issues": []}
             for surface in bank]},
-        "narrative_report": {"schema_version": "narrative_report.v1", "surfaces": [
+        "narrative_report": {"schema_version": "narrative_report.v2", "surfaces": [
             {"surface": surface, "summary": "脚本摘要，仅验证传输。", "reader_takeaway": "脚本理解。",
              "reasoning": "脚本理由，不代表模型已经判断论证。", "coherent": True, "thesis_focus": True,
-             "issues": [], "supporting_spans": [
+             "issues": [], "analysis": scripted_analysis(), "supporting_spans": [
                  {"source": source, "span_id": fields[source][0]["span_id"], "role": role}
-                 for source, role in (("title", "thesis"), ("body", "reason"))]}
+                 for source, role in (("title", "thesis"), *[("body", role)
+                     for role in ("news", "thesis", "reason", "impact", "limit")])]}
             for surface, fields in bank.items()]},
     }
 
@@ -134,7 +136,7 @@ def test_scripted_reasoning_rejections_keep_original_text_evidence_and_verdict(f
         row = review.narrative_report.surfaces[0]
         assert row.coherent == narrative["coherent"]
         assert row.issues == narrative["issues"]
-        assert [span.quote for span in row.supporting_spans] == [output.master_title, output.master_content]
+        assert [span.quote for span in row.supporting_spans] == [output.master_title, *[output.master_content] * 5]
     blocked = apply_editorial_assessment(output, review)
     assert blocked.status == "quality_insufficient"
     assert blocked.master_title == output.master_title and blocked.master_content == output.master_content

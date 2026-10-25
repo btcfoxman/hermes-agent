@@ -18,7 +18,7 @@ from ai_marketing_api.operator_review import (
     apply_editorial_assessment, assess_editorial, editorial_content_hash,
 )
 from tests.ai_marketing_api.test_editorial_layout_and_model_version import _layout_normalize
-from tests.ai_marketing_api.test_editorial_steps_and_scorecard import review as scripted_review
+from tests.ai_marketing_api.test_editorial_steps_and_scorecard import review as scripted_review, scripted_analysis
 from tests.ai_marketing_api.test_operator_api import _request
 
 
@@ -31,7 +31,8 @@ def reference_review(body):
     bank = body["editorial_review"]["source_span_bank"]
     for surface in raw["narrative_report"]["surfaces"]:
         item = next(row for row in bank[surface["surface"]]["body"] if row["text"].strip())
-        surface["supporting_spans"] = [{"source": "body", "span_id": item["span_id"], "role": "reason"}]
+        roles = ("news", "thesis", "reason", "impact", "limit") if "analysis" in surface else ("reason",)
+        surface["supporting_spans"] = [{"source": "body", "span_id": item["span_id"], "role": role} for role in roles]
     return raw
 
 
@@ -168,10 +169,11 @@ def synthetic_punctuation_case():
         master_title=draft["master_title"], master_content=draft["master_content"],
         platform_variants=[{**v, "format": SUPPORTED_CHANNEL_FORMATS[v["platform"]]} for v in draft["platform_variants"]],
         critic={"passed": True, "checks": [], "errors": [], "warnings": []})
-    report = {"schema_version": "narrative_report.v1", "surfaces": [{
+    report = {"schema_version": "narrative_report.v2", "surfaces": [{
         "surface": surface, "summary": "Synthetic protocol selection, not a new model summary.",
         "reader_takeaway": "Synthetic structure probe only.", "reasoning": "Test exact evidence binding.",
-        "coherent": True, "thesis_focus": True, "issues": [], "supporting_spans": deepcopy(spans)}
+        "coherent": True, "thesis_focus": True, "issues": [], "supporting_spans": deepcopy(spans),
+        "analysis": scripted_analysis()}
         for surface, spans in fixture["quote_spans"].items()]}
     raw = {**deepcopy(fixture["assessment_fields"]), "_model": "offline-synthetic-ref-probe",
            "narrative_report": report}
@@ -200,7 +202,8 @@ def test_synthetic_ref_form_keeps_original_scripted_depth3_failure(synthetic_pun
     bank = _narrative_span_bank(value)
     original_card = deepcopy(raw["quality_scorecard"])
     for surface in raw["narrative_report"]["surfaces"]:
-        surface["supporting_spans"] = [{"source": "body", "span_id": bank[surface["surface"]]["body"][0]["span_id"], "role": "reason"}]
+        surface["supporting_spans"] = [{"source": "body", "span_id": bank[surface["surface"]]["body"][0]["span_id"], "role": role}
+            for role in ("news", "thesis", "reason", "impact", "limit")]
     review, state, _ = assess(value, raw)
     assert state == "failed" and not review.passed and review.narrative_report.passed
     assert not review.quality_scorecard.passed and "wechat_moments" in review.failed_surfaces

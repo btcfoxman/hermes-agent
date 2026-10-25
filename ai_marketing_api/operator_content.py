@@ -11,13 +11,14 @@ from urllib.parse import urlparse
 
 from pydantic import Field, field_validator, model_serializer
 
-from ai_marketing_api.operator_editorial import EditorialReview, GenerationTrace, OwnerRevision, PublicEditorialBrief, QualityScorecard, RuntimeBudget
+from ai_marketing_api.operator_editorial import EditorialInstruction, EditorialReview, GenerationTrace, OwnerRevision, PublicEditorialBrief, QualityScorecard, RuntimeBudget
 from ai_marketing_api.operator_style import CURRENT_GENRE, MASTER_ONLY, PUBLIC_TUTORIAL_ATTRIBUTION_RE, PUBLIC_TUTORIAL_GENRE, editorial_scope, style_context
 from ai_marketing_api.operator_grounding import ClaimBindingReview, _SEEDANCE_VERSION_RE, _SEEDANCE_VERSION_UNIT_RE
 from ai_marketing_api.operator_analysis import (
     AnalysisBindingReview, PendingEditorialAnalysis, DEFER_EDITORIAL_ANALYSIS,
     derive_pending, soft_eligible,
 )
+from ai_marketing_api.operator_editorial_method import apply_industry_writer_method
 
 from ai_marketing_api.operator_runtime import (
     CONTENT_SCHEMA_VERSION,
@@ -76,6 +77,7 @@ class OperatorComposeRequest(OperatorProposeRequest):
     runtime_budget: RuntimeBudget = Field(default_factory=RuntimeBudget)
     fact_expression_mode: Literal["exact", "grounded_paraphrase"] = "exact"
     owner_revision: Optional[OwnerRevision] = None
+    editorial_instruction: Optional[EditorialInstruction] = None
     editorial_feedback: str = Field(default="", max_length=6000)
     surface_fact_plan: Optional[Dict[str, Any]] = None
 
@@ -3405,6 +3407,19 @@ def content_request_payload(
     visible = disclosable_contexts(role, request, contexts)
     visible_ids = {context.record_id for context in visible}
     public_brief = request.public_editorial_brief
+    editorial_instruction = request.editorial_instruction
+    if editorial_instruction is not None:
+        if _value(editorial_instruction.target.role_id) != role.value:
+            raise ContextAuthorizationError("editorial_instruction_role_denied", "editorial_instruction",
+                "The chat editing instruction must belong to this operator role.")
+        instruction_text = re.sub(r"\s+", "", json.dumps(_dump(editorial_instruction), ensure_ascii=False)).lower()
+        for context in contexts:
+            if _is_disclosable(role, context):
+                continue
+            excerpt = re.sub(r"\s+", "", context.content).lower()
+            if len(excerpt) >= 16 and excerpt in instruction_text:
+                raise ContextAuthorizationError("editorial_instruction_private_excerpt", context.record_id,
+                    "A non-public excerpt cannot be included in a chat editing instruction.")
     if request.editorial_feedback:
         feedback_text = re.sub(r"\s+", "", request.editorial_feedback).lower()
         for context in contexts:
@@ -3773,6 +3788,15 @@ def content_request_payload(
             for block in model_blocks
         ],
     }
+    if editorial_instruction is not None:
+        payload["editorial_instruction"] = _dump(editorial_instruction)
+        payload["editorial_instruction_contract"] = (
+            "This is the exact audited user-chat editing instruction for a bound earlier draft. It is "
+            "separate from an owner review decision, never an approval, rejection, factual grant, personal "
+            "experience or publication authorization. Apply its current writing concern within the existing "
+            "evidence and role. Reference URLs are style_only and their unread contents are not evidence. "
+            "The orchestrator verifies the target IDs, versions and hashes; these identifiers do not "
+            "authorize new claims. Return a new draft for genuine independent and human review.")
 
     forbidden_texts = [
         source
@@ -4029,7 +4053,7 @@ def content_request_payload(
         payload["publication_brief"]["authored_block_rule"] = rule
         payload["publication_brief"]["thesis_contract"] = [rule]
         payload["response_contract"]["safety"].append(rule)
-    if request.owner_revision is not None:
+    if request.owner_revision is not None or editorial_instruction is not None:
         # The signed input remains an exact audit of the approved direction.
         # An old AI thesis is not the owner's instruction for this revision.
         for key in ("angle", "audience_value"):
@@ -4038,9 +4062,10 @@ def content_request_payload(
         if payload.get("public_editorial_brief"):
             payload["public_editorial_brief"] = {k: v for k, v in payload["public_editorial_brief"].items()
                 if k not in {"angle", "reader_value", "value_contract"}}
-        payload["owner_revision_contract"] += (
+        intent_contract = "owner_revision_contract" if request.owner_revision is not None else "editorial_instruction_contract"
+        payload[intent_contract] += (
             " The former AI angle, value contract and reader-value hypothesis have been removed from this "
-            "writer view. Choose a coherent main point in response to the actual latest owner concern; "
+            "writer view. Choose a coherent main point in response to the actual current editing concern; "
             "do not preserve an obsolete thesis merely because it appeared in the prior draft. "
             "The audience, objective, genre, factual restrictions and authorized evidence remain binding."
         )
@@ -4065,4 +4090,6 @@ def content_request_payload(
             "required references for each surface and every triggered dependency; optional pool references "
             "need not be repeated. All factual and disclosure restrictions remain unchanged."
         )
+    if role is OperatorRole.INDUSTRY and request.genre == "industry_analysis":
+        apply_industry_writer_method(payload)
     return payload

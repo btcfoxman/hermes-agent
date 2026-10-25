@@ -30,6 +30,7 @@ from ai_marketing_api.operator_content import (
     publishable_editorial_references,
 )
 from ai_marketing_api.operator_editorial import BoundedModelRun, RuntimeBudget
+from ai_marketing_api.operator_editorial_method import apply_industry_writer_method
 from ai_marketing_api.operator_style import CURRENT_GENRE, editorial_scope, style_context
 from ai_marketing_api.operator_routing import (
     BUDGET_RESERVATION_ID, MAX_PROVIDER_OUTPUT_TOKENS, PROVIDER_EVENT_SINK, SINGLE_PROVIDER_REQUEST,
@@ -984,7 +985,7 @@ async def _run_compose_impl(
             or candidate.get("_error")
         ):
             break
-        reserved_calls = (2 if payload.fact_expression_mode == "grounded_paraphrase" else 1) if (payload.public_editorial_brief is not None or payload.owner_revision is not None or payload.genre or payload.style_references) else 0
+        reserved_calls = (2 if payload.fact_expression_mode == "grounded_paraphrase" else 1) if (payload.public_editorial_brief is not None or payload.owner_revision is not None or payload.editorial_instruction is not None or payload.genre or payload.style_references) else 0
         if not run.can_call() or len(run.attempts) + 1 + reserved_calls > payload.runtime_budget.max_model_calls:
             break
         failed_surfaces = missing_publishable_surfaces(
@@ -1157,6 +1158,8 @@ async def _run_compose_impl(
             ),
             "public_editorial_brief": compose_payload.get("public_editorial_brief"),
             "owner_revision": compose_payload.get("owner_revision"),
+            "editorial_instruction": compose_payload.get("editorial_instruction"),
+            "editorial_instruction_contract": compose_payload.get("editorial_instruction_contract"),
             "style_context": compose_payload.get("style_context"),
             "editorial_feedback": compose_payload.get("editorial_feedback", ""),
             "editorial_feedback_rule": compose_payload.get("editorial_feedback_rule"),
@@ -1327,6 +1330,8 @@ async def _run_compose_impl(
             retry_payload["style_context"] = style_context(payload)
             retry_payload["response_contract"]["editorial_shape"] = compose_payload["response_contract"]["editorial_shape"]
             retry_payload["quality_retry"]["required_shape"] = [compose_payload["response_contract"]["editorial_shape"]["rule"]]
+        if role_id is OperatorRole.INDUSTRY and payload.genre == "industry_analysis":
+            apply_industry_writer_method(retry_payload)
         retry_payload["quality_retry"]["instruction"] += (
             " Follow response_contract.title_safety_rule for the requested title, including its canonical factual anchor. "
             "Use model_title_normalized diagnostics to correct a replaced title; do not remove its anchor "
@@ -1376,7 +1381,7 @@ async def _run_compose_impl(
             model_args=(openai_base_url, openai_api_key, model_name, timeout_seconds),
             approved_claims=payload.claims,
         )
-    review_required = payload.public_editorial_brief is not None or payload.owner_revision is not None or bool(payload.genre or payload.style_references)
+    review_required = payload.public_editorial_brief is not None or payload.owner_revision is not None or payload.editorial_instruction is not None or bool(payload.genre or payload.style_references)
     review_state = "not_completed" if review_required else "not_requested"
     if review_required and output.status == ContentStatus.CONTENT_READY.value:
         review, review_state = await assess_editorial(
@@ -1434,6 +1439,8 @@ async def _run_compose_impl(
                     "instruction": "Revise exactly focus_surfaces to address every applicable independent-editor issue and the last repair's deterministic_validation codes, if present. Return top-level blocks/master_title only when master is listed, and exactly the channels listed in this request as platform_variants. Other surfaces are retained unchanged. Follow the original canonical block contract; ordinary fact public_text may be proposed for independent verification. No new claims, privacy, authorization, pricing or identity information may be introduced. Use transition/opinion for a closing judgment; CTA only for an actual invitation. Do not invent product instructions or results to make the advice more concrete: express an optional reader task or question where product detail is not evidenced.",
                 },
             }
+            if role_id is OperatorRole.INDUSTRY and payload.genre == "industry_analysis":
+                apply_industry_writer_method(editorial_repair_payload)
             repaired_candidate = await run.call(
                 _llm_json, profile.system_prompt, editorial_repair_payload, fallback,
                 openai_base_url, openai_api_key, model_name, timeout_seconds,

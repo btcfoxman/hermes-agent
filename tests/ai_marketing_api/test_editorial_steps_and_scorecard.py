@@ -36,6 +36,14 @@ def payload():
     return value
 
 
+def scripted_analysis():
+    """Synthetic transport fixture, never a model's evaluation of an article."""
+    return {"news_value": "Synthetic supplied observation.", "author_conclusion": "Synthetic bounded judgment.",
+        "causal_explanation": "Synthetic argument mapping.", "affected_reader": "Synthetic reader.",
+        "decision_consequence": "Synthetic decision implication.", "limits": "Synthetic applicability limit.",
+        "source_restatement_only": False, "supported": True}
+
+
 def review(body, *, low=None, missing=False):
     draft = body["editorial_review"]["draft"]
     surfaces = ["master", *[v["platform"] for v in draft["platform_variants"]]]
@@ -55,6 +63,13 @@ def review(body, *, low=None, missing=False):
         "supporting_spans": [{"source": "body", "quote": text[:180], "role": "reason"}],
         "coherent": True, "thesis_focus": True, "issues": [],
     } for surface, text in texts.items()]}
+    if body.get("response_contract", {}).get("narrative_report", {}).get("schema_version") == "narrative_report.v2":
+        report["schema_version"] = "narrative_report.v2"
+        for row in report["surfaces"]:
+            row["analysis"] = scripted_analysis()
+            quote = row["supporting_spans"][0]["quote"]
+            row["supporting_spans"] = [{"source": "body", "quote": quote, "role": role}
+                for role in ("news", "thesis", "reason", "impact", "limit")]
     return {**_review(True), "quality_scorecard": {"schema_version": "quality_scorecard.v1", "surfaces": rows},
             "narrative_report": report}
 

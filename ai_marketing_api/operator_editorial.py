@@ -14,10 +14,11 @@ import re
 from typing import Any, Awaitable, Callable, Literal
 from urllib.parse import urlsplit
 
-from pydantic import Field, field_validator, model_serializer
+from pydantic import Field, field_validator, model_serializer, model_validator
 
 from ai_marketing_api.operator_runtime import OperatorRole, StrictModel
 from ai_marketing_api.operator_routing import PROVIDER_EVENT_SINK
+from ai_marketing_api.operator_editorial_method import INDUSTRY_BODY_ROLES
 
 
 class TopicEvidenceAnchor(StrictModel):
@@ -106,6 +107,59 @@ class OwnerRevision(StrictModel):
     )
 
 
+class EditorialInstructionReference(StrictModel):
+    url: str = Field(min_length=1, max_length=4096, strict=True)
+    purpose: Literal["style_only"]
+
+    @field_validator("url")
+    @classmethod
+    def https_reference(cls, value: str) -> str:
+        parsed = urlsplit(value)
+        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+            raise ValueError("editorial instruction references require credential-free HTTPS URLs")
+        return value
+
+
+class EditorialInstructionTarget(StrictModel):
+    review_id: str = Field(min_length=1, max_length=160, strict=True)
+    review_version: int = Field(ge=1, strict=True)
+    campaign_id: str = Field(min_length=1, max_length=160, strict=True)
+    package_id: str = Field(min_length=1, max_length=160, strict=True)
+    package_version: int = Field(ge=1, strict=True)
+    role_id: OperatorRole
+    content_hash: str = Field(pattern=r"^[0-9a-f]{64}$", strict=True)
+    evidence_hash: str = Field(pattern=r"^[0-9a-f]{64}$", strict=True)
+    policy_hash: str = Field(pattern=r"^[0-9a-f]{64}$", strict=True)
+
+
+class EditorialInstruction(StrictModel):
+    """Audited user-chat editing intent, never an owner review or factual grant."""
+
+    schema_version: Literal["operator.editorial_instruction.v1"]
+    instruction_id: str = Field(min_length=1, max_length=160, strict=True)
+    instruction: str = Field(min_length=1, max_length=4000, strict=True)
+    source: Literal["user_chat"]
+    source_user_message_sha256: str = Field(pattern=r"^[0-9a-f]{64}$", strict=True)
+    references: list[EditorialInstructionReference] = Field(max_length=12)
+    target: EditorialInstructionTarget
+    owner_decision: Literal[False]
+    publication_authorized: Literal[False]
+
+    @field_validator("owner_decision", "publication_authorized", mode="before")
+    @classmethod
+    def no_decision_or_publication(cls, value):
+        if value is not False:
+            raise ValueError("editing intent cannot authorize an owner decision or publication")
+        return value
+
+    @model_validator(mode="after")
+    def bind_exact_message(self):
+        if (not self.instruction.strip() or hashlib.sha256(self.instruction.encode("utf-8")).hexdigest()
+                != self.source_user_message_sha256):
+            raise ValueError("editorial instruction message hash mismatch")
+        return self
+
+
 class GenerationAttempt(StrictModel):
     stage: Literal["planner", "propose", "revise", "compose", "repair", "claim_verification", "editorial_review"]
     surface: str = "all"
@@ -160,7 +214,26 @@ class GenerationTrace(StrictModel):
 class NarrativeSupportingSpan(StrictModel):
     source: Literal["title", "body"]
     quote: str = Field(min_length=1, max_length=500, strict=True)
-    role: Literal["thesis", "reason", "limit"]
+    role: Literal["thesis", "reason", "limit", "news", "impact"]
+
+
+class IndustryAnalysisReading(StrictModel):
+    """What a blind reader can reconstruct, never an author's supplied answer."""
+
+    news_value: str = Field(max_length=2000, strict=True)
+    author_conclusion: str = Field(max_length=2000, strict=True)
+    causal_explanation: str = Field(max_length=2000, strict=True)
+    affected_reader: str = Field(max_length=1000, strict=True)
+    decision_consequence: str = Field(max_length=2000, strict=True)
+    limits: str = Field(max_length=2000, strict=True)
+    source_restatement_only: bool = Field(strict=True)
+    supported: bool = Field(strict=True)
+
+    @property
+    def passed(self) -> bool:
+        return (all(getattr(self, key).strip() for key in (
+            "news_value", "author_conclusion", "causal_explanation", "affected_reader",
+            "decision_consequence", "limits")) and not self.source_restatement_only and self.supported)
 
 
 class SurfaceNarrativeReport(StrictModel):
@@ -172,22 +245,52 @@ class SurfaceNarrativeReport(StrictModel):
     coherent: bool = Field(strict=True)
     thesis_focus: bool = Field(strict=True)
     issues: list[str] = Field(default_factory=list, max_length=20)
+    analysis: IndustryAnalysisReading | None = None
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_shape(self, handler):
+        value = handler(self)
+        if self.analysis is None:
+            value.pop("analysis", None)
+        return value
 
     @property
     def passed(self) -> bool:
         return bool(self.summary.strip() and self.reader_takeaway.strip()
                     and self.reasoning.strip() and self.coherent and self.thesis_focus
                     and any(span.source == "body" and span.quote.strip()
-                            for span in self.supporting_spans))
+                            for span in self.supporting_spans)
+                    and (self.analysis is None or (self.analysis.passed and
+                        {span.role for span in self.supporting_spans if span.source == "body"}
+                        >= INDUSTRY_BODY_ROLES)))
 
 
 class NarrativeReport(StrictModel):
     """A reader's reconstruction of the supplied text, never factual authority."""
 
-    schema_version: Literal["narrative_report.v1"] = "narrative_report.v1"
+    schema_version: Literal["narrative_report.v1", "narrative_report.v2"] = "narrative_report.v1"
     content_sha256: str = Field(default="", max_length=64, strict=True)
     surfaces: list[SurfaceNarrativeReport] = Field(min_length=1, max_length=21)
     passed: bool = Field(default=False, strict=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def preserve_exact_legacy_shape(cls, value):
+        if isinstance(value, dict) and value.get("schema_version", "narrative_report.v1") == "narrative_report.v1":
+            rows = value.get("surfaces")
+            if isinstance(rows, list) and any(isinstance(row, dict) and "analysis" in row for row in rows):
+                raise ValueError("legacy narrative contains industry-only fields")
+        return value
+
+    @model_validator(mode="after")
+    def enforce_version_shape(self):
+        if self.schema_version == "narrative_report.v2":
+            if any(row.analysis is None for row in self.surfaces):
+                raise ValueError("industry narrative analysis missing")
+        elif any(row.analysis is not None or any(span.role in {"news", "impact"}
+                for span in row.supporting_spans) for row in self.surfaces):
+            raise ValueError("legacy narrative contains industry-only fields")
+        return self
 
 
 class EditorialReview(StrictModel):
