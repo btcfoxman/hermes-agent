@@ -4061,24 +4061,30 @@ def content_request_payload(
         payload["publication_brief"]["authored_block_rule"] = rule
         payload["publication_brief"]["thesis_contract"] = [rule]
         payload["response_contract"]["safety"].append(rule)
-    if request.owner_revision is not None or editorial_instruction is not None:
+    rebuilding_direction = (request.owner_revision is not None or editorial_instruction is not None
+                            or bool(request.editorial_feedback.strip()))
+    if rebuilding_direction:
         # The signed input remains an exact audit of the approved direction.
-        # An old AI thesis is not the owner's instruction for this revision.
+        # A previous AI thesis does not bind the revised author judgment.
         for key in ("angle", "audience_value"):
             payload["approved_proposal"].pop(key, None)
         payload.pop("approved_editorial_brief", None)
         if payload.get("public_editorial_brief"):
             payload["public_editorial_brief"] = {k: v for k, v in payload["public_editorial_brief"].items()
                 if k not in {"angle", "reader_value", "value_contract"}}
-        intent_contract = "owner_revision_contract" if request.owner_revision is not None else "editorial_instruction_contract"
+        intent_contract = ("owner_revision_contract" if request.owner_revision is not None else
+                           "editorial_instruction_contract" if editorial_instruction is not None else "editorial_feedback_rule")
         payload[intent_contract] += (
             " The former AI angle, value contract and reader-value hypothesis have been removed from this "
-            "writer view. Choose a coherent main point in response to the actual current editing concern; "
+            "writer view. Rebuild one coherent main judgment from the supplied evidence and the actual current editing concern; "
             "do not preserve an obsolete thesis merely because it appeared in the prior draft. "
             "The audience, objective, genre, factual restrictions and authorized evidence remain binding."
         )
     if fact_plan is not None:
-        payload["surface_fact_plan"] = {k: fact_plan[k] for k in ("surfaces", "fact_roles", "editorial_intent")}
+        # Evidence obligations survive revision; the old AI hypothesis must not
+        # re-enter the writer view after the earlier direction was removed.
+        payload["surface_fact_plan"] = {k: fact_plan[k] for k in
+            (("surfaces", "fact_roles") if rebuilding_direction else ("surfaces", "fact_roles", "editorial_intent"))}
         payload["surface_fact_plan_rule"] = (
             "The registry is the complete authorized evidence pool, not a display quota on every surface. "
             "Use the server's required claim IDs for this surface. All long-form surfaces retain the full pool; "

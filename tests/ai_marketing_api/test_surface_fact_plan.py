@@ -78,20 +78,62 @@ def test_untrusted_candidate_cannot_change_signed_plan_or_claim_scope(monkeypatc
         content_request_payload(OperatorRole.INDUSTRY, request, contexts)
 
 
-def test_writer_projection_removes_old_ai_thesis_but_preserves_real_owner_instruction(monkeypatch):
+@pytest.mark.parametrize("revision", ["owner", "chat", "feedback", "normal", "blank_feedback"])
+def test_writer_revision_rebuilds_direction_without_changing_signed_evidence(monkeypatch, revision):
+    if revision == "chat":
+        from tests.ai_marketing_api.test_industry_interpretation_method import chat_instruction
     request, contexts, _ = fixture(monkeypatch)
-    from ai_marketing_api.operator_editorial import OwnerRevision, PublicEditorialBrief
-    request.public_editorial_brief = PublicEditorialBrief(role_id="industry", objective="解释预览的问题范围", audience="创作团队",
-        angle="旧的否决错误才有价值", reader_value="旧的否决错误才有价值", channels=request.channels)
-    request.owner_revision = OwnerRevision(instruction="仍然AI味太重，整篇不知道到底在表达什么？")
+    from ai_marketing_api.operator_editorial import EditorialInstruction, OwnerRevision, PublicEditorialBrief
+    request.public_editorial_brief = PublicEditorialBrief(role_id="industry", objective="Explain a fictional production workflow", audience="Editors of the fictional studio",
+        angle="Synthetic obsolete AI angle", reader_value="Synthetic obsolete reader value", channels=request.channels,
+        value_contract={"reader_problem": "Synthetic earlier reader problem", "thesis": "Synthetic obsolete AI conclusion",
+            "evidence_anchor": {"opportunity_id": "source-1", "quote": request.claims[0].text},
+            "decision_delta": "Synthetic earlier decision", "counterargument": "Synthetic earlier limitation"})
+    original_payload = content_request_payload(OperatorRole.INDUSTRY, request, contexts)
+    signed_plan = deepcopy(_validated_surface_fact_plan(request))
+    if revision == "owner":
+        request.owner_revision = OwnerRevision(instruction="  Rebuild the fictional example around one supported decision.\n")
+    elif revision == "chat":
+        request.editorial_instruction = EditorialInstruction.model_validate(chat_instruction())
+    elif revision == "feedback":
+        request.editorial_feedback = '  {"source":"independent_editorial_review","issues":["Synthetic current reader concern"]}\n'
+    elif revision == "blank_feedback":
+        request.editorial_feedback = " \n\t "
     before = request.model_dump(mode="json")
     payload = content_request_payload(OperatorRole.INDUSTRY, request, contexts)
-    assert "旧的否决错误才有价值" not in json.dumps(payload, ensure_ascii=False)
-    assert payload["owner_revision"]["instruction"] == request.owner_revision.instruction
-    assert payload["public_editorial_brief"]["audience"] == "创作团队"
-    assert payload["public_editorial_brief"]["objective"] == "解释预览的问题范围"
-    assert "approved_editorial_brief" not in payload
+
+    if revision in {"owner", "chat", "feedback"}:
+        assert {"angle", "audience_value"}.isdisjoint(payload["approved_proposal"])
+        assert "approved_editorial_brief" not in payload
+        assert {"angle", "reader_value", "value_contract"}.isdisjoint(payload["public_editorial_brief"])
+        assert set(payload["surface_fact_plan"]) == {"surfaces", "fact_roles"}
+    else:
+        assert payload["approved_proposal"] == original_payload["approved_proposal"]
+        assert payload["approved_editorial_brief"] == original_payload["approved_editorial_brief"]
+        assert payload["public_editorial_brief"] == original_payload["public_editorial_brief"]
+        assert payload["surface_fact_plan"] == original_payload["surface_fact_plan"]
+        assert payload["surface_fact_plan"]["editorial_intent"] == signed_plan["editorial_intent"]
+
+    for key in ("audience", "objective", "channels", "constraints", "claims", "authorized_context", "canonical_block_registry"):
+        assert payload[key] == original_payload[key], key
+    assert payload["response_contract"]["editorial_shape"]["genre"] == request.genre
+    for key in ("surfaces", "fact_roles"):
+        assert payload["surface_fact_plan"][key] == signed_plan[key]
+    for key in ("title", "key_points", "suggested_formats", "cta", "first_person"):
+        assert payload["approved_proposal"][key] == original_payload["approved_proposal"][key]
+    for key in ("audience", "objective", "channels", "constraints"):
+        assert payload["public_editorial_brief"][key] == original_payload["public_editorial_brief"][key]
+    assert payload["editorial_feedback"] == before["editorial_feedback"]
+    if revision == "owner":
+        assert payload["owner_revision"] == before["owner_revision"]
+        assert "editorial_instruction" not in payload
+    elif revision == "chat":
+        assert payload["editorial_instruction"] == before["editorial_instruction"]
+        assert "owner_revision" not in payload
+    else:
+        assert "owner_revision" not in payload and "editorial_instruction" not in payload
     assert request.model_dump(mode="json") == before
+    assert _validated_surface_fact_plan(request) == signed_plan
 
 
 def test_surface_scoped_payload_projects_required_display_but_keeps_full_pool(monkeypatch):
