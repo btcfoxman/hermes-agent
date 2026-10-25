@@ -78,7 +78,7 @@ def test_untrusted_candidate_cannot_change_signed_plan_or_claim_scope(monkeypatc
         content_request_payload(OperatorRole.INDUSTRY, request, contexts)
 
 
-@pytest.mark.parametrize("revision", ["owner", "chat", "feedback", "normal", "blank_feedback"])
+@pytest.mark.parametrize("revision", ["owner", "chat", "feedback", "feedback_without_plan", "normal", "blank_feedback"])
 def test_writer_revision_rebuilds_direction_without_changing_signed_evidence(monkeypatch, revision):
     if revision == "chat":
         from tests.ai_marketing_api.test_industry_interpretation_method import chat_instruction
@@ -89,13 +89,15 @@ def test_writer_revision_rebuilds_direction_without_changing_signed_evidence(mon
         value_contract={"reader_problem": "Synthetic earlier reader problem", "thesis": "Synthetic obsolete AI conclusion",
             "evidence_anchor": {"opportunity_id": "source-1", "quote": request.claims[0].text},
             "decision_delta": "Synthetic earlier decision", "counterargument": "Synthetic earlier limitation"})
+    if revision == "feedback_without_plan":
+        request.surface_fact_plan = None
     original_payload = content_request_payload(OperatorRole.INDUSTRY, request, contexts)
     signed_plan = deepcopy(_validated_surface_fact_plan(request))
     if revision == "owner":
         request.owner_revision = OwnerRevision(instruction="  Rebuild the fictional example around one supported decision.\n")
     elif revision == "chat":
         request.editorial_instruction = EditorialInstruction.model_validate(chat_instruction())
-    elif revision == "feedback":
+    elif revision in {"feedback", "feedback_without_plan"}:
         request.editorial_feedback = '  {"source":"independent_editorial_review","issues":["Synthetic current reader concern"]}\n'
     elif revision == "blank_feedback":
         request.editorial_feedback = " \n\t "
@@ -111,14 +113,18 @@ def test_writer_revision_rebuilds_direction_without_changing_signed_evidence(mon
         assert payload["approved_proposal"] == original_payload["approved_proposal"]
         assert payload["approved_editorial_brief"] == original_payload["approved_editorial_brief"]
         assert payload["public_editorial_brief"] == original_payload["public_editorial_brief"]
-        assert payload["surface_fact_plan"] == original_payload["surface_fact_plan"]
-        assert payload["surface_fact_plan"]["editorial_intent"] == signed_plan["editorial_intent"]
+        if signed_plan is None:
+            assert "surface_fact_plan" not in payload
+        else:
+            assert payload["surface_fact_plan"] == original_payload["surface_fact_plan"]
+            assert payload["surface_fact_plan"]["editorial_intent"] == signed_plan["editorial_intent"]
 
     for key in ("audience", "objective", "channels", "constraints", "claims", "authorized_context", "canonical_block_registry"):
         assert payload[key] == original_payload[key], key
     assert payload["response_contract"]["editorial_shape"]["genre"] == request.genre
-    for key in ("surfaces", "fact_roles"):
-        assert payload["surface_fact_plan"][key] == signed_plan[key]
+    if signed_plan is not None:
+        for key in ("surfaces", "fact_roles"):
+            assert payload["surface_fact_plan"][key] == signed_plan[key]
     for key in ("title", "key_points", "suggested_formats", "cta", "first_person"):
         assert payload["approved_proposal"][key] == original_payload["approved_proposal"][key]
     for key in ("audience", "objective", "channels", "constraints"):

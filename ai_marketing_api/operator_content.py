@@ -4062,7 +4062,8 @@ def content_request_payload(
         payload["publication_brief"]["thesis_contract"] = [rule]
         payload["response_contract"]["safety"].append(rule)
     rebuilding_direction = (request.owner_revision is not None or editorial_instruction is not None
-                            or bool(request.editorial_feedback.strip()))
+                            or (fact_plan is not None and role is OperatorRole.INDUSTRY
+                                and request.genre == "industry_analysis" and bool(request.editorial_feedback.strip())))
     if rebuilding_direction:
         # The signed input remains an exact audit of the approved direction.
         # A previous AI thesis does not bind the revised author judgment.
