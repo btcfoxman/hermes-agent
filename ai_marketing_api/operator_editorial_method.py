@@ -1,9 +1,29 @@
 """Versioned industry writing craft, never a source of facts or owner authority."""
 from __future__ import annotations
 
-INDUSTRY_METHOD_VERSION = "industry_interpretation.v1"
+INDUSTRY_METHOD_VERSION = "industry_interpretation.v2"
 INDUSTRY_NARRATIVE_SCHEMA = "narrative_report.v2"
 INDUSTRY_BODY_ROLES = frozenset({"news", "thesis", "reason", "impact", "limit"})
+VALUE_REASSESSMENT_MODE = "value_reassessment.v1"
+
+VALUE_REASSESSMENT_CHECKS = (
+    "Reconstruct the choice the reader might otherwise make, the author's concrete recommendation "
+    "about how to change it or when to skip it, and the supplied reason and cost or sacrifice of that "
+    "choice. A useful conclusion can retain an existing practice if the text explains why. Do not "
+    "invent a prior habit, an industry norm, a numerical saving or a recommendation absent from the body.",
+    "Apply the deletion test: mentally remove the author's commentary while keeping the reported "
+    "facts. Identify the justified choice or tradeoff the reader would then lose. Repeating the "
+    "feature's stated purpose, telling readers to check inputs or consider whether something is useful, "
+    "and saying an outcome is not guaranteed do not by themselves supply that lost interpretation. "
+    "They can be valid qualifications; they cannot substitute for the article's judgment.",
+    "Check the recommendation's cost: what useful alternative is set aside, what extra effort or "
+    "constraint is accepted, and which fact explains that decision? Do not require a financial number, "
+    "a prescribed position or disagreement with a vendor. Mark a missing decision link unsupported "
+    "rather than completing it for the author.",
+    "Follow one center of argument on each surface. Distinct facts and examples should support that "
+    "center or define its actual boundary. A generic invitation to share experience cannot repair a "
+    "missing closing conclusion. Judge the invitation's function in context, never a word blacklist.",
+)
 
 
 def requires_industry_interpretation(output) -> bool:
@@ -21,6 +41,11 @@ INDUSTRY_METHOD_RULES = (
     "Make one defensible author conclusion explicit early enough to guide the article. Explain what "
     "the reader should understand or decide differently and why. A feature description, a promise "
     "that something is useful, or a question with no answer is not an industry interpretation.",
+    "Before drafting, work out the reader's plausible alternative, the specific choice you recommend "
+    "changing or retaining, when to skip that recommendation, and the cost or sacrifice justified by "
+    "the evidence. Do not claim the alternative is an actual widespread habit without evidence. "
+    "A feature's stated purpose rewritten as advice is not enough; show the extra tradeoff your "
+    "interpretation contributes. Leave the stance open until the supplied facts support it.",
     "Connect a specific approved observation to the conclusion through an explained mechanism, "
     "a concrete affected participant and a consequence for that participant's decision. State "
     "inference as inference. Show what this reasoning adds beyond the source's own description; "
@@ -58,13 +83,15 @@ def industry_reader_method() -> dict:
         "source_restatement_only=true when the supposed analysis only repeats features or reporting. "
         "An illustrative scene, safe wording, fluent prose or high numeric scores cannot supply a "
         "missing judgment. Cite body spans for news, thesis, reason, impact and limit; one exact span "
-        "may serve multiple roles and short posts need no fixed paragraph count."}
+        "may serve multiple roles and short posts need no fixed paragraph count.",
+        "value_checks": list(VALUE_REASSESSMENT_CHECKS)}
 
 
 def apply_industry_writer_method(payload: dict) -> None:
     """Replace system-generated sparse-material fallbacks, never user/evidence data."""
     payload["industry_editorial_method"] = industry_reader_method()
     payload["industry_editorial_method"].pop("reader_rule")
+    payload["industry_editorial_method"].pop("value_checks")
     publication = payload["publication_brief"]
     publication.update(
         voice="An industry writer who reports verified details and argues a clear, bounded interpretation.",

@@ -158,6 +158,9 @@ async def run_editorial_step(registry, role, step: EditorialStep, payload: Edito
     # Validate the original disclosure, channels, brief and owner-edit scope
     # before narrowing work to one surface.
     content_request_payload(role, request, contexts)
+    if request.editorial_review_mode != "standard" and step != "review_editorial":
+        raise ContextAuthorizationError("editorial_review_mode_step_denied", "editorial_review_mode",
+            "Value reassessment requires the independent review step.")
     if step == "adapt_platform" and payload.surface not in request.channels:
         raise ContextAuthorizationError("step_surface_denied", payload.surface, "The platform must belong to the original scope.")
     stage = {"draft_master": "compose", "adapt_platform": "compose",
@@ -268,8 +271,9 @@ async def run_editorial_step(registry, role, step: EditorialStep, payload: Edito
                             run=run, llm=llm, system=registry.get(role).system_prompt, model_args=(),
                             owner_revision=request.owner_revision.model_dump(mode="json") if request.owner_revision else None,
                             style_context=style_context(request), editorial_feedback=request.editorial_feedback,
-                            scorecard_required=True)
-                        output = apply_editorial_assessment(output, review)
+                            scorecard_required=True, review_mode=request.editorial_review_mode)
+                        output = apply_editorial_assessment(output, review,
+                            review_context=run.editorial_review_context)
             trace = run.trace(blocked=bool(output.critic.errors) and not run.attempts,
                 review=review_state, stop_reason=output.status)
             if request.fact_expression_mode == "grounded_paraphrase":
@@ -281,6 +285,8 @@ async def run_editorial_step(registry, role, step: EditorialStep, payload: Edito
                 "artifact": artifact, "artifact_signature": artifact_signature(artifact),
                 "publishable": False, "requires_human_review": True,
                 "generation_trace": trace.model_dump(mode="json")}
+            if request.editorial_review_mode != "standard":
+                result["editorial_review_mode"] = request.editorial_review_mode
             return capture.attach(result, run.private_review_receipt if step == "review_editorial" else None)
     except ValueError as exc:
         code = str(exc) if str(exc) in {"stage_route_unavailable", "artifact_signature_invalid", "artifact_public_expression_invalid", "signed_master_required", "signed_candidate_required", "candidate_required", "master_evidence_invalid", "master_writer_not_completed", "analysis_verification_required", "analysis_verifier_not_completed"} else "step_artifact_invalid"

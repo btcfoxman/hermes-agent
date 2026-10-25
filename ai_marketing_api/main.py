@@ -1392,6 +1392,7 @@ async def _run_compose_impl(
             style_context=compose_payload.get("style_context"),
             editorial_feedback=compose_payload.get("editorial_feedback", ""),
             scorecard_required=bool(payload.genre or payload.style_references),
+            review_mode=payload.editorial_review_mode,
         )
         # Each bounded batch fixes the editor-identified surfaces together.
         # Rejected structure may be retried within the existing per-surface,
@@ -1486,12 +1487,13 @@ async def _run_compose_impl(
                     style_context=compose_payload.get("style_context"),
                     editorial_feedback=compose_payload.get("editorial_feedback", ""),
                     scorecard_required=bool(payload.genre or payload.style_references),
+                    review_mode=payload.editorial_review_mode,
                 )
             else:
                 last_repair_diagnostics = repair_diagnostics
             # A rejected repair cannot erase the useful diagnostics from the
             # preceding independent assessment or promote its failing draft.
-        output = apply_editorial_assessment(output, review)
+        output = apply_editorial_assessment(output, review, review_context=run.editorial_review_context)
         if last_repair_diagnostics:
             output = annotate_editorial_repair_failure(output, last_repair_diagnostics)
     if output.status == ContentStatus.QUALITY_INSUFFICIENT.value and len(run.attempts) >= payload.runtime_budget.max_model_calls:

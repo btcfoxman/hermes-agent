@@ -160,6 +160,15 @@ class EditorialInstruction(StrictModel):
         return self
 
 
+class EditorialReviewContext(StrictModel):
+    """Server-applied fresh review method, bound into the signed artifact."""
+
+    schema_version: Literal["operator.editorial_review_context.v1"] = "operator.editorial_review_context.v1"
+    mode: Literal["value_reassessment.v1"]
+    method_version: Literal["industry_interpretation.v2"]
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$", strict=True)
+
+
 class GenerationAttempt(StrictModel):
     stage: Literal["planner", "propose", "revise", "compose", "repair", "claim_verification", "editorial_review"]
     surface: str = "all"
@@ -304,16 +313,21 @@ class EditorialReview(StrictModel):
     failed_surfaces: list[str] = Field(default_factory=list, max_length=21)
     quality_scorecard: "QualityScorecard | None" = None
     narrative_report: NarrativeReport | None = None
+    value_resolution: Literal["ready", "revise", "needs_material"] | None = None
 
     @model_serializer(mode="wrap")
     def preserve_legacy_report_shape(self, handler):
         value = handler(self)
         if self.narrative_report is None:
             value.pop("narrative_report", None)
+        if self.value_resolution is None:
+            value.pop("value_resolution", None)
         return value
 
     @property
     def passed(self) -> bool:
+        if self.value_resolution is not None and self.value_resolution != "ready":
+            return False
         if not all((self.relevant_to_brief, self.useful_to_reader,
                     self.clear_and_specific, self.platform_fit)) or self.failed_surfaces:
             return False
@@ -366,6 +380,7 @@ class BoundedModelRun:
         # Private structured reviewer output is returned only by the internal
         # staged endpoint, never by legacy compose or the public trace.
         self.private_review_receipt: dict[str, Any] | None = None
+        self.editorial_review_context: EditorialReviewContext | None = None
         self.review_diagnostics: list[ReviewValidationDiagnostic] = []
 
     @property

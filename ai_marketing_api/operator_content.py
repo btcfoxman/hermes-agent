@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 
 from pydantic import Field, field_validator, model_serializer
 
-from ai_marketing_api.operator_editorial import EditorialInstruction, EditorialReview, GenerationTrace, OwnerRevision, PublicEditorialBrief, QualityScorecard, RuntimeBudget
+from ai_marketing_api.operator_editorial import EditorialInstruction, EditorialReview, EditorialReviewContext, GenerationTrace, OwnerRevision, PublicEditorialBrief, QualityScorecard, RuntimeBudget
 from ai_marketing_api.operator_style import CURRENT_GENRE, MASTER_ONLY, PUBLIC_TUTORIAL_ATTRIBUTION_RE, PUBLIC_TUTORIAL_GENRE, editorial_scope, style_context
 from ai_marketing_api.operator_grounding import ClaimBindingReview, _SEEDANCE_VERSION_RE, _SEEDANCE_VERSION_UNIT_RE
 from ai_marketing_api.operator_analysis import (
@@ -79,6 +79,7 @@ class OperatorComposeRequest(OperatorProposeRequest):
     owner_revision: Optional[OwnerRevision] = None
     editorial_instruction: Optional[EditorialInstruction] = None
     editorial_feedback: str = Field(default="", max_length=6000)
+    editorial_review_mode: Literal["standard", "value_reassessment.v1"] = "standard"
     surface_fact_plan: Optional[Dict[str, Any]] = None
 
 
@@ -162,6 +163,7 @@ class OperatorContentOutput(StrictModel):
     generation_trace: Optional[GenerationTrace] = None
     claim_binding_reviews: List[ClaimBindingReview] = Field(default_factory=list, max_length=100)
     editorial_assessment: Optional[EditorialReview] = None
+    editorial_review_context: Optional[EditorialReviewContext] = None
     quality_scorecard: Optional[QualityScorecard] = None
     genre: str = ""
     surface_fact_plan_sha256: Optional[str] = None
@@ -173,6 +175,8 @@ class OperatorContentOutput(StrictModel):
         data = handler(self)
         if self.surface_fact_plan_sha256 is None:
             data.pop("surface_fact_plan_sha256", None)
+        if self.editorial_review_context is None:
+            data.pop("editorial_review_context", None)
         for key in ("pending_editorial_analysis", "analysis_binding_reviews"):
             if not getattr(self, key):
                 data.pop(key, None)
@@ -3401,6 +3405,10 @@ def content_request_payload(
     contexts: Sequence[AuthorizedContext],
 ) -> Dict[str, Any]:
     role = role_id if isinstance(role_id, OperatorRole) else OperatorRole(role_id)
+    if request.editorial_review_mode != "standard" and (
+            role is not OperatorRole.INDUSTRY or request.genre != "industry_analysis"):
+        raise ContextAuthorizationError("editorial_review_mode_denied", "editorial_review_mode",
+            "Value reassessment is limited to industry analysis.")
     fact_plan = _validated_surface_fact_plan(request)
     if fact_plan is not None and role is not OperatorRole.INDUSTRY:
         raise ContextAuthorizationError("surface_fact_plan_role_denied", "surface_fact_plan", "The signed plan belongs to industry.")
