@@ -16,6 +16,8 @@ from ai_marketing_api.operator_style import PUBLIC_TUTORIAL_ATTRIBUTION_RE, PUBL
 
 SCHEMA_VERSION = "operator.proposal.v1"
 CONTENT_SCHEMA_VERSION = "operator.content.v1"
+INDUSTRY_FACT_SELECTION_VERSION = "operator.industry_fact_selection.v1"
+INDUSTRY_FACT_SELECTION_FIELD = "_industry_fact_selection"
 PROFILE_ROOT = Path(__file__).resolve().parent / "profiles"
 PREFERENCE_CHANNEL_CONTENT_TYPES = {
     "wechat_moments": "post",
@@ -982,6 +984,49 @@ def _normalize_model_claims(
     return claims or fallback_objects, risks
 
 
+def _industry_proposal_fact_selection(fallback_claims, candidate):
+    """Select whole canonical facts only after an explicit new raw opt-in.
+
+    Old provider JSON has no marker and keeps the complete legacy fact pool.
+    Invalid or empty selections are rejected as a whole, never partly applied.
+    Already normalized receipts are not inputs to this raw-response boundary.
+    """
+    marker = candidate.get(INDUSTRY_FACT_SELECTION_FIELD)
+    code = "industry_fact_selection_missing" if marker is None else "industry_fact_selection_invalid"
+
+    def unchanged():
+        return fallback_claims, [_risk(code,
+            "No valid versioned fact subset was supplied; the complete original fact pool was retained.")]
+
+    raw_claims = candidate.get("claims")
+    if (marker != INDUSTRY_FACT_SELECTION_VERSION or candidate.get("_error")
+            or not isinstance(raw_claims, list) or not 1 <= len(raw_claims) <= 50):
+        return unchanged()
+    by_text = {claim["text"]: (index, claim) for index, claim in enumerate(fallback_claims)
+               if claim.get("kind") == ClaimKind.FACT.value}
+    selected = set()
+    for raw in raw_claims:
+        if not isinstance(raw, dict):
+            return unchanged()
+        if (raw.get("kind") != ClaimKind.FACT.value
+                or not isinstance(raw.get("text"), str) or raw["text"] not in by_text):
+            return unchanged()
+        index, canonical = by_text[raw["text"]]
+        identifiers = raw.get("evidence_ids")
+        if (not isinstance(identifiers, list) or not 1 <= len(identifiers) <= 20
+                or not all(isinstance(item, str) and item for item in identifiers)
+                or len(set(identifiers)) != len(identifiers)
+                or not set(identifiers) <= set(canonical["evidence_ids"])
+                or index in selected):
+            return unchanged()
+        selected.add(index)
+    if not selected:
+        return unchanged()
+    # Copy original objects, including every original corroborating reference.
+    return [dict(claim) for index, claim in enumerate(fallback_claims)
+            if claim.get("kind") != ClaimKind.FACT.value or index in selected], []
+
+
 def normalize_output(
     registry: OperatorRegistry,
     role_id: OperatorRole | str,
@@ -994,11 +1039,28 @@ def normalize_output(
     role = role_id if isinstance(role_id, OperatorRole) else OperatorRole(role_id)
     profile = registry.get(role)
     fallback_claims = list(fallback.get("claims") or [])
+    selection_risks = []
+    raw_claims = candidate.get("claims")
+    proposal_fallback = fallback.get("proposal")
+    if (role is OperatorRole.INDUSTRY and action is OperatorAction.PROPOSE
+            and request.genre == "industry_analysis"):
+        fallback_claims, selection_risks = _industry_proposal_fact_selection(fallback_claims, candidate)
+        if not selection_risks:
+            selected_ids = {identity for claim in fallback_claims for identity in claim.get("evidence_ids") or []}
+            selected_contexts = [context for context in contexts if context.record_id in selected_ids]
+            # Re-anchor only the deterministic outline. Original authorization
+            # status, questions and source-risk gates are retained below.
+            proposal_fallback = _industry_fallback(request, selected_contexts).get("proposal")
+        elif INDUSTRY_FACT_SELECTION_FIELD in candidate:
+            # Malformed new selection data must not reach the permissive
+            # legacy raw parser. Unmarked old raw keeps its original path.
+            raw_claims = None
     claims, claim_risks = _normalize_model_claims(
-        role, candidate.get("claims"), fallback_claims, contexts
+        role, raw_claims, fallback_claims, contexts
     )
-    proposal = _safe_model_proposal(role, fallback.get("proposal"), candidate.get("proposal"), contexts, request.genre)
+    proposal = _safe_model_proposal(role, proposal_fallback, candidate.get("proposal"), contexts, request.genre)
     if proposal is not None:
+        proposal = dict(proposal)
         # Key points are presented to the owner as the factual basis of the
         # direction.  They must never retain prose whose corresponding model
         # claim was discarded by the evidence normalizer.
@@ -1007,6 +1069,7 @@ def normalize_output(
     questions = [OperatorQuestion(**item) for item in fallback.get("questions") or []]
     risks = [OperatorRisk(**item) for item in fallback.get("risk_flags") or []]
     risks.extend(claim_risks)
+    risks.extend(selection_risks)
     risk_codes = {risk.code for risk in risks}
     if role is OperatorRole.INDUSTRY:
         facts = [claim for claim in claims if claim.kind == ClaimKind.FACT.value]
@@ -1041,7 +1104,7 @@ def normalize_output(
     )
 
 
-def request_payload(request: OperatorProposeRequest) -> Dict[str, Any]:
+def request_payload(request: OperatorProposeRequest, *, role_id=None, action=None, fallback=None) -> Dict[str, Any]:
     """Serialize only user/context data; the SOUL remains a stable system message."""
 
     payload = _model_dump(request)
@@ -1087,4 +1150,22 @@ def request_payload(request: OperatorProposeRequest) -> Dict[str, Any]:
             }
         ],
     }
+    if (role_id is OperatorRole.INDUSTRY and action is OperatorAction.PROPOSE
+            and request.genre == "industry_analysis" and isinstance(fallback, dict)):
+        payload["selectable_facts"] = [
+            {"text": claim["text"], "evidence_ids": list(claim["evidence_ids"])}
+            for claim in fallback.get("claims") or [] if claim.get("kind") == ClaimKind.FACT.value]
+        payload["response_contract"][INDUSTRY_FACT_SELECTION_FIELD] = INDUSTRY_FACT_SELECTION_VERSION
+        payload["fact_selection_contract"] = [
+            "For this new industry proposal, explicitly echo the requested fact-selection version and return "
+            "a nonempty subset of selectable_facts through the existing claims field. Copy whole fact text "
+            "exactly and cite its supplied evidence IDs; never create or rewrite a fact to make it fit.",
+            "Work out one concrete reader problem, the justified choice or understanding and its reasonable "
+            "alternative. Select only facts needed to support that argument and preserve conditions that "
+            "can change its meaning. Do not turn every available parameter into a separate section.",
+            "Evidence selection grants no position, factual authority, measured benefit, approval or score. "
+            "If a useful conclusion needs an unsupported premise, state the material gap rather than inventing it. "
+            "The existing factual verification and independent editorial review still decide validity.",
+            "Missing, invalid or empty versioned selection retains the complete legacy fact pool and a diagnostic; "
+            "it never authorizes an empty EvidenceManifest or silently drops a required canonical fact."]
     return payload

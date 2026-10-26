@@ -809,7 +809,7 @@ async def _run_operator(
     run = BoundedModelRun(RuntimeBudget(max_model_calls=1))
     candidate = await run.call(_llm_json,
         profile.system_prompt,
-        request_payload(payload),
+        request_payload(payload, role_id=role_id, action=action, fallback=fallback),
         fallback,
         openai_base_url,
         openai_api_key,
