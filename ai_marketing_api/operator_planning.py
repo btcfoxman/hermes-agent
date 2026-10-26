@@ -5,9 +5,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import AwareDatetime, Field, field_validator, model_validator
+from pydantic import AwareDatetime, Field, field_validator, model_serializer, model_validator
 
 from ai_marketing_api.operator_editorial import BoundedModelRun, RuntimeBudget, TopicValueContract
+from ai_marketing_api.operator_editorial_method import industry_planning_method
 from ai_marketing_api.operator_runtime import OperatorRole, StrictModel
 
 
@@ -101,9 +102,17 @@ class EditorialPlanRequest(StrictModel):
     )
     max_packages: int = Field(default=2, ge=0, le=6)
     topic_value_required: bool = Field(default=False, strict=True)
+    genre: str = Field(default="", max_length=80, pattern=r"^[a-z0-9_\-]*$", strict=True)
     budget: RuntimeBudget = Field(
         default_factory=lambda: RuntimeBudget(max_model_calls=1, max_output_tokens=3000)
     )
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_genre_absence(self, handler):
+        result = handler(self)
+        if not self.genre:
+            result.pop("genre", None)
+        return result
 
     @field_validator("performance_history")
     @classmethod
@@ -192,12 +201,31 @@ history or no useful testable question, return learning_hypotheses=[].
 """
 
 
+INDUSTRY_PLANNING_PROMPT = """
+For industry opportunities only, genre=industry_analysis requests the supplied
+industry_editorial_method's topic-selection rules. A documented tutorial, news
+brief or FAQ can be valuable under its own authorized genre; do not silently
+substitute one for this analysis request. Select an industry analysis only when
+the supplied summary supports an explicit, defensible author conclusion, its
+reasoning and an observable consequence for a reader's choice beyond repeating
+the source's stated purpose. Consider the plausible alternative, cost or sacrifice
+and the condition that would change the judgment without inventing any of them.
+For every selected industry opportunity, provide the existing value_contract with
+an exact quote from that opportunity's summary. This requirement does not apply
+to other roles unless topic_value_required is true. If the material cannot support
+the requested analysis, return no such selection and identify the material gap in
+skips. The method grants no facts, intended answer, owner or publication authority.
+"""
+
+
 async def plan_editorial(
     request: EditorialPlanRequest, llm: Any, *model_args: Any
 ) -> dict:
     run = BoundedModelRun(request.budget)
+    industry_analysis = request.genre == "industry_analysis"
     eligible = {item.id: item for item in request.opportunities
-                if item.verified and (not request.topic_value_required or item.summary.strip())}
+                if item.verified and (not (request.topic_value_required
+                    or (industry_analysis and item.role_id == "industry")) or item.summary.strip())}
     # No opportunities is a successful abstention, not an unavailable model.
     if not eligible or request.max_packages == 0:
         return {
@@ -252,7 +280,8 @@ async def plan_editorial(
             }
         ],
     }
-    if request.topic_value_required:
+    analysis_required = industry_analysis and any(item.role_id == "industry" for item in eligible.values())
+    if request.topic_value_required or analysis_required:
         body["response_contract"]["selections"][0]["value_contract"] = {
             "reader_problem": "specific reader uncertainty or task, not an audience label",
             "thesis": "a defensible source-specific answer, not a topic announcement",
@@ -263,7 +292,11 @@ async def plan_editorial(
             "decision_delta": "what this evidence changes for the reader and the reasoning",
             "counterargument": "a substantive limitation or evidence that would overturn the answer",
         }
-    result = await run.call(llm, PLANNER_PROMPT, body, {}, *model_args, stage="planner")
+    system = PLANNER_PROMPT
+    if analysis_required:
+        body["industry_editorial_method"] = industry_planning_method()
+        system += INDUSTRY_PLANNING_PROMPT
+    result = await run.call(llm, system, body, {}, *model_args, stage="planner")
     selections: list[EditorialSelection] = []
     hypotheses: list[LearningHypothesis] = []
     valid = (
@@ -291,7 +324,8 @@ async def plan_editorial(
                 valid = False
                 break
             contract = selection.value_contract
-            if (request.topic_value_required and contract is None) or (
+            required = request.topic_value_required or (industry_analysis and opportunity.role_id == "industry")
+            if (required and contract is None) or (
                 contract is not None and (
                     contract.evidence_anchor.opportunity_id != opportunity.id
                     or contract.evidence_anchor.quote not in opportunity.summary

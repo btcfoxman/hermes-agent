@@ -33,32 +33,54 @@ def requires_industry_interpretation(output) -> bool:
 
 # Original transferable methods distilled from owner-supplied reading. Reference
 # reporting, figures, personal experience and conclusions are deliberately absent.
+INDUSTRY_CONCLUSION_RULE = (
+    "Make one defensible author conclusion explicit early enough to guide the article. Explain what "
+    "the reader should understand or decide differently and why. A feature description, a promise "
+    "that something is useful, or a question with no answer is not an industry interpretation."
+)
+INDUSTRY_TRADEOFF_RULE = (
+    "Before drafting, work out the reader's plausible alternative, the specific choice you recommend "
+    "changing or retaining, when to skip that recommendation, and the cost or sacrifice justified by "
+    "the evidence. Do not claim the alternative is an actual widespread habit without evidence. "
+    "A feature's stated purpose rewritten as advice is not enough; show the extra tradeoff your "
+    "interpretation contributes. Leave the stance open until the supplied facts support it."
+)
+INDUSTRY_MECHANISM_RULE = (
+    "Connect a specific approved observation to the conclusion through an explained mechanism, "
+    "a concrete affected participant and a consequence for that participant's decision. State "
+    "inference as inference. Show what this reasoning adds beyond the source's own description; "
+    "do not manufacture novelty, a competitor comparison, a number or a firm outcome."
+)
+INDUSTRY_PREMISE_SCOPE_RULE = (
+    "Keep each premise within its documented object, operation and preconditions. A restriction on a "
+    "later operation does not establish that an earlier choice must be fixed or that the whole process "
+    "forbids alternatives. Distinguish evidence, inference and hypothetical conditions; if an inference "
+    "needs an unstated premise, obtain support or narrow the conclusion rather than inventing it."
+)
+INDUSTRY_OBSERVABLE_CHOICE_RULE = (
+    "Ground a recommendation in an observable distinction that can change the reader's choice, not "
+    "in the conclusion that the choice is worthwhile or useful. Explain which observation favors which "
+    "action and why, using only distinctions the evidence supports. Do not require the reader to supply "
+    "the missing value judgment before the recommendation works. This is an internal reasoning check, "
+    "not a prescribed article structure, product stance, numerical threshold or guaranteed result."
+)
+INDUSTRY_MATERIAL_RULE = (
+    "If the authorized material cannot support this analysis, stop for more research or return an "
+    "insufficient-evidence draft for revision. Do not promote a generic selection checklist, "
+    "verification question or invented workflow into a qualified industry analysis. A separate "
+    "news brief or tutorial needs its own authorized genre; do not silently change this request."
+)
+
 INDUSTRY_METHOD_RULES = (
     "Establish what actually changed and why this reader should care. Use the authorized subject, "
     "event or update date, reporting attribution and platform/version scope when the approved facts "
     "contain them. Distinguish a dated report from today's news; never invent a date, attribution, "
     "interview, hands-on test, customer, result or industry-wide habit to create realism.",
-    "Make one defensible author conclusion explicit early enough to guide the article. Explain what "
-    "the reader should understand or decide differently and why. A feature description, a promise "
-    "that something is useful, or a question with no answer is not an industry interpretation.",
-    "Before drafting, work out the reader's plausible alternative, the specific choice you recommend "
-    "changing or retaining, when to skip that recommendation, and the cost or sacrifice justified by "
-    "the evidence. Do not claim the alternative is an actual widespread habit without evidence. "
-    "A feature's stated purpose rewritten as advice is not enough; show the extra tradeoff your "
-    "interpretation contributes. Leave the stance open until the supplied facts support it.",
-    "Connect a specific approved observation to the conclusion through an explained mechanism, "
-    "a concrete affected participant and a consequence for that participant's decision. State "
-    "inference as inference. Show what this reasoning adds beyond the source's own description; "
-    "do not manufacture novelty, a competitor comparison, a number or a firm outcome.",
-    "Keep each premise within its documented object, operation and preconditions. A restriction on a "
-    "later operation does not establish that an earlier choice must be fixed or that the whole process "
-    "forbids alternatives. Distinguish evidence, inference and hypothetical conditions; if an inference "
-    "needs an unstated premise, obtain support or narrow the conclusion rather than inventing it.",
-    "Ground a recommendation in an observable distinction that can change the reader's choice, not "
-    "in the conclusion that the choice is worthwhile or useful. Explain which observation favors which "
-    "action and why, using only distinctions the evidence supports. Do not require the reader to supply "
-    "the missing value judgment before the recommendation works. This is an internal reasoning check, "
-    "not a prescribed article structure, product stance, numerical threshold or guaranteed result.",
+    INDUSTRY_CONCLUSION_RULE,
+    INDUSTRY_TRADEOFF_RULE,
+    INDUSTRY_MECHANISM_RULE,
+    INDUSTRY_PREMISE_SCOPE_RULE,
+    INDUSTRY_OBSERVABLE_CHOICE_RULE,
     "For a cost or speed judgment, explain the tradeoff between added charges or effort, expected "
     "avoided work and human review. A lower-priced intermediate step alone does not prove lower total "
     "cost or faster delivery. Keep fee scope, assumptions and unmeasured results distinct.",
@@ -68,10 +90,7 @@ INDUSTRY_METHOD_RULES = (
     "Use verified details and meaningful tradeoffs for specificity. A clearly hypothetical scene "
     "can illustrate an already supported argument; it cannot replace reported evidence, a causal "
     "explanation or the author's conclusion. Never turn a reference author's experience into the owner's.",
-    "If the authorized material cannot support this analysis, stop for more research or return an "
-    "insufficient-evidence draft for revision. Do not promote a generic selection checklist, "
-    "verification question or invented workflow into a qualified industry analysis. A separate "
-    "news brief or tutorial needs its own authorized genre; do not silently change this request.",
+    INDUSTRY_MATERIAL_RULE,
     "Write connected reader-facing prose with a clear priority. Keep only paragraphs that supply "
     "evidence, reasoning, a meaningful alternative or a consequence. Do not imitate an author's "
     "catchphrases, add fake first-person experience, force a scene, five sections, a CTA or a "
@@ -79,6 +98,16 @@ INDUSTRY_METHOD_RULES = (
     "Judge natural expression in context, not a word blacklist; a precise necessary limitation is useful. "
     "A clear concluding judgment can end without an invitation.",
 )
+
+
+def industry_planning_method() -> dict:
+    """The shared reasoning rules needed to select an analysis, without a draft or answer."""
+    return {"version": INDUSTRY_METHOD_VERSION, "application": "topic_selection",
+        "applies_to": {"role_id": "industry", "genre": "industry_analysis"},
+        "authority": "Planning method only; not factual evidence, an intended answer, owner feedback "
+            "or publication authority.",
+        "rules": [INDUSTRY_METHOD_RULES[0], INDUSTRY_CONCLUSION_RULE, INDUSTRY_TRADEOFF_RULE, INDUSTRY_MECHANISM_RULE, INDUSTRY_PREMISE_SCOPE_RULE,
+            INDUSTRY_OBSERVABLE_CHOICE_RULE, INDUSTRY_MATERIAL_RULE]}
 
 
 def industry_reader_method() -> dict:
