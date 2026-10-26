@@ -50,6 +50,15 @@ INDUSTRY_METHOD_RULES = (
     "a concrete affected participant and a consequence for that participant's decision. State "
     "inference as inference. Show what this reasoning adds beyond the source's own description; "
     "do not manufacture novelty, a competitor comparison, a number or a firm outcome.",
+    "Keep each premise within its documented object, operation and preconditions. A restriction on a "
+    "later operation does not establish that an earlier choice must be fixed or that the whole process "
+    "forbids alternatives. Distinguish evidence, inference and hypothetical conditions; if an inference "
+    "needs an unstated premise, obtain support or narrow the conclusion rather than inventing it.",
+    "Ground a recommendation in an observable distinction that can change the reader's choice, not "
+    "in the conclusion that the choice is worthwhile or useful. Explain which observation favors which "
+    "action and why, using only distinctions the evidence supports. Do not require the reader to supply "
+    "the missing value judgment before the recommendation works. This is an internal reasoning check, "
+    "not a prescribed article structure, product stance, numerical threshold or guaranteed result.",
     "For a cost or speed judgment, explain the tradeoff between added charges or effort, expected "
     "avoided work and human review. A lower-priced intermediate step alone does not prove lower total "
     "cost or faster delivery. Keep fee scope, assumptions and unmeasured results distinct.",
