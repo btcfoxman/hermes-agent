@@ -16,7 +16,7 @@ from ai_marketing_api.operator_style import CURRENT_GENRE, MASTER_ONLY, PUBLIC_T
 from ai_marketing_api.operator_grounding import ClaimBindingReview, _SEEDANCE_VERSION_RE, _SEEDANCE_VERSION_UNIT_RE
 from ai_marketing_api.operator_analysis import (
     AnalysisBindingReview, PendingEditorialAnalysis, DEFER_EDITORIAL_ANALYSIS,
-    derive_pending, soft_eligible,
+    derive_pending, soft_eligible, ANALYSIS_HARD_CAPABILITY_RE,
 )
 from ai_marketing_api.operator_editorial_method import apply_industry_writer_method
 
@@ -777,6 +777,43 @@ def _source_restatement_ratio(value: str, source: str) -> float:
     if not candidate_grams:
         return 0.0
     return sum(gram in source_grams for gram in candidate_grams) / len(candidate_grams)
+
+
+_NEGATED_GUARANTEE_CLAUSE_RE = re.compile(r"[^，,。！？!?；;：:\n\r]+")
+
+_NEGATED_GUARANTEE_RE = re.compile(
+    r"(?:(?:而不是|并非)(?P<contrast_subject>[\u4e00-\u9fffA-Za-z][\u4e00-\u9fffA-Za-z0-9 ._-]{0,23})|"
+    r"(?P<direct_subject>(?:[\u4e00-\u9fffA-Za-z][\u4e00-\u9fffA-Za-z0-9 ._-]{0,23})?)(?:不能|无法|不))"
+    r"(?P<predicate>保证)(?P<target>[\u4e00-\u9fffA-Za-z][\u4e00-\u9fffA-Za-z0-9 ._-]{0,59})"
+)
+
+_NEGATED_GUARANTEE_AMBIGUITY_RE = re.compile(
+    r"不|没|未|无|非|否|别|勿|莫|难道|岂|怎么|何尝|焉|是否|能否|只有|所有|任何|"
+    r"一定|必然|必定|可能|似乎|说|声称|宣称|怀疑|认为|以为|觉得|"
+    r"而是|但|却|反而|虽然|即使|如果|若|因为|所以|因此|既然|只要|除非|仅|只是|吗|么|呢|吧|才怪|才对"
+)
+
+def _industry_negated_guarantee_spans(text: str) -> set[tuple[int, int]]:
+    """Identify one explicitly denied predicate, never authorize its clause.
+
+    Multiple guarantees, quoted speech, questions, extra negation or
+    ambiguous scope stay under the original promise guard. Callers must still
+    require independent analysis verification and all other hard guards.
+    """
+    if text.count("保证") != 1 or any(mark in text for mark in ('"', "'", "“", "”", "‘", "’")):
+        return set()
+    for clause in _NEGATED_GUARANTEE_CLAUSE_RE.finditer(text):
+        value = clause.group().strip()
+        match = _NEGATED_GUARANTEE_RE.fullmatch(value)
+        if match is None or (clause.end() < len(text) and text[clause.end()] in "?？"):
+            continue
+        subject = match.group("contrast_subject") or match.group("direct_subject") or ""
+        if _NEGATED_GUARANTEE_AMBIGUITY_RE.search(subject + match.group("target")):
+            continue
+        offset = clause.start() + len(clause.group()) - len(clause.group().lstrip())
+        begin, end = match.span("predicate")
+        return {(offset + begin, offset + end)}
+    return set()
 
 
 def _restates_approved_source(value: str, approved_fact_texts: Sequence[str]) -> bool:
@@ -1768,23 +1805,32 @@ def _safe_candidate_blocks(
             allow_industry_direction_condition=allow_industry_analysis,
             allow_industry_pending_reasoning=allow_industry_analysis,
             allow_industry_creative_condition=allow_industry_analysis)
-        deferred_analysis = (DEFER_EDITORIAL_ANALYSIS.get() and allow_industry_analysis
-            and soft_eligible(text, soft_assertions))
+        can_defer_analysis = DEFER_EDITORIAL_ANALYSIS.get() and allow_industry_analysis
+        soft_reviewable = can_defer_analysis and soft_eligible(text, soft_assertions)
+        negated_guarantees = (_industry_negated_guarantee_spans(text)
+            if can_defer_analysis else set())
+        blocking_contrasts = (_industry_blocking_contrast_matches(
+            text, allow_paired_contrast=CURRENT_GENRE.get() == "industry_analysis")
+            if role is OperatorRole.INDUSTRY else [])
+        # Syntax only preserves candidates. Newly retained claims remain hidden
+        # until the independent verifier supplies a context-bound decision.
+        deferred_analysis = bool(soft_reviewable or negated_guarantees
+            or (can_defer_analysis and blocking_contrasts))
         if (
             (
                 role is not OperatorRole.INDUSTRY
                 and _PRICE_VALUE_RE.search(text)
             )
-            or _PROMISE_RE.search(text)
+            or any(match.span() not in negated_guarantees for match in _PROMISE_RE.finditer(text))
             or _DELIVERY_COMMITMENT_RE.search(text)
-            or (soft_assertions and not deferred_analysis)
+            or ((negated_guarantees or (can_defer_analysis and blocking_contrasts))
+                and ANALYSIS_HARD_CAPABILITY_RE.search(text))
+            or (soft_assertions and not soft_reviewable)
         ):
             return None, "assertion_forbidden"
         if _generic_editorial_meta_matches(text, allow_industry_reader_task=allow_industry_analysis):
             return None, "generic_meta_copy_forbidden"
-        if role is OperatorRole.INDUSTRY and _industry_blocking_contrast_matches(
-            text, allow_paired_contrast=CURRENT_GENRE.get() == "industry_analysis",
-        ):
+        if blocking_contrasts and not can_defer_analysis:
             return None, "generic_meta_copy_forbidden"
         if _restates_approved_source(text, approved_fact_texts):
             return None, "source_restatement_forbidden"
@@ -2012,6 +2058,9 @@ def _safe_candidate_blocks(
             if (role is OperatorRole.INDUSTRY and CURRENT_GENRE.get() == "industry_analysis"
                     and _INDUSTRY_PAIRED_CONTRAST_RE.search(text)):
                 warnings.append(f"editorial_style_review_required:{prefix}-{index}:paired_contrast")
+            if (editorial.analysis_pending and role is OperatorRole.INDUSTRY
+                    and _industry_blocking_contrast_matches(text, allow_paired_contrast=True)):
+                warnings.append(f"editorial_style_review_required:{prefix}-{index}:contrast")
             selected.append(editorial.model_copy(update={"paragraph_id": paragraph_id}))
             continue
         if kind in {
