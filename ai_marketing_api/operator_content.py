@@ -255,6 +255,12 @@ def _validated_surface_fact_plan(request):
     return body
 
 
+def _dependency_scan_text(role, text):
+    if role != "billing" or re.search(r"\b(?:pay|paid|billing|cost|price|saving)\b", text, re.I | re.ASCII):
+        return text
+    return re.sub(r"节省(?:多少)?人力(?=$|[\s，,。.!！?？；;：:、])", " ", text)
+
+
 def _surface_required_ids(plan, surface, raw_blocks, title="", *, canonical_blocks=()):
     if plan is None:
         return None
@@ -281,7 +287,7 @@ def _surface_required_ids(plan, surface, raw_blocks, title="", *, canonical_bloc
                 *(block.text for block in canonical_blocks if block.claim_id in required | referenced)]))
             updated = set(required)
             for role, pattern in _SURFACE_DEPENDENCIES.items():
-                if pattern.search(text):
+                if pattern.search(_dependency_scan_text(role, text)):
                     if not plan["fact_roles"][role]:
                         raise ContextAuthorizationError("surface_fact_plan_dependency_evidence_missing", surface,
                             "The topic needs approved evidence for this condition.")
@@ -292,7 +298,7 @@ def _surface_required_ids(plan, surface, raw_blocks, title="", *, canonical_bloc
     text = title + " " + " ".join(str(b.get("text") or b.get("public_text") or "") for b in (raw_blocks or []) if isinstance(b, dict))
     text = re.sub(r"\s+", " ", text)
     for role, pattern in _SURFACE_DEPENDENCIES.items():
-        if pattern.search(text):
+        if pattern.search(_dependency_scan_text(role, text)):
             if not plan["fact_roles"][role]:
                 raise ContextAuthorizationError("surface_fact_plan_dependency_evidence_missing", surface, "The topic needs approved evidence for this condition.")
             required.update(plan["fact_roles"][role])
