@@ -173,6 +173,10 @@ async def apply_grounded_paraphrases(
         output.pending_editorial_analysis = derive_pending(output, approved_claims)
     analysis = {identity_digest(row.model_dump(mode="json")): row
         for row in output.pending_editorial_analysis}
+    # The verifier only echoes short call-local IDs. Full pending identities and
+    # their hashes remain server-derived; model output cannot select a binding
+    # by copying, truncating, or approximately matching a long digest.
+    analysis_ids = {f"analysis-{index}": key for index, key in enumerate(analysis, 1)}
     if not eligible and not analysis:
         return output.model_copy(update={"claim_binding_reviews": reviews[:100]})
     body = {
@@ -210,8 +214,9 @@ async def apply_grounded_paraphrases(
                 "block_binding_hash": b.binding_hash, "paragraph_id": b.paragraph_id,
                 "analysis_pending": b.analysis_pending} for b in blocks]}
                 for surface, (title, blocks) in actual_surfaces.items()],
-            "candidates": [{"analysis_id": key, **pending_identity(row),
-                "text": by_ref[(row.surface, row.block_binding_hash)].text} for key, row in analysis.items()],
+            "candidates": [{"analysis_id": alias, **pending_identity(analysis[key]),
+                "text": by_ref[(analysis[key].surface, analysis[key].block_binding_hash)].text}
+                for alias, key in analysis_ids.items()],
         }
         body["response_contract"]["analysis_reviews"] = [{"analysis_id": "exact supplied analysis id",
             "verdict": "supported|unsupported|uncertain", "reason": "nonempty evidence-and-context-specific explanation"}]
@@ -239,12 +244,12 @@ async def apply_grounded_paraphrases(
         seen = set()
         for row in rows:
             if (not isinstance(row, dict) or set(row) != {"analysis_id", "verdict", "reason"}
-                    or not isinstance(row.get("analysis_id"), str) or row["analysis_id"] not in analysis
+                    or not isinstance(row.get("analysis_id"), str) or row["analysis_id"] not in analysis_ids
                     or row["analysis_id"] in seen or row.get("verdict") not in {"supported", "unsupported", "uncertain"}
                     or not isinstance(row.get("reason"), str) or not row["reason"].strip() or len(row["reason"]) > 1000):
                 raise ValueError("analysis_verifier_not_completed")
             seen.add(row["analysis_id"])
-            pending = analysis[row["analysis_id"]]
+            pending = analysis[analysis_ids[row["analysis_id"]]]
             analysis_reviews.append(AnalysisBindingReview(**pending_identity(pending),
                 verdict=row["verdict"], review_model=model, reason=row["reason"]))
         pair_rows = candidate.get("reviews", [])
