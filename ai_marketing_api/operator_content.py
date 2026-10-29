@@ -36,6 +36,7 @@ from ai_marketing_api.operator_runtime import (
     StrictModel,
     VerificationStatus,
     public_tutorial_contexts,
+    reporting_context_records,
 )
 
 
@@ -101,7 +102,7 @@ class ContentBlock(StrictModel):
     public_text: Optional[str] = Field(default=None, max_length=20000)
     public_text_verified: bool = False
     # Server-derived presentation only; canonical fact/evidence never changes.
-    source_display: Literal["excerpt", "full_documentation"] = "excerpt"
+    source_display: Literal["excerpt", "full_documentation", "report_attribution"] = "excerpt"
     paragraph_id: Optional[str] = Field(default=None, strict=True, min_length=1, max_length=48)
     analysis_pending: bool = Field(default=False, strict=True)
 
@@ -643,6 +644,8 @@ def _binding_hash(data: Dict[str, Any]) -> str:
         "locked": bool(data.get("locked")),
         "required": bool(data.get("required")),
     }
+    if data.get("source_display") == "report_attribution":
+        payload["source_display"] = "report_attribution"
     encoded = json.dumps(
         payload,
         ensure_ascii=False,
@@ -836,7 +839,7 @@ def _fact_display_text(block: ContentBlock, *, surface: str = "master") -> str:
     independently, so presentation never weakens evidence binding.
     """
 
-    if (block.source_display == "full_documentation" and block.source_exact
+    if (block.source_display in {"full_documentation", "report_attribution"} and block.source_exact
             and _value(block.kind) == "fact" and _value(block.origin) == "approved_claim"
             and block.locked and block.required):
         return block.text.strip()
@@ -1005,11 +1008,39 @@ def _contains_personal_attribution(value: Any) -> bool:
     return bool(_PERSONAL_ATTRIBUTION_RE.search(str(value or "").strip()))
 
 
+def _industry_current_judgment(text: str) -> bool:
+    """Syntax eligibility for independent checking, never factual permission.
+
+    Only the present editorial stance may use first person. Other pronouns or
+    an experience/identity assertion retain the existing rejection. The whole
+    retained block still needs the real context-bound analysis verifier.
+    """
+    if _PERSONAL_EDITORIAL_ASSERTION_RE.search(text):
+        return False
+    remainder = _SAFE_PERSONAL_JUDGMENT_RE.sub("", text)
+    return remainder != text and not _PERSONAL_ATTRIBUTION_RE.search(remainder)
+
+
+def _reporting_claim_ids(role, request, contexts):
+    required = set()
+    for context in reporting_context_records(role, request, contexts):
+        matches = [f"claim-{index}" for index, claim in enumerate(request.claims, 1)
+            if _claim_kind(claim.kind) == "fact" and claim.text == context.content
+            and context.record_id in claim.evidence_ids
+            and _verification(claim.verification_status) == "verified"]
+        if not matches:
+            raise ContextAuthorizationError("reporting_context_claim_missing", context.record_id,
+                "A reporting dependency must remain an exact verified canonical claim.")
+        required.update(matches)
+    return required
+
+
 def _build_approved_blocks(
     role: OperatorRole,
     request: OperatorComposeRequest,
     authorized_contexts: Sequence[AuthorizedContext],
 ) -> tuple[List[ContentBlock], List[str]]:
+    reporting_ids = _reporting_claim_ids(role, request, authorized_contexts)
     all_by_id = {context.record_id: context for context in authorized_contexts}
     public_by_id = {
         context.record_id: context
@@ -1120,7 +1151,7 @@ def _build_approved_blocks(
                         else VerificationStatus.VERIFIED
                     ),
                     source_exact=True,
-                    source_display=("full_documentation" if (
+                    source_display=("report_attribution" if claim_id in reporting_ids else "full_documentation" if (
                         role is OperatorRole.PERSONAL_IP and request.genre == PUBLIC_TUTORIAL_GENRE
                         and kind == ClaimKind.FACT.value and len(claim.text) >= 96
                         and all(public_by_id[record_id].record_type in {"source_fact", "source_item"}
@@ -1870,7 +1901,9 @@ def _safe_candidate_blocks(
             # customer, result, or experience.  Exact personal-card statements
             # remain canonical evidence blocks; authored copy may only add a
             # safe present-tense judgment around them.
-            if (
+            if can_defer_analysis and _industry_current_judgment(text):
+                deferred_analysis = True
+            elif (
                 role is not OperatorRole.PERSONAL_IP
                 or kind == ContentBlockKind.CTA.value
                 or _PERSONAL_EDITORIAL_ASSERTION_RE.search(text)
@@ -2396,6 +2429,10 @@ def _normalize_content_output(
 ) -> OperatorContentOutput:
     role = role_id if isinstance(role_id, OperatorRole) else OperatorRole(role_id)
     fact_plan = _validated_surface_fact_plan(request)
+    reporting_ids = _reporting_claim_ids(role, request, contexts)
+    def required_for(surface, raw_blocks, title):
+        ids = _surface_required_ids(fact_plan, surface, raw_blocks, title)
+        return None if ids is None else ids | reporting_ids
     profile: OperatorProfile = registry.get(role)
     approved_blocks, claim_errors = _build_approved_blocks(role, request, contexts)
     fallback_errors = [str(value) for value in fallback.get("_fallback_errors") or []]
@@ -2414,7 +2451,7 @@ def _normalize_content_output(
         prefix="master",
         template_blocks=base_blocks,
         allow_legacy_canonical=allow_legacy_canonical,
-        required_claim_ids=_surface_required_ids(fact_plan, "master", raw_master_blocks, str(candidate.get("master_title") or "")),
+        required_claim_ids=required_for("master", raw_master_blocks, str(candidate.get("master_title") or "")),
     )
     errors.extend(master_errors)
     warnings.extend(master_warnings)
@@ -2493,7 +2530,7 @@ def _normalize_content_output(
             prefix=f"variant-{platform}",
             template_blocks=base_variant_blocks,
             allow_legacy_canonical=allow_legacy_canonical,
-            required_claim_ids=_surface_required_ids(fact_plan, platform, raw_variant_blocks, str(raw.get("title") or "")),
+            required_claim_ids=required_for(platform, raw_variant_blocks, str(raw.get("title") or "")),
         )
         errors.extend(variant_errors)
         warnings.extend(variant_warnings)
@@ -3459,6 +3496,7 @@ def content_request_payload(
         raise ContextAuthorizationError("editorial_review_mode_denied", "editorial_review_mode",
             "Value reassessment is limited to industry analysis.")
     fact_plan = _validated_surface_fact_plan(request)
+    reporting_ids = _reporting_claim_ids(role, request, contexts)
     if fact_plan is not None and role is not OperatorRole.INDUSTRY:
         raise ContextAuthorizationError("surface_fact_plan_role_denied", "surface_fact_plan", "The signed plan belongs to industry.")
     visible = disclosable_contexts(role, request, contexts)
@@ -3841,6 +3879,8 @@ def content_request_payload(
                 "locked": block.locked,
                 "required": block.required,
                 "binding_hash": block.binding_hash,
+                **({"source_display": "report_attribution"}
+                   if block.source_display == "report_attribution" else {}),
             }
             for block in model_blocks
         ],
@@ -4156,4 +4196,15 @@ def content_request_payload(
         )
     if role is OperatorRole.INDUSTRY and request.genre == "industry_analysis":
         apply_industry_writer_method(payload)
+    if request.reporting_context is not None:
+        payload["reporting_context"] = _dump(request.reporting_context)
+        payload["reporting_context_rule"] = (
+            "The bound reporting facts establish who reported this event, when and in what source scope. "
+            "They are mandatory canonical dependencies on every surface, not another source of facts. "
+            "Establish this context before referring to its team or authors; do not invent an introduction "
+            "from editorial intent or treat the author's reported practice as an independent test.")
+        for block in payload["canonical_block_registry"]:
+            if block["claim_id"] in reporting_ids:
+                block["required"] = True
+                block["required_on_surfaces"] = ["master", *request.channels]
     return payload

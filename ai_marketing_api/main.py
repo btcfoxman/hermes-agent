@@ -799,13 +799,13 @@ async def _run_operator(
         OPERATOR_REGISTRY.authorize_preferences(
             role_id, payload.approved_preferences
         )
+        fallback = build_fallback(role_id, action, payload, contexts)
     except ContextAuthorizationError as exc:
         raise HTTPException(
             status_code=403,
             detail={"code": exc.code, "record_id": exc.record_id, "message": str(exc)},
         ) from exc
 
-    fallback = build_fallback(role_id, action, payload, contexts)
     run = BoundedModelRun(RuntimeBudget(max_model_calls=1))
     candidate = await run.call(_llm_json,
         profile.system_prompt,

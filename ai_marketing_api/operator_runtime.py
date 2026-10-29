@@ -10,13 +10,14 @@ from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Sequence, Set
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
 from ai_marketing_api.operator_style import PUBLIC_TUTORIAL_ATTRIBUTION_RE, PUBLIC_TUTORIAL_GENRE, StyleReference, style_context
 
 
 SCHEMA_VERSION = "operator.proposal.v1"
 CONTENT_SCHEMA_VERSION = "operator.content.v1"
 INDUSTRY_FACT_SELECTION_VERSION = "operator.industry_fact_selection.v1"
+INDUSTRY_CONTEXT_FACT_SELECTION_VERSION = "operator.industry_fact_selection.v2"
 INDUSTRY_FACT_SELECTION_FIELD = "_industry_fact_selection"
 PROFILE_ROOT = Path(__file__).resolve().parent / "profiles"
 PREFERENCE_CHANNEL_CONTENT_TYPES = {
@@ -115,6 +116,48 @@ class ApprovedPreference(StrictModel):
     version: int = Field(ge=1)
 
 
+def _reporting_source_key(value: str) -> tuple[str, str, str, str]:
+    parsed = urlsplit(value)
+    if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password
+            or parsed.fragment):
+        raise ValueError("reporting_context_source_invalid")
+    return parsed.scheme, parsed.netloc.lower(), parsed.path.rstrip("/"), parsed.query
+
+
+class ReportingContextFact(StrictModel):
+    record_id: str = Field(min_length=1, max_length=160)
+    record_version: int = Field(ge=1, strict=True)
+    body_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    role: Literal["report_attribution"]
+
+
+class ReportingContext(StrictModel):
+    """A caller-validated annotation of existing facts, never another fact grant."""
+    schema_version: Literal["operator.reporting_context.v1"]
+    annotation_id: str = Field(min_length=1, max_length=160)
+    annotation_version: int = Field(ge=1, strict=True)
+    annotation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_uri: str = Field(min_length=1, max_length=2000)
+    source_text_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    facts: List[ReportingContextFact] = Field(min_length=1, max_length=4)
+
+    @field_validator("source_uri")
+    @classmethod
+    def valid_source(cls, value):
+        _reporting_source_key(value)
+        return value
+
+    @model_validator(mode="after")
+    def valid_binding(self):
+        if len({fact.record_id for fact in self.facts}) != len(self.facts):
+            raise ValueError("reporting_context_duplicate_fact")
+        body = self.model_dump(mode="json", exclude={"annotation_sha256"})
+        raw = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        if hashlib.sha256(raw.encode("utf-8")).hexdigest() != self.annotation_sha256:
+            raise ValueError("reporting_context_annotation_changed")
+        return self
+
+
 class OperatorProposeRequest(StrictModel):
     objective: str = Field(min_length=1, max_length=2_000)
     topic: str = Field(default="", max_length=2_000)
@@ -127,6 +170,14 @@ class OperatorProposeRequest(StrictModel):
     decision_thread_id: Optional[str] = Field(default=None, max_length=160)
     genre: str = Field(default="", max_length=80, pattern=r"^[a-z0-9_\-]*$")
     style_references: List[StyleReference] = Field(default_factory=list, max_length=12)
+    reporting_context: Optional[ReportingContext] = None
+
+    @model_serializer(mode="wrap")
+    def serialize_reporting_context(self, handler):
+        data = handler(self)
+        if self.reporting_context is None:
+            data.pop("reporting_context", None)
+        return data
 
 
 class ProposalOutline(StrictModel):
@@ -185,6 +236,47 @@ class ContextAuthorizationError(ValueError):
         super().__init__(message)
         self.code = code
         self.record_id = record_id
+
+
+def reporting_context_records(role, request, contexts):
+    """Resolve complete approved attribution facts; do not infer one from dates or titles.
+
+    The caller checks live record versions. This stateless edge rechecks the
+    content/source hashes and explicit authorization supplied in this request.
+    """
+    binding = request.reporting_context
+    if binding is None:
+        return []
+    if _enum_value(role) != "industry" or request.genre != "industry_analysis":
+        raise ContextAuthorizationError("reporting_context_scope_denied", "reporting_context",
+            "Reporting context is limited to industry analysis.")
+    by_id = {context.record_id: context for context in contexts}
+    result = []
+    for fact in binding.facts:
+        context = by_id.get(fact.record_id)
+        document = context.structured_data.get("source_document", {}) if context else {}
+        source_text = document.get("source_text") if isinstance(document, dict) else None
+        valid = bool(context and _enum_value(context.space) == "industry"
+            and context.record_type == "source_fact" and context.status == "approved"
+            and context.source_tier in {"official", "primary"}
+            and context.structured_data.get("publishable") is not False
+            and context.structured_data.get("e2e_only") is not True
+            and 1 <= len(context.content) <= 4000
+            and hashlib.sha256(context.content.encode("utf-8")).hexdigest() == fact.body_sha256
+            and isinstance(source_text, str) and source_text
+            and document.get("source_text_hash") == binding.source_text_sha256
+            and hashlib.sha256(source_text.encode("utf-8")).hexdigest() == binding.source_text_sha256)
+        try:
+            valid = valid and _reporting_source_key(context.source_uri or "") == _reporting_source_key(binding.source_uri)
+            if valid and document.get("url"):
+                valid = _reporting_source_key(document["url"]) == _reporting_source_key(binding.source_uri)
+        except (ValueError, TypeError, AttributeError):
+            valid = False
+        if not valid:
+            raise ContextAuthorizationError("reporting_context_fact_unavailable", fact.record_id,
+                "The attribution dependency must bind this exact approved same-source public fact.")
+        result.append(context)
+    return result
 
 
 @dataclass(frozen=True)
@@ -653,10 +745,12 @@ def _industry_fallback(
     request: OperatorProposeRequest,
     contexts: Sequence[AuthorizedContext],
 ) -> Dict[str, Any]:
+    attribution = reporting_context_records(OperatorRole.INDUSTRY, request, contexts)
+    attribution_ids = {context.record_id for context in attribution}
     industry_sources = [context for context in contexts if _enum_value(context.space) == "industry"]
     grouped_sources: Dict[str, List[AuthorizedContext]] = {}
     for context in industry_sources:
-        text = _context_text(context)
+        text = context.content if context.record_id in attribution_ids else _context_text(context)
         if text:
             grouped_sources.setdefault(text, []).append(context)
     claims = [
@@ -666,8 +760,12 @@ def _industry_fallback(
             evidence_ids=[context.record_id for context in rows[:20]],
             verification_status=VerificationStatus.VERIFIED,
         )
-        for text, rows in list(grouped_sources.items())[:8]
+        for index, (text, rows) in enumerate(grouped_sources.items())
+        if index < 8 or any(context.record_id in attribution_ids for context in rows)
     ]
+    if not attribution_ids.issubset({identity for claim in claims for identity in claim.evidence_ids}):
+        raise ContextAuthorizationError("reporting_context_dependency_unrepresentable", "reporting_context",
+            "The complete attribution dependency must fit the canonical evidence binding.")
     unsupported_claims = []
     for text, rows in grouped_sources.items():
         source_domains = {
@@ -846,6 +944,7 @@ def build_fallback(
     contexts: Sequence[AuthorizedContext],
 ) -> Dict[str, Any]:
     role = role_id if isinstance(role_id, OperatorRole) else OperatorRole(role_id)
+    reporting_context_records(role, request, contexts)
     if role is OperatorRole.COMMERCIAL:
         payload = _commercial_fallback(request, contexts)
     elif role is OperatorRole.INDUSTRY:
@@ -984,7 +1083,8 @@ def _normalize_model_claims(
     return claims or fallback_objects, risks
 
 
-def _industry_proposal_fact_selection(fallback_claims, candidate):
+def _industry_proposal_fact_selection(fallback_claims, candidate, *, required_evidence_ids=(),
+        version=INDUSTRY_FACT_SELECTION_VERSION):
     """Select whole canonical facts only after an explicit new raw opt-in.
 
     Old provider JSON has no marker and keeps the complete legacy fact pool.
@@ -999,7 +1099,7 @@ def _industry_proposal_fact_selection(fallback_claims, candidate):
             "No valid versioned fact subset was supplied; the complete original fact pool was retained.")]
 
     raw_claims = candidate.get("claims")
-    if (marker != INDUSTRY_FACT_SELECTION_VERSION or candidate.get("_error")
+    if (marker != version or candidate.get("_error")
             or not isinstance(raw_claims, list) or not 1 <= len(raw_claims) <= 50):
         return unchanged()
     by_text = {claim["text"]: (index, claim) for index, claim in enumerate(fallback_claims)
@@ -1022,6 +1122,8 @@ def _industry_proposal_fact_selection(fallback_claims, candidate):
         selected.add(index)
     if not selected:
         return unchanged()
+    selected.update(index for index, claim in enumerate(fallback_claims)
+        if set(claim.get("evidence_ids") or []).intersection(required_evidence_ids))
     # Copy original objects, including every original corroborating reference.
     return [dict(claim) for index, claim in enumerate(fallback_claims)
             if claim.get("kind") != ClaimKind.FACT.value or index in selected], []
@@ -1044,8 +1146,16 @@ def normalize_output(
     proposal_fallback = fallback.get("proposal")
     if (role is OperatorRole.INDUSTRY and action is OperatorAction.PROPOSE
             and request.genre == "industry_analysis"):
-        fallback_claims, selection_risks = _industry_proposal_fact_selection(fallback_claims, candidate)
+        attribution = reporting_context_records(role, request, contexts)
+        fallback_claims, selection_risks = _industry_proposal_fact_selection(fallback_claims, candidate,
+            required_evidence_ids={context.record_id for context in attribution},
+            version=(INDUSTRY_CONTEXT_FACT_SELECTION_VERSION if attribution else INDUSTRY_FACT_SELECTION_VERSION))
         if not selection_risks:
+            if attribution:
+                # Selection already validated every whole canonical object.
+                # Avoid the legacy 480-character raw parser reinterpreting a
+                # complete attribution dependency as an unsupported new fact.
+                raw_claims = None
             selected_ids = {identity for claim in fallback_claims for identity in claim.get("evidence_ids") or []}
             selected_contexts = [context for context in contexts if context.record_id in selected_ids]
             # Re-anchor only the deterministic outline. Original authorization
@@ -1155,7 +1265,8 @@ def request_payload(request: OperatorProposeRequest, *, role_id=None, action=Non
         payload["selectable_facts"] = [
             {"text": claim["text"], "evidence_ids": list(claim["evidence_ids"])}
             for claim in fallback.get("claims") or [] if claim.get("kind") == ClaimKind.FACT.value]
-        payload["response_contract"][INDUSTRY_FACT_SELECTION_FIELD] = INDUSTRY_FACT_SELECTION_VERSION
+        payload["response_contract"][INDUSTRY_FACT_SELECTION_FIELD] = (
+            INDUSTRY_CONTEXT_FACT_SELECTION_VERSION if request.reporting_context else INDUSTRY_FACT_SELECTION_VERSION)
         payload["fact_selection_contract"] = [
             "For this new industry proposal, explicitly echo the requested fact-selection version and return "
             "a nonempty subset of selectable_facts through the existing claims field. Copy whole fact text "
@@ -1168,4 +1279,9 @@ def request_payload(request: OperatorProposeRequest, *, role_id=None, action=Non
             "The existing factual verification and independent editorial review still decide validity.",
             "Missing, invalid or empty versioned selection retains the complete legacy fact pool and a diagnostic; "
             "it never authorizes an empty EvidenceManifest or silently drops a required canonical fact."]
+        if request.reporting_context:
+            payload["reporting_context_rule"] = (
+                "The bound report_attribution facts are mandatory dependencies of the selected argument. "
+                "The server retains these complete canonical facts alongside your evidence subset. "
+                "This annotation grants no additional event, date, experience, conclusion or permission.")
     return payload

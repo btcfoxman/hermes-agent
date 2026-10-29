@@ -73,6 +73,7 @@ def digest(text: str) -> str:
 def paraphrase_eligible(block: Any, text: str, *, allow_seedance_version: bool = False) -> bool:
     return (
         block.kind == "fact"
+        and getattr(block, "source_display", "excerpt") != "report_attribution"
         and block.origin == "approved_claim"
         and block.source_exact
         and bool(block.claim_id)
