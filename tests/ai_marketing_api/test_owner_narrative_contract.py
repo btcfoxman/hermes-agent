@@ -48,7 +48,8 @@ def test_industry_writer_contract_keeps_facts_and_owner_intent_separate_from_nat
     body = content_request_payload("industry", request, contexts)
     narration = " ".join([*body["industry_editorial_method"]["rules"], *body["industry_narration_contract"]])
     assert "not a word blacklist" in narration
-    assert "force a scene" in narration and "without an invitation" in narration
+    assert "force a scene" in narration
+    assert "end directly when the concluding judgment is clear; an invitation is optional" in narration
     assert "paragraph_id" in narration and "independent verifier" in narration
     assert "industry-wide habit" in narration
     assert "expected avoided" in narration and "human review" in narration
