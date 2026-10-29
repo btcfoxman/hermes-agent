@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
 from ai_marketing_api.operator_style import PUBLIC_TUTORIAL_ATTRIBUTION_RE, PUBLIC_TUTORIAL_GENRE, StyleReference, style_context
+from ai_marketing_api.operator_surface_selection import PreparationEvidenceSelection, public_source_key
 
 
 SCHEMA_VERSION = "operator.proposal.v1"
@@ -171,12 +172,15 @@ class OperatorProposeRequest(StrictModel):
     genre: str = Field(default="", max_length=80, pattern=r"^[a-z0-9_\-]*$")
     style_references: List[StyleReference] = Field(default_factory=list, max_length=12)
     reporting_context: Optional[ReportingContext] = None
+    preparation_evidence_selection: Optional[PreparationEvidenceSelection] = None
 
     @model_serializer(mode="wrap")
     def serialize_reporting_context(self, handler):
         data = handler(self)
         if self.reporting_context is None:
             data.pop("reporting_context", None)
+        if self.preparation_evidence_selection is None:
+            data.pop("preparation_evidence_selection", None)
         return data
 
 
@@ -277,6 +281,55 @@ def reporting_context_records(role, request, contexts):
                 "The attribution dependency must bind this exact approved same-source public fact.")
         result.append(context)
     return result
+
+
+def preparation_evidence_records(role, request, contexts, *, action=None):
+    """Keep whole selected facts; this input conveys no approval or new facts.
+
+    Main checks current record versions and the frozen planner catalog before
+    this authenticated request.  This stateless edge checks the same-source
+    public facts and complete source bytes available in authorized_context.
+    """
+    binding = request.preparation_evidence_selection
+    if binding is None:
+        return []
+    if (_enum_value(role) != "industry" or request.genre != "industry_analysis"
+            or (action is not None and _enum_value(action) != "propose")):
+        raise ContextAuthorizationError("preparation_evidence_scope_denied", "preparation_evidence_selection",
+            "Planner evidence selection is limited to a fresh industry analysis proposal.")
+    by_id = {context.record_id: context for context in contexts}
+    records, source_bindings = [], set()
+    for identity in binding.required_evidence_ids:
+        context = by_id.get(identity)
+        document = context.structured_data.get("source_document", {}) if context else {}
+        source_text = document.get("source_text") if isinstance(document, dict) else None
+        source_hash = document.get("source_text_hash") if isinstance(document, dict) else None
+        valid = bool(context and _enum_value(context.space) == "industry"
+            and context.record_type == "source_fact" and context.status == "approved"
+            and context.source_tier in {"official", "primary"}
+            and context.structured_data.get("publishable") is not False
+            and context.structured_data.get("e2e_only") is not True
+            and context.content.strip() and 1 <= len(context.content) <= 4000
+            and isinstance(source_text, str) and 80 <= len(source_text) <= 24000
+            and isinstance(source_hash, str)
+            and hashlib.sha256(source_text.encode("utf-8")).hexdigest() == source_hash)
+        try:
+            source_key = public_source_key(context.source_uri or "") if context else None
+            valid = valid and source_key == public_source_key(document.get("url") or "")
+            if valid and request.reporting_context is not None:
+                valid = (source_key == public_source_key(request.reporting_context.source_uri)
+                    and source_hash == request.reporting_context.source_text_sha256)
+        except (ValueError, TypeError, AttributeError):
+            valid = False
+        if not valid:
+            raise ContextAuthorizationError("preparation_evidence_fact_unavailable", identity,
+                "The selected evidence must be a complete approved same-source atomic public fact.")
+        source_bindings.add((source_key, source_hash))
+        records.append(context)
+    if len(source_bindings) != 1:
+        raise ContextAuthorizationError("preparation_evidence_source_changed", "preparation_evidence_selection",
+            "Selected facts must bind the same original source document.")
+    return records
 
 
 @dataclass(frozen=True)
@@ -747,10 +800,13 @@ def _industry_fallback(
 ) -> Dict[str, Any]:
     attribution = reporting_context_records(OperatorRole.INDUSTRY, request, contexts)
     attribution_ids = {context.record_id for context in attribution}
+    preparation = preparation_evidence_records(OperatorRole.INDUSTRY, request, contexts)
+    preparation_ids = {context.record_id for context in preparation}
+    whole_fact_ids = attribution_ids | preparation_ids
     industry_sources = [context for context in contexts if _enum_value(context.space) == "industry"]
     grouped_sources: Dict[str, List[AuthorizedContext]] = {}
     for context in industry_sources:
-        text = context.content if context.record_id in attribution_ids else _context_text(context)
+        text = context.content if context.record_id in whole_fact_ids else _context_text(context)
         if text:
             grouped_sources.setdefault(text, []).append(context)
     claims = [
@@ -761,11 +817,15 @@ def _industry_fallback(
             verification_status=VerificationStatus.VERIFIED,
         )
         for index, (text, rows) in enumerate(grouped_sources.items())
-        if index < 8 or any(context.record_id in attribution_ids for context in rows)
+        if index < 8 or any(context.record_id in whole_fact_ids for context in rows)
     ]
     if not attribution_ids.issubset({identity for claim in claims for identity in claim.evidence_ids}):
         raise ContextAuthorizationError("reporting_context_dependency_unrepresentable", "reporting_context",
             "The complete attribution dependency must fit the canonical evidence binding.")
+    if (not preparation_ids.issubset({identity for claim in claims for identity in claim.evidence_ids})
+            or (preparation_ids and len(claims) > 50)):
+        raise ContextAuthorizationError("preparation_evidence_dependency_unrepresentable", "preparation_evidence_selection",
+            "Every selected whole fact must fit the canonical evidence binding.")
     unsupported_claims = []
     for text, rows in grouped_sources.items():
         source_domains = {
@@ -945,6 +1005,7 @@ def build_fallback(
 ) -> Dict[str, Any]:
     role = role_id if isinstance(role_id, OperatorRole) else OperatorRole(role_id)
     reporting_context_records(role, request, contexts)
+    preparation_evidence_records(role, request, contexts, action=action)
     if role is OperatorRole.COMMERCIAL:
         payload = _commercial_fallback(request, contexts)
     elif role is OperatorRole.INDUSTRY:
@@ -1144,14 +1205,15 @@ def normalize_output(
     selection_risks = []
     raw_claims = candidate.get("claims")
     proposal_fallback = fallback.get("proposal")
+    preparation = preparation_evidence_records(role, request, contexts, action=action)
     if (role is OperatorRole.INDUSTRY and action is OperatorAction.PROPOSE
             and request.genre == "industry_analysis"):
         attribution = reporting_context_records(role, request, contexts)
         fallback_claims, selection_risks = _industry_proposal_fact_selection(fallback_claims, candidate,
-            required_evidence_ids={context.record_id for context in attribution},
+            required_evidence_ids={context.record_id for context in [*attribution, *preparation]},
             version=(INDUSTRY_CONTEXT_FACT_SELECTION_VERSION if attribution else INDUSTRY_FACT_SELECTION_VERSION))
         if not selection_risks:
-            if attribution:
+            if attribution or preparation:
                 # Selection already validated every whole canonical object.
                 # Avoid the legacy 480-character raw parser reinterpreting a
                 # complete attribution dependency as an unsupported new fact.
@@ -1284,4 +1346,10 @@ def request_payload(request: OperatorProposeRequest, *, role_id=None, action=Non
                 "The bound report_attribution facts are mandatory dependencies of the selected argument. "
                 "The server retains these complete canonical facts alongside your evidence subset. "
                 "This annotation grants no additional event, date, experience, conclusion or permission.")
+        if request.preparation_evidence_selection is not None:
+            payload["preparation_evidence_selection_rule"] = (
+                "The independent planner's selected anchors, reported-case facts and protected conditions "
+                "are caller-validated drafting dependencies. The server retains each whole canonical fact "
+                "alongside your subset. Do not rewrite a fact, remove its source references, infer a case "
+                "that was not supplied, or treat this selection as owner feedback or publication authority.")
     return payload

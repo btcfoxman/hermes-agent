@@ -220,19 +220,64 @@ def _validated_surface_fact_plan(request):
         raise ContextAuthorizationError("surface_fact_plan_invalid", "surface_fact_plan", "A matching server-signed display plan is required.")
     def refs(value):
         return isinstance(value, list) and all(isinstance(x, str) and x in ids for x in value) and len(value) == len(set(value))
+    preparation = ("preparation_authorization" in body or "preparation_selection_sha256" in body
+        or (isinstance(body.get("editorial_intent"), dict)
+            and body["editorial_intent"].get("schema_version") == "operator.preparation_editorial_intent.v1"))
     classified = [x for values in roles.values() if isinstance(values, list) for x in values]
     if (not roles["anchor"] or any(not refs(v) for v in roles.values())
-            or len(classified) != len(set(classified)) or set(classified) != ids
+            or (not preparation and (len(classified) != len(set(classified)) or set(classified) != ids))
             or any(not refs(v) or not set(v).intersection(roles["anchor"])
                 or (s in {"master", "wechat_mp", "toutiao"} and set(v) != ids) for s, v in surfaces.items())):
         raise ContextAuthorizationError("surface_fact_plan_invalid", "surface_fact_plan", "Required claim IDs cannot be downgraded by the candidate.")
+    if preparation:
+        from ai_marketing_api.operator_surface_selection import validate_preparation_plan_metadata
+        report_ids = {fact.record_id for fact in request.reporting_context.facts} if request.reporting_context else set()
+        report_claims = {claim["claim_id"] for claim in pool if set(claim["evidence_ids"]).intersection(report_ids)}
+        try:
+            if any(claim["kind"] != "fact" or not claim["evidence_ids"] for claim in pool):
+                raise ValueError("surface_preparation_plan_invalid")
+            validate_preparation_plan_metadata(body, claim_texts={f"claim-{i + 1}": c.text for i, c in enumerate(request.claims)},
+                dependencies=_SURFACE_DEPENDENCIES, reporting_claim_ids=report_claims)
+        except (ValueError, TypeError):
+            raise ContextAuthorizationError("surface_fact_plan_invalid", "surface_fact_plan",
+                "The signed preparation allocation must preserve its exact source and display obligations.") from None
     return body
 
 
-def _surface_required_ids(plan, surface, raw_blocks, title=""):
+def _surface_required_ids(plan, surface, raw_blocks, title="", *, canonical_blocks=()):
     if plan is None:
         return None
     required = set(plan["surfaces"][surface])
+    if "preparation_authorization" in plan:
+        # Resolve references before checking conditions: an allocated canonical
+        # anchor can itself discuss billing or input restrictions. Dependencies
+        # can introduce another protected condition, so close the whole set.
+        by_ref = {block.binding_hash: block for block in canonical_blocks if block.binding_hash}
+        text_parts = [title]
+        referenced = set()
+        for raw in raw_blocks or []:
+            if isinstance(raw, str):
+                ref = raw.strip()
+            elif isinstance(raw, dict):
+                ref = str(raw.get("block_ref") or raw.get("canonical_block_ref") or "")
+                text_parts.extend(str(raw.get(key) or "") for key in ("text", "public_text"))
+            else:
+                continue
+            if ref in by_ref:
+                referenced.add(by_ref[ref].claim_id)
+        while True:
+            text = re.sub(r"\s+", " ", " ".join([*text_parts,
+                *(block.text for block in canonical_blocks if block.claim_id in required | referenced)]))
+            updated = set(required)
+            for role, pattern in _SURFACE_DEPENDENCIES.items():
+                if pattern.search(text):
+                    if not plan["fact_roles"][role]:
+                        raise ContextAuthorizationError("surface_fact_plan_dependency_evidence_missing", surface,
+                            "The topic needs approved evidence for this condition.")
+                    updated.update(plan["fact_roles"][role])
+            if updated == required:
+                return required
+            required = updated
     text = title + " " + " ".join(str(b.get("text") or b.get("public_text") or "") for b in (raw_blocks or []) if isinstance(b, dict))
     text = re.sub(r"\s+", " ", text)
     for role, pattern in _SURFACE_DEPENDENCIES.items():
@@ -2429,9 +2474,10 @@ def _normalize_content_output(
 ) -> OperatorContentOutput:
     role = role_id if isinstance(role_id, OperatorRole) else OperatorRole(role_id)
     fact_plan = _validated_surface_fact_plan(request)
+    preparation_plan = fact_plan is not None and "preparation_authorization" in fact_plan
     reporting_ids = _reporting_claim_ids(role, request, contexts)
     def required_for(surface, raw_blocks, title):
-        ids = _surface_required_ids(fact_plan, surface, raw_blocks, title)
+        ids = _surface_required_ids(fact_plan, surface, raw_blocks, title, canonical_blocks=approved_blocks)
         return None if ids is None else ids | reporting_ids
     profile: OperatorProfile = registry.get(role)
     approved_blocks, claim_errors = _build_approved_blocks(role, request, contexts)
@@ -2444,6 +2490,15 @@ def _normalize_content_output(
 
     base_blocks = [ContentBlock(**raw) for raw in fallback.get("blocks") or []]
     raw_master_blocks = candidate.get("blocks")
+    # Only the preparation allocation may omit optional canonical facts. Its
+    # dependencies must follow the title that will actually be rendered,
+    # including a safe replacement for a missing or rejected model title.
+    title = _safe_master_title(
+        request, approved_blocks, candidate.get("master_title"), role=role,
+        diagnostic_warnings=(warnings if not allow_legacy_canonical
+            and ("blocks" in candidate or "master_title" in candidate) else None),
+        surface="master",
+    ) if preparation_plan else None
     master_selection, master_errors, master_warnings = _safe_candidate_blocks(
         role,
         raw_master_blocks,
@@ -2451,7 +2506,8 @@ def _normalize_content_output(
         prefix="master",
         template_blocks=base_blocks,
         allow_legacy_canonical=allow_legacy_canonical,
-        required_claim_ids=required_for("master", raw_master_blocks, str(candidate.get("master_title") or "")),
+        required_claim_ids=required_for("master", raw_master_blocks,
+            title if preparation_plan else str(candidate.get("master_title") or "")),
     )
     errors.extend(master_errors)
     warnings.extend(master_warnings)
@@ -2492,7 +2548,7 @@ def _normalize_content_output(
         by_platform[platform] = raw
 
     variants: List[PlatformVariant] = []
-    title = _safe_master_title(
+    title = title if preparation_plan else _safe_master_title(
         request,
         approved_blocks,
         candidate.get("master_title"),
@@ -2523,6 +2579,11 @@ def _normalize_content_output(
         raw_variant_blocks = raw.get("blocks")
         if platform in by_platform and raw_variant_blocks is None:
             warnings.append(f"model_platform_blocks_missing:{platform}")
+        variant_title = _safe_master_title(
+            request, approved_blocks, raw.get("title"), role=role,
+            diagnostic_warnings=(warnings if not allow_legacy_canonical and platform in by_platform else None),
+            surface=platform,
+        ) if preparation_plan else None
         variant_selection, variant_errors, variant_warnings = _safe_candidate_blocks(
             role,
             raw_variant_blocks,
@@ -2530,7 +2591,8 @@ def _normalize_content_output(
             prefix=f"variant-{platform}",
             template_blocks=base_variant_blocks,
             allow_legacy_canonical=allow_legacy_canonical,
-            required_claim_ids=required_for(platform, raw_variant_blocks, str(raw.get("title") or "")),
+            required_claim_ids=required_for(platform, raw_variant_blocks,
+                variant_title if preparation_plan else str(raw.get("title") or "")),
         )
         errors.extend(variant_errors)
         warnings.extend(variant_warnings)
@@ -2550,7 +2612,7 @@ def _normalize_content_output(
             )
         body = _render(variant_blocks, surface=platform)
         if body:
-            variant_title = _safe_master_title(
+            variant_title = variant_title if preparation_plan else _safe_master_title(
                 request,
                 approved_blocks,
                 raw.get("title"),
@@ -4194,6 +4256,17 @@ def content_request_payload(
             "required references for each surface and every triggered dependency; optional pool references "
             "need not be repeated. All factual and disclosure restrictions remain unchanged."
         )
+        if "preparation_authorization" in fact_plan:
+            payload["surface_fact_plan_rule"] += (
+                " This plan was compiled under standing preparation authority from an independent workflow planner, "
+                "not from an owner review. On a short surface, develop the allocated substantive fact into one "
+                "specific bounded judgment; do not repeat optional facts merely because they are available. "
+                "Add another canonical reference only when the argument needs its factual premise or a mandatory "
+                "condition requires it. Attribution, dates and material restrictions remain mandatory. "
+                "Selected reported-case facts may illustrate long-form reasoning; a declared case gap cannot be "
+                "filled with an invented event or presented as a real example."
+            )
+            payload["response_contract"]["safety"][2] = payload["surface_fact_plan_rule"]
     if role is OperatorRole.INDUSTRY and request.genre == "industry_analysis":
         apply_industry_writer_method(payload)
     if request.reporting_context is not None:

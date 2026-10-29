@@ -10,6 +10,9 @@ from pydantic import AwareDatetime, Field, field_validator, model_serializer, mo
 from ai_marketing_api.operator_editorial import BoundedModelRun, RuntimeBudget, TopicValueContract
 from ai_marketing_api.operator_editorial_method import industry_planning_method
 from ai_marketing_api.operator_runtime import OperatorRole, StrictModel
+from ai_marketing_api.operator_surface_selection import (
+    LONG_SURFACES, IndustrySurfaceSelection, PlannerAtomicFact, public_source_key, validate_surface_selection,
+)
 
 
 class PublicProduct(StrictModel):
@@ -103,6 +106,7 @@ class EditorialPlanRequest(StrictModel):
     max_packages: int = Field(default=2, ge=0, le=6)
     topic_value_required: bool = Field(default=False, strict=True)
     genre: str = Field(default="", max_length=80, pattern=r"^[a-z0-9_\-]*$", strict=True)
+    industry_fact_catalog: dict[str, list[PlannerAtomicFact]] | None = Field(default=None, max_length=60)
     budget: RuntimeBudget = Field(
         default_factory=lambda: RuntimeBudget(max_model_calls=1, max_output_tokens=3000)
     )
@@ -112,7 +116,27 @@ class EditorialPlanRequest(StrictModel):
         result = handler(self)
         if not self.genre:
             result.pop("genre", None)
+        if self.industry_fact_catalog is None:
+            result.pop("industry_fact_catalog", None)
         return result
+
+    @model_validator(mode="after")
+    def bound_industry_catalog(self):
+        if self.industry_fact_catalog is None:
+            return self
+        opportunities = {item.id: item for item in self.opportunities}
+        if self.genre != "industry_analysis" or not self.industry_fact_catalog:
+            raise ValueError("industry_surface_catalog_scope_invalid")
+        for identity, facts in self.industry_fact_catalog.items():
+            opportunity = opportunities.get(identity)
+            if (not opportunity or opportunity.role_id != "industry" or not opportunity.verified
+                    or not 1 <= len(facts) <= 8
+                    or len({fact.record_id for fact in facts}) != len(facts)
+                    or any(fact.text not in opportunity.summary for fact in facts)
+                    or any(public_source_key(fact.source_uri) != public_source_key(opportunity.url) for fact in facts)
+                    or len({fact.source_text_sha256 for fact in facts}) != 1):
+                raise ValueError("industry_surface_catalog_unbound")
+        return self
 
     @field_validator("performance_history")
     @classmethod
@@ -131,6 +155,14 @@ class EditorialSelection(StrictModel):
     history_refs: list[HistorySignalId] = Field(default_factory=list, max_length=10)
     history_reason: str = Field(default="", max_length=1000, strict=True)
     value_contract: TopicValueContract | None = None
+    industry_surface_selection: IndustrySurfaceSelection | None = None
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_selection(self, handler):
+        result = handler(self)
+        if self.industry_surface_selection is None:
+            result.pop("industry_surface_selection", None)
+        return result
 
 
 class LearningHypothesis(StrictModel):
@@ -292,6 +324,25 @@ async def plan_editorial(
             "decision_delta": "what this evidence changes for the reader and the reasoning",
             "counterargument": "a substantive limitation or evidence that would overturn the answer",
         }
+    if request.industry_fact_catalog is not None:
+        body["response_contract"]["selections"][0]["industry_surface_selection"] = {
+            "schema_version": "operator.industry_surface_selection.v1",
+            "short_surfaces": {surface: {"anchor_record_id": "one exact record_id from this opportunity's industry_fact_catalog",
+                "reason": "the specific reader judgment this fact supports on this surface"}
+                for surface in request.mandate.channels if surface not in LONG_SURFACES},
+            "reported_case_record_ids": ["exact record_ids of an existing documented case, or an empty list"],
+            "case_gap": "empty if an actual reported case was selected; otherwise state what concrete case material is missing",
+        }
+        body["industry_surface_selection_contract"] = [
+            "Only a selection whose opportunity has an industry_fact_catalog must provide industry_surface_selection. "
+            "Use that opportunity's exact atomic record IDs; records from other opportunities or source-document IDs are unavailable.",
+            "Choose one substantive reported fact for each requested short surface and explain its distinct reader judgment. "
+            "Attribution alone is not a substantive anchor. Long surfaces retain the complete eventual canonical pool; do not allocate them a subset.",
+            "Choose supplied facts that document a concrete reported case when one supports the argument. A tool name or method label alone is not a case. "
+            "If no such case exists, use reported_case_record_ids=[] and a specific nonblank case_gap; never invent a case or mark a hypothetical scenario as reported.",
+            "This is an independent planner's editorial suggestion, not an owner decision, factual grant, display permission, quality verdict or publication approval. "
+            "Orchestration must validate current whole facts, preserve material conditions and compile its own signed preparation plan before writing.",
+        ]
     system = PLANNER_PROMPT
     if analysis_required:
         body["industry_editorial_method"] = industry_planning_method()
@@ -321,6 +372,19 @@ async def plan_editorial(
                 or not set(selection.history_refs).issubset(history_ids)
                 or len(set(selection.history_refs)) != len(selection.history_refs)
             ):
+                valid = False
+                break
+            catalog = (request.industry_fact_catalog or {}).get(selection.opportunity_id)
+            if catalog is not None:
+                try:
+                    if selection.industry_surface_selection is None:
+                        raise ValueError("industry_surface_selection_missing")
+                    validate_surface_selection(selection.industry_surface_selection, catalog=catalog,
+                        channels=request.mandate.channels)
+                except (ValueError, TypeError):
+                    valid = False
+                    break
+            elif selection.industry_surface_selection is not None:
                 valid = False
                 break
             contract = selection.value_contract

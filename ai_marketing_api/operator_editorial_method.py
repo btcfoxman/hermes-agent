@@ -96,7 +96,10 @@ INDUSTRY_METHOD_RULES = (
     "catchphrases, add fake first-person experience, force a scene, five sections, a CTA or a "
     "contrarian position. One short paragraph may serve several argumentative functions. "
     "Judge natural expression in context, not a word blacklist; a precise necessary limitation is useful. "
-    "A clear concluding judgment can end without an invitation.",
+    "Explain the same boundary once. A later paragraph should add a new verified detail, mechanism or "
+    "consequence; otherwise remove it. Do not defend the argument against an objection that the text "
+    "has no reason to raise. Keep any meaningful limitation the conclusion actually needs, and end "
+    "directly when the concluding judgment is clear; an invitation is optional.",
 )
 
 
