@@ -1529,6 +1529,7 @@ def _safe_master_title(
     }
     source_text = "\n".join(exact_texts)
     role_value = _value(role) if role is not None else ""
+    social_title_required = role_value == OperatorRole.INDUSTRY.value and request.genre == "industry_analysis"
 
     def title_rejection_reason(value: str) -> Optional[str]:
         if not value:
@@ -1580,9 +1581,14 @@ def _safe_master_title(
         return next((reason for failed, reason in rejected if failed), None)
 
     def title_is_safe(value: str) -> bool:
-        return title_rejection_reason(value) is None
+        return title_rejection_reason(value) is None and (
+            not social_title_required or not _social_title_quality_errors(
+                value, surface=surface, source_texts=exact_texts))
 
     supplied_reason = title_rejection_reason(supplied)
+    if supplied_reason is None and social_title_required:
+        social_errors = _social_title_quality_errors(supplied, surface=surface, source_texts=exact_texts)
+        supplied_reason = social_errors[0].split(":", 1)[0] if social_errors else None
     if supplied_reason is None:
         return supplied
 
@@ -1603,6 +1609,30 @@ def _safe_master_title(
     # source excerpt whenever the model title drifts.
     if title_is_safe(requested):
         return normalized_title(requested)
+    if social_title_required:
+        # Reuse only complete, contiguous approved clauses. Do not truncate a
+        # factual statement to fit a platform or synthesize a replacement claim.
+        eligible = []
+        for source in exact_texts:
+            source = source.strip()
+            if title_is_safe(source):
+                eligible.append(source)
+            spans = [match.span() for match in re.finditer(r"[^，；。！？!?]+[，；。！？!?]?", source)
+                     if match.group(0).strip(" \t\r\n，；。！？!? ")]
+            for start_index in range(len(spans)):
+                for end_index in range(start_index, min(len(spans), start_index + 4)):
+                    value = source[spans[start_index][0]:spans[end_index][1]].strip(" \t\r\n，；。！？!?")
+                    value = re.sub(r"^(?:同时|此外|并且|并|依据|根据|对)", "", value).strip()
+                    if 12 <= len(value) <= 48 and value in source and title_is_safe(value):
+                        eligible.append(value)
+        if not eligible:
+            raise ValueError("social_title_no_eligible_candidate")
+        def social_title_score(value):
+            entity = int(bool(_TITLE_ENTITY_RE.search(value)))
+            number = int(bool(_NUMBER_RE.search(value)))
+            return (entity and number, entity, int(bool(_TITLE_ACTION_RE.search(value))),
+                    min(len(_NUMBER_RE.findall(value)), 3), -abs(len(value) - 36))
+        return normalized_title(max(eligible, key=social_title_score))
     # A proposal title is an editorial direction, not evidence.  When it is
     # not itself a verbatim approved excerpt, extract a concise contiguous
     # span from the first verified claim instead of turning a whole source
