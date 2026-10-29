@@ -99,7 +99,35 @@ def artifact_signature(artifact: dict) -> str:
     return hmac.new(os.getenv("HERMES_API_KEY", "").encode(), body.encode(), hashlib.sha256).hexdigest()
 
 
+def _candidate_fact_projection_matches(candidate, request, role):
+    """A signed prior step must retain its frozen display policy, including legacy absence."""
+    requested = request.fact_projection_version
+    if requested is not None and (requested != "literal_prose.v1"
+            or getattr(role, "value", role) != "industry" or request.genre != "industry_analysis"):
+        return False
+    master, variants = candidate.get("blocks"), candidate.get("platform_variants")
+    if not isinstance(master, list) or not isinstance(variants, list):
+        return False
+    surfaces = [master]
+    for variant in variants:
+        if not isinstance(variant, dict) or not isinstance(variant.get("blocks"), list):
+            return False
+        surfaces.append(variant["blocks"])
+    for rows in surfaces:
+        for block in rows:
+            if not isinstance(block, dict):
+                return False
+            expected = requested if (str(block.get("kind") or "").strip().lower() == "fact"
+                and (block.get("source_display") or "excerpt") == "excerpt") else None
+            if block.get("fact_projection_version") != expected:
+                return False
+    return True
+
+
 def _normalized_candidate(registry, role, request, contexts, fallback, candidate, signature):
+    if signature and hmac.compare_digest(artifact_signature(candidate), signature):
+        if not _candidate_fact_projection_matches(candidate, request, role):
+            raise ValueError("artifact_fact_projection_mismatch")
     output = normalize_content_output(registry, role, request, contexts, fallback, candidate)
     if output.critic.errors:
         return output

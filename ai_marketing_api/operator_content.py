@@ -82,6 +82,14 @@ class OperatorComposeRequest(OperatorProposeRequest):
     editorial_feedback: str = Field(default="", max_length=6000)
     editorial_review_mode: Literal["standard", "value_reassessment.v1"] = "standard"
     surface_fact_plan: Optional[Dict[str, Any]] = None
+    fact_projection_version: Optional[Literal["literal_prose.v1"]] = None
+
+    @model_serializer(mode="wrap")
+    def serialize_reporting_context(self, handler):
+        data = super().serialize_reporting_context(handler)
+        if self.fact_projection_version is None:
+            data.pop("fact_projection_version", None)
+        return data
 
 
 _PARAGRAPH_ID_RE = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,47}")
@@ -105,6 +113,7 @@ class ContentBlock(StrictModel):
     source_display: Literal["excerpt", "full_documentation", "report_attribution"] = "excerpt"
     paragraph_id: Optional[str] = Field(default=None, strict=True, min_length=1, max_length=48)
     analysis_pending: bool = Field(default=False, strict=True)
+    fact_projection_version: Optional[Literal["literal_prose.v1"]] = None
 
     @field_validator("paragraph_id")
     @classmethod
@@ -120,6 +129,8 @@ class ContentBlock(StrictModel):
             data.pop("paragraph_id", None)
         if not self.analysis_pending:
             data.pop("analysis_pending", None)
+        if self.fact_projection_version is None:
+            data.pop("fact_projection_version", None)
         return data
 
 
@@ -691,6 +702,8 @@ def _binding_hash(data: Dict[str, Any]) -> str:
     }
     if data.get("source_display") == "report_attribution":
         payload["source_display"] = "report_attribution"
+    if data.get("fact_projection_version") is not None:
+        payload["fact_projection_version"] = data["fact_projection_version"]
     encoded = json.dumps(
         payload,
         ensure_ascii=False,
@@ -890,6 +903,10 @@ def _fact_display_text(block: ContentBlock, *, surface: str = "master") -> str:
         return block.text.strip()
     if block.public_text_verified and block.public_text:
         return block.public_text
+    if (block.fact_projection_version == "literal_prose.v1" and block.source_exact
+            and _value(block.kind) == "fact" and _value(block.origin) == "approved_claim"
+            and block.locked and block.required):
+        return block.text.strip()
     text = block.text.strip()
     if (
         _value(block.kind) != ContentBlockKind.FACT.value
@@ -1085,6 +1102,10 @@ def _build_approved_blocks(
     request: OperatorComposeRequest,
     authorized_contexts: Sequence[AuthorizedContext],
 ) -> tuple[List[ContentBlock], List[str]]:
+    if request.fact_projection_version is not None and (
+            role is not OperatorRole.INDUSTRY or request.genre != "industry_analysis"):
+        raise ContextAuthorizationError("fact_projection_scope_invalid", "fact_projection_version",
+            "Literal fact prose is limited to an explicitly versioned industry-analysis request.")
     reporting_ids = _reporting_claim_ids(role, request, authorized_contexts)
     all_by_id = {context.record_id: context for context in authorized_contexts}
     public_by_id = {
@@ -1196,6 +1217,9 @@ def _build_approved_blocks(
                         else VerificationStatus.VERIFIED
                     ),
                     source_exact=True,
+                    fact_projection_version=(request.fact_projection_version
+                        if role is OperatorRole.INDUSTRY and request.genre == "industry_analysis"
+                        and kind == ClaimKind.FACT.value and claim_id not in reporting_ids else None),
                     source_display=("report_attribution" if claim_id in reporting_ids else "full_documentation" if (
                         role is OperatorRole.PERSONAL_IP and request.genre == PUBLIC_TUTORIAL_GENRE
                         and kind == ClaimKind.FACT.value and len(claim.text) >= 96
@@ -2012,6 +2036,7 @@ def _safe_candidate_blocks(
             "locked",
             "required",
             "binding_hash",
+            "fact_projection_version",
         )
         for field in scalar_fields:
             if field not in raw:
