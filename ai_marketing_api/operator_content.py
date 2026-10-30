@@ -1520,6 +1520,7 @@ def _safe_master_title(
     role: OperatorRole | str | None = None,
     diagnostic_warnings: Optional[List[str]] = None,
     surface: str = "master",
+    fallback_claim_ids: Optional[set[str]] = None,
 ) -> str:
     requested = request.approved_proposal.title.strip()
     exact_texts = [block.text for block in approved_blocks if block.source_exact]
@@ -1616,8 +1617,13 @@ def _safe_master_title(
     if social_title_required:
         # Reuse only complete, contiguous approved clauses. Do not truncate a
         # factual statement to fit a platform or synthesize a replacement claim.
+        # Scope automatic extraction to the actual frozen surface allocation.
+        # Explicit safe titles retain their ordinary dependency closure above.
+        fallback_texts = [block.text for block in approved_blocks
+            if block.source_exact and (fallback_claim_ids is None
+                or block.claim_id in fallback_claim_ids)]
         eligible = []
-        for source in exact_texts:
+        for source in fallback_texts:
             source = source.strip()
             if title_is_safe(source):
                 eligible.append(source)
@@ -2562,7 +2568,7 @@ def _normalize_content_output(
         request, approved_blocks, candidate.get("master_title"), role=role,
         diagnostic_warnings=(warnings if not allow_legacy_canonical
             and ("blocks" in candidate or "master_title" in candidate) else None),
-        surface="master",
+        surface="master", fallback_claim_ids=set(fact_plan["surfaces"]["master"]),
     ) if preparation_plan else None
     master_selection, master_errors, master_warnings = _safe_candidate_blocks(
         role,
@@ -2647,7 +2653,7 @@ def _normalize_content_output(
         variant_title = _safe_master_title(
             request, approved_blocks, raw.get("title"), role=role,
             diagnostic_warnings=(warnings if not allow_legacy_canonical and platform in by_platform else None),
-            surface=platform,
+            surface=platform, fallback_claim_ids=set(fact_plan["surfaces"][platform]),
         ) if preparation_plan else None
         variant_selection, variant_errors, variant_warnings = _safe_candidate_blocks(
             role,
