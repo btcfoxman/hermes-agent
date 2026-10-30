@@ -1380,6 +1380,7 @@ async def _run_compose_impl(
             system=profile.system_prompt,
             model_args=(openai_base_url, openai_api_key, model_name, timeout_seconds),
             approved_claims=payload.claims,
+            **({"compose_request": payload} if payload.long_surface_selection_version == "thesis_selection.v2" else {}),
         )
     review_required = payload.public_editorial_brief is not None or payload.owner_revision is not None or payload.editorial_instruction is not None or bool(payload.genre or payload.style_references)
     review_state = "not_completed" if review_required else "not_requested"
@@ -1478,6 +1479,7 @@ async def _run_compose_impl(
                         system=profile.system_prompt,
                         model_args=(openai_base_url, openai_api_key, model_name, timeout_seconds),
                         approved_claims=payload.claims,
+                        **({"compose_request": payload} if payload.long_surface_selection_version == "thesis_selection.v2" else {}),
                     )
                 review, review_state = await assess_editorial(
                     output=output, brief=compose_payload.get("public_editorial_brief") or compose_payload.get("approved_editorial_brief", {}), run=run, llm=_llm_json,

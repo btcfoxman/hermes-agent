@@ -138,6 +138,9 @@ def validate_preparation_plan_metadata(body, *, claim_texts, dependencies, repor
             or intent.get("schema_version") != "operator.preparation_editorial_intent.v1"
             or intent.get("author") != "independent workflow editorial planner"):
         raise ValueError("surface_preparation_authority_invalid")
+    if body.get("long_surface_selection_version") != "thesis_selection.v2" and (
+            "reference_only_claim_ids" in body or "source_evidence_bindings" in body):
+        raise ValueError("surface_preparation_plan_invalid")
     ids = list(claim_texts)
     expected_roles = {"anchor": ids, **{role: [identity for identity, text in claim_texts.items() if pattern.search(text)]
         for role, pattern in dependencies.items()}}

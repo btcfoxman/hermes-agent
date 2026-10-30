@@ -292,7 +292,8 @@ async def run_editorial_step(registry, role, step: EditorialStep, payload: Edito
                                 for v in (payload.candidate.get("platform_variants") or []) if isinstance(v, dict)]}
                         output = await apply_grounded_paraphrases(output=output, raw_candidates=[proposals],
                             run=run, llm=llm, system=registry.get(role).system_prompt, model_args=(),
-                            approved_claims=request.claims)
+                            approved_claims=request.claims,
+                            **({"compose_request": request} if request.long_surface_selection_version == "thesis_selection.v2" else {}))
                     else:
                         if not payload.candidate_signature:
                             raise ValueError("signed_candidate_required")

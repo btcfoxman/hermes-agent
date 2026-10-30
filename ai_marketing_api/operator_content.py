@@ -83,7 +83,7 @@ class OperatorComposeRequest(OperatorProposeRequest):
     editorial_review_mode: Literal["standard", "value_reassessment.v1"] = "standard"
     surface_fact_plan: Optional[Dict[str, Any]] = None
     fact_projection_version: Optional[Literal["literal_prose.v1"]] = None
-    long_surface_selection_version: Optional[Literal["thesis_selection.v1"]] = None
+    long_surface_selection_version: Optional[Literal["thesis_selection.v1", "thesis_selection.v2"]] = None
 
     @model_serializer(mode="wrap")
     def serialize_reporting_context(self, handler):
@@ -182,7 +182,7 @@ class OperatorContentOutput(StrictModel):
     quality_scorecard: Optional[QualityScorecard] = None
     genre: str = ""
     surface_fact_plan_sha256: Optional[str] = None
-    long_surface_selection_version: Optional[Literal["thesis_selection.v1"]] = None
+    long_surface_selection_version: Optional[Literal["thesis_selection.v1", "thesis_selection.v2"]] = None
     pending_editorial_analysis: List[PendingEditorialAnalysis] = Field(default_factory=list, max_length=100)
     analysis_binding_reviews: List[AnalysisBindingReview] = Field(default_factory=list, max_length=100)
 
@@ -244,9 +244,24 @@ def _validated_surface_fact_plan(request):
             and body["editorial_intent"].get("schema_version") == "operator.preparation_editorial_intent.v1"))
     long_selection = body.get("long_surface_selection_version")
     if (long_selection != request.long_surface_selection_version
-            or long_selection not in {None, "thesis_selection.v1"}
+            or long_selection not in {None, "thesis_selection.v1", "thesis_selection.v2"}
             or (long_selection is not None and not preparation)):
         raise ContextAuthorizationError("surface_fact_plan_invalid", "surface_fact_plan", "Long-form selection policy must match the signed preparation request.")
+    reference_ids = set()
+    if long_selection == "thesis_selection.v2":
+        from ai_marketing_api.operator_reference_evidence import reference_evidence_metadata
+        try:
+            metadata = reference_evidence_metadata(request.claims, request.authorized_context, as_of=request.as_of)
+            if any(body.get(key) != value for key, value in metadata.items()):
+                raise ValueError("surface_preparation_reference_evidence_invalid")
+            reference_ids = set(metadata["reference_only_claim_ids"])
+            ids -= reference_ids
+        except (ValueError, TypeError, KeyError, AttributeError):
+            raise ContextAuthorizationError("surface_fact_plan_invalid", "surface_fact_plan",
+                "Reference-only display roles must match the complete frozen source evidence.") from None
+    elif "reference_only_claim_ids" in body or "source_evidence_bindings" in body:
+        raise ContextAuthorizationError("surface_fact_plan_invalid", "surface_fact_plan",
+            "Reference-only metadata requires an explicit matching v2 request.")
     classified = [x for values in roles.values() if isinstance(values, list) for x in values]
     if (not roles["anchor"] or any(not refs(v) for v in roles.values())
             or (not preparation and (len(classified) != len(set(classified)) or set(classified) != ids))
@@ -264,7 +279,7 @@ def _validated_surface_fact_plan(request):
                 raise ValueError("surface_preparation_substantive_anchor_required")
             if any(claim["kind"] != "fact" or not claim["evidence_ids"] for claim in pool):
                 raise ValueError("surface_preparation_plan_invalid")
-            validate_preparation_plan_metadata(body, claim_texts={f"claim-{i + 1}": c.text for i, c in enumerate(request.claims)},
+            validate_preparation_plan_metadata(body, claim_texts={f"claim-{i + 1}": c.text for i, c in enumerate(request.claims) if f"claim-{i + 1}" not in reference_ids},
                 dependencies=_SURFACE_DEPENDENCIES, reporting_claim_ids=report_claims)
         except (ValueError, TypeError):
             raise ContextAuthorizationError("surface_fact_plan_invalid", "surface_fact_plan",
@@ -287,8 +302,12 @@ def _surface_required_ids(plan, surface, raw_blocks, title="", *, canonical_bloc
         # anchor can itself discuss billing or input restrictions. Dependencies
         # can introduce another protected condition, so close the whole set.
         by_ref = {block.binding_hash: block for block in canonical_blocks if block.binding_hash}
+        by_legacy_key = {(_value(block.kind), block.text, tuple(block.evidence_ids)): block for block in canonical_blocks}
         text_parts = [title]
         referenced = set()
+        reference_ids = set(plan.get("reference_only_claim_ids") or [])
+        reference_hashes = {row["text_sha256"] for row in plan["claim_pool"] if row["claim_id"] in reference_ids}
+        reference_hashes.update(row["source_text_sha256"] for row in plan.get("source_evidence_bindings") or [])
         for raw in raw_blocks or []:
             if isinstance(raw, str):
                 ref = raw.strip()
@@ -297,6 +316,20 @@ def _surface_required_ids(plan, surface, raw_blocks, title="", *, canonical_bloc
                 text_parts.extend(str(raw.get(key) or "") for key in ("text", "public_text"))
             else:
                 continue
+            if plan.get("long_surface_selection_version") == "thesis_selection.v2" and isinstance(raw, dict):
+                atomic = by_ref.get(ref)
+                if atomic is None:
+                    kind = str(raw.get("kind") or raw.get("type") or raw.get("block_type") or raw.get("category") or "").strip().lower()
+                    value = str(raw.get("text") or raw.get("content") or raw.get("body") or raw.get("value") or "").strip()
+                    evidence = raw.get("evidence_ids") or raw.get("evidence_refs") or raw.get("references") or []
+                    if isinstance(evidence, list):
+                        atomic = by_legacy_key.get((_EDITORIAL_KIND_ALIASES.get(kind, kind), value, tuple(str(v) for v in evidence)))
+                if str(raw.get("claim_id") or "").strip() in reference_ids or any(isinstance(raw.get(key), str)
+                        and hashlib.sha256(raw[key].strip().encode()).hexdigest() in reference_hashes
+                        and not (atomic is not None and raw[key].strip() == atomic.text)
+                        for key in ("text", "public_text", "content", "body", "value")):
+                    raise ContextAuthorizationError("surface_fact_plan_reference_only_claim_published", surface,
+                        "Reference-only source text cannot become a public display block.")
             if ref in by_ref:
                 referenced.add(by_ref[ref].claim_id)
         while True:
@@ -1120,7 +1153,7 @@ def _reporting_claim_ids(role, request, contexts):
     return required
 
 
-def _build_approved_blocks(
+def _build_all_approved_blocks(
     role: OperatorRole,
     request: OperatorComposeRequest,
     authorized_contexts: Sequence[AuthorizedContext],
@@ -1263,6 +1296,28 @@ def _build_approved_blocks(
         )
 
     return blocks, errors
+
+
+def _build_approved_blocks(role, request, authorized_contexts):
+    # Validate the complete immutable claim pool first. Display classification
+    # cannot hide an unavailable, private or non-verbatim original claim.
+    blocks, errors = _build_all_approved_blocks(role, request, authorized_contexts)
+    if request.long_surface_selection_version == "thesis_selection.v2":
+        plan = _validated_surface_fact_plan(request)
+        references = set(plan["reference_only_claim_ids"])
+        blocks = [block for block in blocks if block.claim_id not in references]
+    return blocks, errors
+
+
+def _reference_only_guard(request, contexts):
+    if request.long_surface_selection_version != "thesis_selection.v2":
+        return [], []
+    plan = _validated_surface_fact_plan(request)
+    references = set(plan["reference_only_claim_ids"])
+    blocks, _ = _build_all_approved_blocks(OperatorRole.INDUSTRY, request, contexts)
+    reference_blocks = [block for block in blocks if block.claim_id in references]
+    raw_ids = {binding["record_id"] for binding in plan["source_evidence_bindings"]}
+    return reference_blocks, [context.content for context in contexts if context.record_id in raw_ids]
 
 
 def _source_identity(context: AuthorizedContext) -> str:
@@ -1896,6 +1951,8 @@ def _safe_candidate_blocks(
     template_blocks: Sequence[ContentBlock] = (),
     allow_legacy_canonical: bool = False,
     required_claim_ids: Optional[set[str]] = None,
+    reference_only_blocks: Sequence[ContentBlock] = (),
+    reference_only_texts: Sequence[str] = (),
 ) -> tuple[List[ContentBlock], List[str], List[str]]:
     selected: List[ContentBlock] = []
     errors: List[str] = []
@@ -2123,7 +2180,36 @@ def _safe_candidate_blocks(
                 return True
         return False
 
+    reference_ids = {block.claim_id for block in reference_only_blocks}
+    reference_refs = {block.binding_hash for block in reference_only_blocks}
+    reference_texts = {block.text for block in reference_only_blocks} | set(reference_only_texts)
+
+    def reference_forbidden(raw):
+        if isinstance(raw, str):
+            return raw.strip() in reference_refs or raw.strip() in reference_texts
+        if not isinstance(raw, dict):
+            return False
+        if str(raw.get("claim_id") or "").strip() in reference_ids or any(str(raw.get(key) or "").strip() in reference_refs
+                for key in ("block_ref", "canonical_block_ref", "ref", "binding_hash")):
+            return True
+        ref = str(raw.get("block_ref") or raw.get("canonical_block_ref") or raw.get("ref") or "").strip()
+        canonical = canonical_by_ref.get(ref)
+        if canonical is None:
+            kind = str(raw.get("kind") or raw.get("type") or raw.get("block_type") or raw.get("category") or "").strip().lower()
+            value = str(raw.get("text") or raw.get("content") or raw.get("body") or raw.get("value") or "").strip()
+            evidence = raw.get("evidence_ids") or raw.get("evidence_refs") or raw.get("references") or []
+            if isinstance(evidence, list):
+                canonical = canonical_by_legacy_key.get((_EDITORIAL_KIND_ALIASES.get(kind, kind), value, tuple(str(v) for v in evidence)))
+        exact_atomic = canonical is not None and not echo_is_tampered(raw, canonical)
+        return any(isinstance(raw.get(key), str) and raw[key].strip() in reference_texts
+            and not (exact_atomic and raw[key].strip() == canonical.text)
+            for key in ("text", "content", "body", "value", "public_text"))
+
     for index, raw in enumerate(raw_blocks[:80], start=1):
+        if (reference_only_blocks or reference_only_texts) and (reference_forbidden(raw)
+                or (isinstance(raw, dict) and reference_forbidden(raw.get("one_of")))):
+            errors.append("surface_fact_plan_reference_only_claim_published")
+            continue
         if isinstance(raw, str):
             # Some JSON-only models serialize an opaque selection as the bare
             # block_ref string instead of {"block_ref": "..."}. Accepting an
@@ -2572,6 +2658,7 @@ def _normalize_content_output(
         ids = _surface_required_ids(fact_plan, surface, raw_blocks, title, canonical_blocks=approved_blocks)
         return None if ids is None else ids | reporting_ids
     profile: OperatorProfile = registry.get(role)
+    reference_blocks, reference_texts = _reference_only_guard(request, contexts)
     approved_blocks, claim_errors = _build_approved_blocks(role, request, contexts)
     fallback_errors = [str(value) for value in fallback.get("_fallback_errors") or []]
     errors = list(dict.fromkeys([*fallback_errors, *claim_errors]))
@@ -2598,6 +2685,7 @@ def _normalize_content_output(
         prefix="master",
         template_blocks=base_blocks,
         allow_legacy_canonical=allow_legacy_canonical,
+        reference_only_blocks=reference_blocks, reference_only_texts=reference_texts,
         required_claim_ids=required_for("master", raw_master_blocks,
             title if preparation_plan else str(candidate.get("master_title") or "")),
     )
@@ -2683,6 +2771,7 @@ def _normalize_content_output(
             prefix=f"variant-{platform}",
             template_blocks=base_variant_blocks,
             allow_legacy_canonical=allow_legacy_canonical,
+            reference_only_blocks=reference_blocks, reference_only_texts=reference_texts,
             required_claim_ids=required_for(platform, raw_variant_blocks,
                 variant_title if preparation_plan else str(raw.get("title") or "")),
         )
@@ -3699,10 +3788,11 @@ def content_request_payload(
             excerpt = re.sub(r"\s+", "", context.content).lower()
             if len(excerpt) >= 16 and excerpt in brief_text:
                 raise ContextAuthorizationError("editorial_brief_private_excerpt", context.record_id, "A non-public excerpt cannot be included in the public brief.")
+    reference_ids = set(fact_plan.get("reference_only_claim_ids") or []) if fact_plan else set()
     public_claims = [
         _dump(claim)
-        for claim in request.claims
-        if (
+        for index, claim in enumerate(request.claims, 1)
+        if f"claim-{index}" not in reference_ids and (
             (not claim.evidence_ids and _claim_kind(claim.kind) == ClaimKind.OPINION.value)
             or (
                 bool(claim.evidence_ids)
@@ -3710,7 +3800,10 @@ def content_request_payload(
             )
         )
     ]
-    approved_blocks, _ = _build_approved_blocks(role, request, contexts)
+    approved_blocks, claim_errors = _build_approved_blocks(role, request, contexts)
+    if request.long_surface_selection_version == "thesis_selection.v2" and claim_errors:
+        raise ContextAuthorizationError("surface_fact_plan_invalid", "claims",
+            "Every original claim must pass authorization and exact-evidence validation before writer projection.")
     canonical_blocks = _reindex(
         [*approved_blocks, *_fallback_freeform(role, request)],
         prefix="canonical",
@@ -4336,7 +4429,7 @@ def content_request_payload(
                "canonical references only when they advance the main argument; the remaining pool is optional. "
                "Keep reporting attribution, a substantive factual anchor and every triggered dependency. "
                "Use paragraph_id to connect adjacent references and reasoning without changing canonical text. "
-               if fact_plan.get("long_surface_selection_version") == "thesis_selection.v1" else
+               if fact_plan.get("long_surface_selection_version") in {"thesis_selection.v1", "thesis_selection.v2"} else
                "Use the server's required claim IDs for this surface. All long-form surfaces retain the full pool; ")
             +
             "a short surface develops its own focused main point. Mentioning payment or cost additionally "
@@ -4344,6 +4437,18 @@ def content_request_payload(
             "evidence. You cannot disable a required reference, change the plan, or turn a public_text proposal "
             "into verified evidence. The new AI editorial intent is a writing hypothesis, not owner feedback or facts."
         )
+        if request.long_surface_selection_version == "thesis_selection.v2":
+            for key in ("reference_only_claim_ids", "source_evidence_bindings"):
+                payload["surface_fact_plan"][key] = fact_plan[key]
+            payload["reference_only_evidence"] = [{"claim_id": f"claim-{index}", **_dump(claim)}
+                for index, claim in enumerate(request.claims, 1) if f"claim-{index}" in reference_ids]
+            raw_ids = {row["record_id"] for row in fact_plan["source_evidence_bindings"]}
+            for context in payload["authorized_context"]:
+                if context["record_id"] in raw_ids:
+                    context["evidence_role"] = "source_reference_only"
+            payload["surface_fact_plan_rule"] += (
+                " Reference-only evidence and raw source documents remain citation context, never publishable blocks, "
+                "new factual authority, number grounding or public key points. Use only the atomic canonical registry.")
         target = "master" if MASTER_ONLY.get() or not request.channels else request.channels[0] if len(request.channels) == 1 else None
         for block in payload["canonical_block_registry"]:
             block["required_on_surfaces"] = [surface for surface, ids in fact_plan["surfaces"].items() if block["claim_id"] in ids]
