@@ -305,9 +305,11 @@ def _surface_required_ids(plan, surface, raw_blocks, title="", *, canonical_bloc
         by_legacy_key = {(_value(block.kind), block.text, tuple(block.evidence_ids)): block for block in canonical_blocks}
         text_parts = [title]
         referenced = set()
-        reference_ids = set(plan.get("reference_only_claim_ids") or [])
-        reference_hashes = {row["text_sha256"] for row in plan["claim_pool"] if row["claim_id"] in reference_ids}
-        reference_hashes.update(row["source_text_sha256"] for row in plan.get("source_evidence_bindings") or [])
+        reference_ids, reference_hashes = set(), set()
+        if plan.get("long_surface_selection_version") == "thesis_selection.v2":
+            reference_ids = set(plan["reference_only_claim_ids"])
+            reference_hashes = {row["text_sha256"] for row in plan["claim_pool"] if row["claim_id"] in reference_ids}
+            reference_hashes.update(row["source_text_sha256"] for row in plan["source_evidence_bindings"])
         for raw in raw_blocks or []:
             if isinstance(raw, str):
                 ref = raw.strip()
