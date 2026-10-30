@@ -128,6 +128,11 @@ def _normalized_candidate(registry, role, request, contexts, fallback, candidate
     if signature and hmac.compare_digest(artifact_signature(candidate), signature):
         if not _candidate_fact_projection_matches(candidate, request, role):
             raise ValueError("artifact_fact_projection_mismatch")
+        if ((candidate.get("long_surface_selection_version") is not None
+                or request.long_surface_selection_version is not None)
+                and (candidate.get("long_surface_selection_version") != request.long_surface_selection_version
+                    or candidate.get("surface_fact_plan_sha256") != (request.surface_fact_plan or {}).get("plan_sha256"))):
+            raise ValueError("artifact_surface_fact_plan_mismatch")
     output = normalize_content_output(registry, role, request, contexts, fallback, candidate)
     if output.critic.errors:
         return output

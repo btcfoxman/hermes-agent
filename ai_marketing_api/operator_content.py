@@ -83,12 +83,15 @@ class OperatorComposeRequest(OperatorProposeRequest):
     editorial_review_mode: Literal["standard", "value_reassessment.v1"] = "standard"
     surface_fact_plan: Optional[Dict[str, Any]] = None
     fact_projection_version: Optional[Literal["literal_prose.v1"]] = None
+    long_surface_selection_version: Optional[Literal["thesis_selection.v1"]] = None
 
     @model_serializer(mode="wrap")
     def serialize_reporting_context(self, handler):
         data = super().serialize_reporting_context(handler)
         if self.fact_projection_version is None:
             data.pop("fact_projection_version", None)
+        if self.long_surface_selection_version is None:
+            data.pop("long_surface_selection_version", None)
         return data
 
 
@@ -179,6 +182,7 @@ class OperatorContentOutput(StrictModel):
     quality_scorecard: Optional[QualityScorecard] = None
     genre: str = ""
     surface_fact_plan_sha256: Optional[str] = None
+    long_surface_selection_version: Optional[Literal["thesis_selection.v1"]] = None
     pending_editorial_analysis: List[PendingEditorialAnalysis] = Field(default_factory=list, max_length=100)
     analysis_binding_reviews: List[AnalysisBindingReview] = Field(default_factory=list, max_length=100)
 
@@ -187,6 +191,8 @@ class OperatorContentOutput(StrictModel):
         data = handler(self)
         if self.surface_fact_plan_sha256 is None:
             data.pop("surface_fact_plan_sha256", None)
+        if self.long_surface_selection_version is None:
+            data.pop("long_surface_selection_version", None)
         if self.editorial_review_context is None:
             data.pop("editorial_review_context", None)
         for key in ("pending_editorial_analysis", "analysis_binding_reviews"):
@@ -209,6 +215,8 @@ def _plan_digest(value):
 def _validated_surface_fact_plan(request):
     plan = request.surface_fact_plan
     if plan is None:
+        if request.long_surface_selection_version is not None:
+            raise ContextAuthorizationError("surface_fact_plan_invalid", "surface_fact_plan", "Thesis selection requires a matching signed preparation plan.")
         return None
     body = {k: v for k, v in plan.items() if k not in {"signature", "certificate", "plan_sha256"}}
     secret = os.getenv("HERMES_API_KEY", "").strip()
@@ -234,17 +242,26 @@ def _validated_surface_fact_plan(request):
     preparation = ("preparation_authorization" in body or "preparation_selection_sha256" in body
         or (isinstance(body.get("editorial_intent"), dict)
             and body["editorial_intent"].get("schema_version") == "operator.preparation_editorial_intent.v1"))
+    long_selection = body.get("long_surface_selection_version")
+    if (long_selection != request.long_surface_selection_version
+            or long_selection not in {None, "thesis_selection.v1"}
+            or (long_selection is not None and not preparation)):
+        raise ContextAuthorizationError("surface_fact_plan_invalid", "surface_fact_plan", "Long-form selection policy must match the signed preparation request.")
     classified = [x for values in roles.values() if isinstance(values, list) for x in values]
     if (not roles["anchor"] or any(not refs(v) for v in roles.values())
             or (not preparation and (len(classified) != len(set(classified)) or set(classified) != ids))
             or any(not refs(v) or not set(v).intersection(roles["anchor"])
-                or (s in {"master", "wechat_mp", "toutiao"} and set(v) != ids) for s, v in surfaces.items())):
+                or (long_selection is None and s in {"master", "wechat_mp", "toutiao"} and set(v) != ids) for s, v in surfaces.items())):
         raise ContextAuthorizationError("surface_fact_plan_invalid", "surface_fact_plan", "Required claim IDs cannot be downgraded by the candidate.")
     if preparation:
         from ai_marketing_api.operator_surface_selection import validate_preparation_plan_metadata
         report_ids = {fact.record_id for fact in request.reporting_context.facts} if request.reporting_context else set()
         report_claims = {claim["claim_id"] for claim in pool if set(claim["evidence_ids"]).intersection(report_ids)}
         try:
+            if long_selection is not None and any(
+                    not report_claims <= set(selected) or not set(selected) - report_claims
+                    for surface, selected in surfaces.items() if surface in {"master", "wechat_mp", "toutiao"}):
+                raise ValueError("surface_preparation_substantive_anchor_required")
             if any(claim["kind"] != "fact" or not claim["evidence_ids"] for claim in pool):
                 raise ValueError("surface_preparation_plan_invalid")
             validate_preparation_plan_metadata(body, claim_texts={f"claim-{i + 1}": c.text for i, c in enumerate(request.claims)},
@@ -1108,6 +1125,10 @@ def _build_approved_blocks(
     request: OperatorComposeRequest,
     authorized_contexts: Sequence[AuthorizedContext],
 ) -> tuple[List[ContentBlock], List[str]]:
+    if request.long_surface_selection_version is not None and (
+            role is not OperatorRole.INDUSTRY or request.genre != "industry_analysis"):
+        raise ContextAuthorizationError("surface_fact_plan_invalid", "long_surface_selection_version",
+            "Thesis selection is limited to a signed industry-analysis preparation request.")
     if request.fact_projection_version is not None and (
             role is not OperatorRole.INDUSTRY or request.genre != "industry_analysis"):
         raise ContextAuthorizationError("fact_projection_scope_invalid", "fact_projection_version",
@@ -2785,7 +2806,8 @@ def normalize_content_output(registry, role_id, request, contexts, fallback, can
     with editorial_scope(request.genre):
         output = _normalize_content_output(registry, role_id, request, contexts, fallback, candidate)
     output = output.model_copy(update={"genre": request.genre,
-        "surface_fact_plan_sha256": (request.surface_fact_plan or {}).get("plan_sha256")})
+        "surface_fact_plan_sha256": (request.surface_fact_plan or {}).get("plan_sha256"),
+        "long_surface_selection_version": request.long_surface_selection_version})
     if DEFER_EDITORIAL_ANALYSIS.get():
         output.pending_editorial_analysis = derive_pending(output, request.claims)
     return output
@@ -4310,7 +4332,13 @@ def content_request_payload(
             (("surfaces", "fact_roles") if rebuilding_direction else ("surfaces", "fact_roles", "editorial_intent"))}
         payload["surface_fact_plan_rule"] = (
             "The registry is the complete authorized evidence pool, not a display quota on every surface. "
-            "Use the server's required claim IDs for this surface. All long-form surfaces retain the full pool; "
+            + ("Use the server's required claim IDs for this surface. For a long article, select additional "
+               "canonical references only when they advance the main argument; the remaining pool is optional. "
+               "Keep reporting attribution, a substantive factual anchor and every triggered dependency. "
+               "Use paragraph_id to connect adjacent references and reasoning without changing canonical text. "
+               if fact_plan.get("long_surface_selection_version") == "thesis_selection.v1" else
+               "Use the server's required claim IDs for this surface. All long-form surfaces retain the full pool; ")
+            +
             "a short surface develops its own focused main point. Mentioning payment or cost additionally "
             "requires billing evidence; explaining input-reuse restrictions requires the complete input-constraints "
             "evidence. You cannot disable a required reference, change the plan, or turn a public_text proposal "
