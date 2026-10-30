@@ -9,8 +9,11 @@ LONG = "Claude 经 Amazon Bedrock 在公司既有 AWS 环境及托管区域内�
 PERMISSIONS = "客户可限定 Custom Agent 获准执行的动作"
 RAW_R59 = "Zendesk 的 Claude 案例：智能体选型不能只看模型"
 
-def inputs(*, genre="industry_analysis", requested="PRIVATE_UNGROUNDED_DIRECTION", texts=None):
-    request=NS(genre=genre,approved_proposal=NS(title=requested,first_person=False))
+def inputs(*, genre="industry_analysis", requested="PRIVATE_UNGROUNDED_DIRECTION", texts=None, preparation=True):
+    # This pure title fixture is not a signature or authority proof. Native
+    # normalization separately validates the real preparation plan before use.
+    request=NS(genre=genre,approved_proposal=NS(title=requested,first_person=False),
+        surface_fact_plan={"preparation_authorization": {}} if preparation else None)
     blocks=[NS(text=text,source_exact=True) for text in (texts if texts is not None else [LONG,PERMISSIONS])]
     return request,blocks
 
@@ -67,3 +70,16 @@ def test_no_complete_eligible_clause_fails_closed_without_truncating():
     request,blocks=inputs(texts=[LONG])
     with pytest.raises(ValueError,match="^social_title_no_eligible_candidate$"):
         content._safe_master_title(request,blocks,RAW_R59,role=OperatorRole.INDUSTRY,surface="wechat_mp")
+
+
+@pytest.mark.parametrize("legacy_plan", [None, {"schema_version": "legacy-plan"}])
+def test_legacy_industry_without_preparation_keeps_existing_repair_trigger(legacy_plan):
+    request, blocks = inputs(preparation=False)
+    request.surface_fact_plan = legacy_plan
+    warnings = []
+    value = content._safe_master_title(request, blocks, RAW_R59, role=OperatorRole.INDUSTRY,
+        surface="wechat_mp", diagnostic_warnings=warnings)
+    assert value == LONG
+    assert warnings == ["model_title_normalized:wechat_mp:forbidden_wrapper"]
+    assert content._social_title_quality_errors(value, surface="wechat_mp",
+        source_texts=[block.text for block in blocks])

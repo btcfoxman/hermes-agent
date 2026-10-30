@@ -1529,7 +1529,11 @@ def _safe_master_title(
     }
     source_text = "\n".join(exact_texts)
     role_value = _value(role) if role is not None else ""
-    social_title_required = role_value == OperatorRole.INDUSTRY.value and request.genre == "industry_analysis"
+    social_title_required = (
+        role_value == OperatorRole.INDUSTRY.value and request.genre == "industry_analysis"
+        and isinstance(request.surface_fact_plan, dict)
+        and "preparation_authorization" in request.surface_fact_plan
+    )
 
     def title_rejection_reason(value: str) -> Optional[str]:
         if not value:
