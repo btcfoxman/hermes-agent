@@ -49,6 +49,9 @@ from ai_marketing_api.operator_receipts import (
     EditorialReceiptError, EditorialReceiptStore, execute_with_receipt, request_sha256 as receipt_request_sha256,
 )
 from ai_marketing_api.operator_private_receipts import PRIVATE_GENERATION_CAPTURE
+from ai_marketing_api.operator_artifact_derivation import (
+    DerivationRequest, DerivationStore, DerivationError, derivation_id, digest as derivation_digest,
+)
 from ai_marketing_api.operator_runtime import (
     CONTENT_SCHEMA_VERSION,
     SCHEMA_VERSION,
@@ -1573,6 +1576,39 @@ def operator_editorial_receipt(role_id: OperatorRole, step: EditorialStep, reser
     except EditorialReceiptError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code},
                             headers={"Cache-Control": "no-store"}) from None
+
+
+@app.post("/api/v1/operators/industry/editorial-derivations/{identity}")
+def operator_writer_derivation(identity: str, payload: DerivationRequest, request: Request, response: Response,
+    authorization: Optional[str] = Header(default=None),
+    request_sha256: str = Header(alias="X-Hermes-Derivation-Request-SHA256")) -> Dict[str, Any]:
+    _require_operator_auth(authorization); response.headers["Cache-Control"] = "no-store"
+    if any(key in request.headers for key in ("x-hermes-openai-base-url", "x-hermes-openai-api-key", "x-hermes-model",
+            "x-hermes-budget-reservation-id", "x-cost-reservation-id")):
+        raise HTTPException(status_code=400,detail={"code":"derivation_provider_override_denied"})
+    try:
+        spec = payload.model_dump(mode="json")
+        if identity != derivation_id(spec) or request_sha256 != derivation_digest(spec):
+            raise DerivationError("derivation_request_mismatch")
+        return DerivationStore().execute(OPERATOR_REGISTRY,spec)
+    except (DerivationError,EditorialReceiptError) as error:
+        raise HTTPException(status_code=error.status_code,detail={"code":error.code},headers={"Cache-Control":"no-store"}) from None
+    except Exception:
+        raise HTTPException(status_code=503,detail={"code":"derivation_failed"},headers={"Cache-Control":"no-store"}) from None
+
+
+@app.get("/api/v1/operators/industry/editorial-derivations/{identity}")
+def operator_writer_derivation_receipt(identity: str,response: Response,authorization: Optional[str] = Header(default=None),
+    request_sha256: str = Header(alias="X-Hermes-Derivation-Request-SHA256")) -> Dict[str, Any]:
+    _require_operator_auth(authorization); response.headers["Cache-Control"] = "no-store"
+    try:
+        if not re.fullmatch(r"wderive_[a-f0-9]{48}",identity) or not re.fullmatch(r"[a-f0-9]{64}",request_sha256):
+            raise DerivationError("derivation_request_mismatch")
+        return DerivationStore().get(identity,request_sha256)
+    except DerivationError as error:
+        raise HTTPException(status_code=error.status_code,detail={"code":error.code},headers={"Cache-Control":"no-store"}) from None
+    except Exception:
+        raise HTTPException(status_code=503,detail={"code":"derivation_lookup_failed"},headers={"Cache-Control":"no-store"}) from None
 
 
 @app.post("/api/v1/operators/{role_id}/propose", response_model=OperatorOutput)
