@@ -58,11 +58,15 @@ INDUSTRY_PREMISE_SCOPE_RULE = (
     "needs an unstated premise, obtain support or narrow the conclusion rather than inventing it."
 )
 INDUSTRY_OBSERVABLE_CHOICE_RULE = (
-    "Ground a recommendation in an observable distinction that can change the reader's choice, not "
-    "in the conclusion that the choice is worthwhile or useful. Explain which observation favors which "
-    "action and why, using only distinctions the evidence supports. Do not require the reader to supply "
-    "the missing value judgment before the recommendation works. This is an internal reasoning check, "
-    "not a prescribed article structure, product stance, numerical threshold or guaranteed result."
+    "Before drafting, select one evidence-supported decision fork for a concrete reader: the observable "
+    "condition, the available competing actions, and the cost accepted. Compare this proposed conclusion "
+    "with the source's own purpose and restrictions. If removing source restatement, input-checking "
+    "advice and denials of guarantees leaves no justified additional choice or tradeoff, return "
+    "insufficient material rather than drafting an industry analysis. After selecting the fork, include "
+    "optional facts only when they supply its premise, distinguish the actions or establish a necessary "
+    "limit. Preserve every required reference and triggered dependency. This is an internal selection "
+    "step, not an article template; do not invent alternatives, prevailing habits, measured results or "
+    "industry trends."
 )
 INDUSTRY_MATERIAL_RULE = (
     "If the authorized material cannot support this analysis, stop for more research or return an "

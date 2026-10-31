@@ -16,6 +16,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 LONG_SURFACES = frozenset({"master", "wechat_mp", "toutiao"})
 SHA256 = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$", strict=True)]
 RecordId = Annotated[str, Field(min_length=1, max_length=160, strict=True)]
+SOURCE_SELECTION_VERSION = "source_selection.v1"
+SOURCE_SELECTION_SCHEMA = "operator.industry_source_selection.v1"
 
 
 class SelectionContract(BaseModel):
@@ -57,6 +59,92 @@ class PlannerAtomicFact(SelectionContract):
         if hashlib.sha256(self.text.encode("utf-8")).hexdigest() != self.body_sha256:
             raise ValueError("industry_surface_fact_body_changed")
         return self
+
+
+class PlannerSourceBinding(SelectionContract):
+    candidate_id: RecordId
+    source_id: RecordId
+    source_kind: Literal["public_document"]
+    source_uri: str = Field(min_length=1, max_length=2000, strict=True)
+    source_text_sha256: SHA256
+    source_document_sha256: SHA256
+    source_binding_hash: SHA256
+
+    @field_validator("candidate_id", "source_id")
+    @classmethod
+    def nonblank(cls, value):
+        if not value.strip():
+            raise ValueError("industry_source_binding_invalid")
+        return value
+
+    @field_validator("source_uri")
+    @classmethod
+    def valid_source(cls, value):
+        public_source_key(value)
+        return value
+
+
+class IndustrySourceSelection(SelectionContract):
+    schema_version: Literal["operator.industry_source_selection.v1"]
+    primary_candidate_id: RecordId
+    supporting_candidate_ids: list[RecordId] = Field(max_length=2)
+    supporting_record_ids: dict[RecordId, list[RecordId]] = Field(max_length=2)
+
+    @model_validator(mode="after")
+    def explicit_sources(self):
+        ids = self.supporting_candidate_ids
+        if (not self.primary_candidate_id.strip() or any(not value.strip() for value in ids)
+                or self.primary_candidate_id in ids or len(set(ids)) != len(ids)
+                or set(self.supporting_record_ids) != set(ids)
+                or any(not 1 <= len(values) <= 8 or len(set(values)) != len(values)
+                       or any(not value.strip() for value in values)
+                       for values in self.supporting_record_ids.values())):
+            raise ValueError("industry_source_selection_invalid")
+        return self
+
+
+def validate_source_bindings(bindings, *, opportunities, catalogs):
+    """Check only the caller's displayed public-document set; no source lookup."""
+    by_id = {item.id: item for item in opportunities}
+    if (not isinstance(bindings, dict) or not isinstance(catalogs, dict)
+            or not 1 <= len(bindings) <= 10 or set(bindings) != set(catalogs)
+            or set(bindings) != set(by_id) or len(by_id) != len(opportunities)):
+        raise ValueError("industry_source_catalog_unbound")
+    seen = set()
+    for identity, raw in bindings.items():
+        bound = raw if isinstance(raw, PlannerSourceBinding) else PlannerSourceBinding.model_validate(raw)
+        opportunity, facts = by_id[identity], catalogs[identity]
+        if (bound.candidate_id != identity or opportunity.role_id != "industry" or opportunity.verified is not True
+                or public_source_key(bound.source_uri) != public_source_key(opportunity.url)
+                or not 1 <= len(facts) <= 8
+                or any(public_source_key(fact.source_uri) != public_source_key(bound.source_uri)
+                       or fact.source_text_sha256 != bound.source_text_sha256 for fact in facts)):
+            raise ValueError("industry_source_catalog_unbound")
+        for fact in facts:
+            if fact.record_id in seen:
+                raise ValueError("industry_source_catalog_duplicate_record")
+            seen.add(fact.record_id)
+    return bindings
+
+
+def validate_source_selection(selection, *, primary_candidate_id, opportunities, catalogs, bindings):
+    """Return the complete chosen catalogs, never model-authored or truncated facts."""
+    if not isinstance(selection, IndustrySourceSelection):
+        selection = IndustrySourceSelection.model_validate(selection)
+    validate_source_bindings(bindings, opportunities=opportunities, catalogs=catalogs)
+    ids = [primary_candidate_id, *sorted(selection.supporting_candidate_ids)]
+    if (selection.primary_candidate_id != primary_candidate_id
+            or any(identity not in bindings for identity in ids)
+            or len({public_source_key(bindings[identity].source_uri if isinstance(bindings[identity], PlannerSourceBinding)
+                                       else bindings[identity]["source_uri"]) for identity in ids}) != len(ids)):
+        raise ValueError("industry_source_selection_unbound")
+    union = [fact for identity in ids for fact in sorted(catalogs[identity], key=lambda value: value.record_id)]
+    if not 1 <= len(union) <= 8:
+        raise ValueError("industry_source_union_too_large")
+    for identity in selection.supporting_candidate_ids:
+        if not set(selection.supporting_record_ids[identity]) <= {fact.record_id for fact in catalogs[identity]}:
+            raise ValueError("industry_source_supporting_fact_unbound")
+    return union
 
 
 class ShortSurfaceAnchor(SelectionContract):

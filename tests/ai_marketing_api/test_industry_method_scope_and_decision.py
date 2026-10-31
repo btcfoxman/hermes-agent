@@ -8,7 +8,9 @@ import pytest
 
 from ai_marketing_api.operator_content import content_request_payload
 from ai_marketing_api.operator_editorial import EditorialInstruction, OwnerRevision
-from ai_marketing_api.operator_editorial_method import industry_reader_method
+from ai_marketing_api.operator_editorial_method import (
+    INDUSTRY_OBSERVABLE_CHOICE_RULE, industry_planning_method, industry_reader_method,
+)
 from ai_marketing_api.operator_review import _reader_payload
 from tests.ai_marketing_api.test_industry_interpretation_method import chat_instruction, reading_output
 from tests.ai_marketing_api.test_surface_fact_plan import fixture
@@ -22,12 +24,9 @@ def _assert_scope_and_choice_guidance(method):
     assert "whole process forbids alternatives" in scope
     assert "Distinguish evidence, inference and hypothetical conditions" in scope
     assert "obtain support or narrow the conclusion" in scope
-    choice = next(rule for rule in method["rules"] if "observable distinction" in rule)
-    assert "not in the conclusion that the choice is worthwhile or useful" in choice
-    assert "which observation favors which action and why" in choice
-    assert "using only distinctions the evidence supports" in choice
-    assert "Do not require the reader to supply the missing value judgment" in choice
-    assert "not a prescribed article structure, product stance, numerical threshold or guaranteed result" in choice
+    assert INDUSTRY_OBSERVABLE_CHOICE_RULE in method["rules"]
+    # The existing real-planner payload test compares against this factory.
+    assert INDUSTRY_OBSERVABLE_CHOICE_RULE in industry_planning_method()["rules"]
 
 
 @pytest.mark.parametrize("intent", ["none", "owner", "chat", "feedback"])

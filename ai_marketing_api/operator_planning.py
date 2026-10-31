@@ -12,6 +12,7 @@ from ai_marketing_api.operator_editorial_method import industry_planning_method
 from ai_marketing_api.operator_runtime import OperatorRole, StrictModel
 from ai_marketing_api.operator_surface_selection import (
     LONG_SURFACES, IndustrySurfaceSelection, PlannerAtomicFact, public_source_key, validate_surface_selection,
+    SOURCE_SELECTION_VERSION, IndustrySourceSelection, PlannerSourceBinding, validate_source_bindings, validate_source_selection,
 )
 
 
@@ -107,6 +108,8 @@ class EditorialPlanRequest(StrictModel):
     topic_value_required: bool = Field(default=False, strict=True)
     genre: str = Field(default="", max_length=80, pattern=r"^[a-z0-9_\-]*$", strict=True)
     industry_fact_catalog: dict[str, list[PlannerAtomicFact]] | None = Field(default=None, max_length=60)
+    source_selection_version: Literal["source_selection.v1"] | None = None
+    industry_source_bindings: dict[str, PlannerSourceBinding] | None = Field(default=None, max_length=10)
     budget: RuntimeBudget = Field(
         default_factory=lambda: RuntimeBudget(max_model_calls=1, max_output_tokens=3000)
     )
@@ -118,6 +121,10 @@ class EditorialPlanRequest(StrictModel):
             result.pop("genre", None)
         if self.industry_fact_catalog is None:
             result.pop("industry_fact_catalog", None)
+        if self.source_selection_version is None:
+            result.pop("source_selection_version", None)
+        if self.industry_source_bindings is None:
+            result.pop("industry_source_bindings", None)
         return result
 
     @model_validator(mode="after")
@@ -138,6 +145,18 @@ class EditorialPlanRequest(StrictModel):
                 raise ValueError("industry_surface_catalog_unbound")
         return self
 
+    @model_validator(mode="after")
+    def bound_source_documents(self):
+        if self.source_selection_version is None:
+            if self.industry_source_bindings is not None:
+                raise ValueError("industry_source_selection_unrequested")
+            return self
+        if self.genre != "industry_analysis":
+            raise ValueError("industry_source_selection_scope_invalid")
+        validate_source_bindings(self.industry_source_bindings, opportunities=self.opportunities,
+            catalogs=self.industry_fact_catalog)
+        return self
+
     @field_validator("performance_history")
     @classmethod
     def unique_history_signals(cls, value):
@@ -156,12 +175,15 @@ class EditorialSelection(StrictModel):
     history_reason: str = Field(default="", max_length=1000, strict=True)
     value_contract: TopicValueContract | None = None
     industry_surface_selection: IndustrySurfaceSelection | None = None
+    source_selection: IndustrySourceSelection | None = None
 
     @model_serializer(mode="wrap")
     def preserve_legacy_selection(self, handler):
         result = handler(self)
         if self.industry_surface_selection is None:
             result.pop("industry_surface_selection", None)
+        if self.source_selection is None:
+            result.pop("source_selection", None)
         return result
 
 
@@ -343,6 +365,25 @@ async def plan_editorial(
             "This is an independent planner's editorial suggestion, not an owner decision, factual grant, display permission, quality verdict or publication approval. "
             "Orchestration must validate current whole facts, preserve material conditions and compile its own signed preparation plan before writing.",
         ]
+    if request.source_selection_version == SOURCE_SELECTION_VERSION:
+        body["response_contract"]["selections"][0]["source_selection"] = {
+            "schema_version": "operator.industry_source_selection.v1",
+            "primary_candidate_id": "same exact supplied opportunity_id as this selection",
+            "supporting_candidate_ids": ["zero to two other exact displayed public-document candidate IDs"],
+            "supporting_record_ids": {"each supporting candidate ID": ["one or more exact fact record IDs from only its own displayed catalog"]},
+        }
+        body["industry_surface_selection_contract"][0] = (
+            "Each industry selection must provide source_selection. Keep one primary opportunity; choose zero to two supporting "
+            "candidates only from this request's industry_source_bindings and industry_fact_catalog. Use only facts from those "
+            "selected candidates for the surface selection; unselected opportunities and source-document IDs are unavailable.")
+        body["industry_source_selection_contract"] = [
+            "The complete selected per-document catalogs must contain at most eight whole facts across at most three distinct "
+            "canonical source URIs. Do not merge different URIs, truncate facts or select a larger union.",
+            "For each supporting candidate, explicitly select at least one whole approved fact record ID from its own catalog. "
+            "These and at least one substantive primary-source fact must be actual required evidence in the future proposal; selected sources are cross-evidence, not metadata decoration, factual authorization or an intended conclusion.",
+            "Each document retains its own source URI and hash. Supporting selection does not create a material pool, "
+            "reset any failure counter or grant owner, publication or quality approval. Abstain if the supplied facts do not support a useful analysis.",
+        ]
     system = PLANNER_PROMPT
     if analysis_required:
         body["industry_editorial_method"] = industry_planning_method()
@@ -360,6 +401,8 @@ async def plan_editorial(
     if valid:
         for raw in result["selections"]:
             try:
+                if request.source_selection_version is None and isinstance(raw, dict) and "source_selection" in raw:
+                    raise ValueError("industry_source_selection_unrequested")
                 selection = EditorialSelection.model_validate(raw)
             except (ValueError, TypeError):
                 valid = False
@@ -379,6 +422,12 @@ async def plan_editorial(
                 try:
                     if selection.industry_surface_selection is None:
                         raise ValueError("industry_surface_selection_missing")
+                    if request.source_selection_version == SOURCE_SELECTION_VERSION:
+                        if selection.source_selection is None:
+                            raise ValueError("industry_source_selection_missing")
+                        catalog = validate_source_selection(selection.source_selection, primary_candidate_id=selection.opportunity_id,
+                            opportunities=request.opportunities, catalogs=request.industry_fact_catalog,
+                            bindings=request.industry_source_bindings)
                     validate_surface_selection(selection.industry_surface_selection, catalog=catalog,
                         channels=request.mandate.channels)
                 except (ValueError, TypeError):
