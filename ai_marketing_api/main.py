@@ -1522,16 +1522,49 @@ async def _run_compose_impl(
 
 @app.post("/api/v1/operators/editorial/plan")
 async def editorial_plan(
-    payload: EditorialPlanRequest,
+    payload: EditorialPlanRequest, request: Request, response: Response,
     authorization: Optional[str] = Header(default=None),
+    reservation_id: Optional[str] = Header(default=None, alias="X-Hermes-Budget-Reservation-Id"),
+    request_sha256: Optional[str] = Header(default=None, alias="X-Hermes-Request-SHA256"),
     x_hermes_openai_base_url: Optional[str] = Header(default=None, alias="X-Hermes-OpenAI-Base-URL"),
     x_hermes_openai_api_key: Optional[str] = Header(default=None, alias="X-Hermes-OpenAI-API-Key"),
     x_hermes_model: Optional[str] = Header(default=None, alias="X-Hermes-Model"),
     x_hermes_timeout_seconds: Optional[str] = Header(default=None, alias="X-Hermes-Timeout-Seconds"),
 ) -> Dict[str, Any]:
     _require_operator_auth(authorization)
-    return await plan_editorial(payload, _llm_json, x_hermes_openai_base_url,
-        x_hermes_openai_api_key, x_hermes_model, x_hermes_timeout_seconds)
+    response.headers["Cache-Control"] = "no-store"
+    async def execute():
+        return await plan_editorial(payload, _llm_json, x_hermes_openai_base_url,
+            x_hermes_openai_api_key, x_hermes_model, x_hermes_timeout_seconds)
+    if reservation_id is None and request_sha256 is None:
+        return await execute()  # Explicit legacy calls do not create a journal.
+    wire = await request.json()
+    if (not isinstance(reservation_id, str) or not re.fullmatch(r"text_[a-f0-9]{40}", reservation_id)
+            or request_sha256 != receipt_request_sha256(wire)):
+        raise HTTPException(status_code=422, detail={"code": "editorial_receipt_binding_invalid"})
+    try:
+        # This planner is global; industry is its fixed journal namespace,
+        # while the original request still selects any authorized content role.
+        return await execute_with_receipt(role_id="industry", step="editorial_plan",
+            reservation_id=reservation_id, wire_payload=wire, execute=execute)
+    except EditorialReceiptError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code},
+                            headers={"Cache-Control": "no-store"}) from None
+
+
+@app.get("/api/v1/operators/editorial/plan/receipts/{reservation_id}")
+def editorial_plan_receipt(reservation_id: str, response: Response,
+    authorization: Optional[str] = Header(default=None),
+    request_sha256: str = Header(alias="X-Hermes-Request-SHA256")) -> Dict[str, Any]:
+    _require_operator_auth(authorization)
+    response.headers["Cache-Control"] = "no-store"
+    if not re.fullmatch(r"text_[a-f0-9]{40}", reservation_id):
+        raise HTTPException(status_code=422, detail={"code": "editorial_receipt_binding_invalid"})
+    try:
+        return EditorialReceiptStore().get("industry", "editorial_plan", reservation_id, request_sha256)
+    except EditorialReceiptError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code},
+                            headers={"Cache-Control": "no-store"}) from None
 
 
 @app.post("/api/v1/operators/{role_id}/editorial-steps/{step}")

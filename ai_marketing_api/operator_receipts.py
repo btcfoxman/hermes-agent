@@ -22,7 +22,7 @@ from typing import Any
 SCHEMA = "operator.editorial_receipt.v1"
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 _RESERVATION = re.compile(r"^[A-Za-z0-9_.:-]{1,160}$")
-_STEPS = frozenset({"draft_master", "adapt_platform", "verify_claims", "review_editorial"})
+_STEPS = frozenset({"draft_master", "adapt_platform", "verify_claims", "review_editorial", "editorial_plan"})
 _ROLES = frozenset({"commercial", "industry", "personal_ip"})
 
 
