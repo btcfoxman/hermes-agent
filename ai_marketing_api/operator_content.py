@@ -72,7 +72,7 @@ def _validated_self_review_source(value):
     try:
         keys = {"package_id", "package_version", "role_id", "master_title", "master_content",
             "structured_blocks", "platform_variants", "surface_text_sha256", "native_diagnostics", "snapshot_sha256"}
-        if (type(value) is not dict or set(value) != keys
+        if (type(value) is not dict or set(value) not in (keys, keys | {"target_surfaces"})
                 or type(value["package_id"]) is not str or not value["package_id"]
                 or type(value["package_version"]) is not int or value["package_version"] <= 0
                 or value["role_id"] != "industry"
@@ -80,8 +80,11 @@ def _validated_self_review_source(value):
             raise ValueError
         def block_rows(rows):
             return type(rows) is list and all(type(row) is dict
-                and set(row) in ({"text", "kind", "block_id"}, {"text", "kind", "block_id", "public_text"})
-                and all(type(item) is str for item in row.values()) for row in rows)
+                and {"text", "kind", "block_id"} <= set(row)
+                and set(row) <= {"text", "kind", "block_id", "public_text", "paragraph_id"}
+                and all(type(item) is str for item in row.values())
+                and ("paragraph_id" not in row or re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,47}", row["paragraph_id"]))
+                for row in rows)
         blocks, variants = value["structured_blocks"], value["platform_variants"]
         if (type(variants) is not list or (blocks is not None and (type(blocks) is not dict
                 or set(blocks) != {"master", "variants"} or not block_rows(blocks["master"])
@@ -98,6 +101,13 @@ def _validated_self_review_source(value):
                 or any(not block_rows(rows) for rows in blocks["variants"].values())
                 or not (blocks["master"] or any(blocks["variants"].values()))):
             raise ValueError
+        if "target_surfaces" in value:
+            targets = value["target_surfaces"]
+            if (type(targets) is not list or not targets or len(targets) > len(texts)
+                    or any(type(surface) is not str for surface in targets)
+                    or targets != sorted(set(targets)) or not set(targets) <= set(texts)
+                    or (set(targets) != set(texts) and blocks is None)):
+                raise ValueError
         hashes = value["surface_text_sha256"]
         if type(hashes) is not dict or set(hashes) != set(texts):
             raise ValueError
@@ -263,6 +273,7 @@ class OperatorContentOutput(StrictModel):
     long_surface_selection_version: Optional[Literal["thesis_selection.v1", "thesis_selection.v2"]] = None
     pending_editorial_analysis: List[PendingEditorialAnalysis] = Field(default_factory=list, max_length=100)
     analysis_binding_reviews: List[AnalysisBindingReview] = Field(default_factory=list, max_length=100)
+    server_transform: Optional[Dict[str, Any]] = None
 
     @model_serializer(mode="wrap")
     def serialize_fact_plan(self, handler):
@@ -273,6 +284,8 @@ class OperatorContentOutput(StrictModel):
             data.pop("long_surface_selection_version", None)
         if self.editorial_review_context is None:
             data.pop("editorial_review_context", None)
+        if self.server_transform is None:
+            data.pop("server_transform", None)
         for key in ("pending_editorial_analysis", "analysis_binding_reviews"):
             if not getattr(self, key):
                 data.pop(key, None)

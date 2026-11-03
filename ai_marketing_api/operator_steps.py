@@ -68,6 +68,99 @@ def _writer_shape_present(candidate, step, surface):
         and variants[0].get("platform") == surface and manuscript(variants[0]))
 
 
+def _preservation_source(request, surface):
+    source = request.self_review_source
+    if source is None or "target_surfaces" not in source or surface in source["target_surfaces"]:
+        return None
+    return source
+
+
+def _preserved_writer_candidate(candidate, request, surface, canonical):
+    """Rebuild old wording from current authority, never old certificates."""
+    source = _preservation_source(request, surface)
+    if source is None:
+        return candidate
+    graph = source["structured_blocks"]
+    if graph is None:
+        raise ValueError("self_review_preservation_invalid")
+    rows = graph["master"] if surface == "master" else graph["variants"].get(surface)
+    if not rows:
+        raise ValueError("self_review_preservation_invalid")
+    rebuilt = []
+    for row in rows:
+        matches = [block for block in canonical
+            if block["kind"] == row["kind"] and block["text"] == row["text"]]
+        if len(matches) > 1:
+            raise ValueError("self_review_preservation_invalid")
+        if matches:
+            block = {"block_ref": matches[0]["block_ref"]}
+            if row.get("public_text"):
+                block["public_text"] = row["public_text"]
+        elif row["kind"] in {"opinion", "transition", "cta"}:
+            block = {"kind": row["kind"], "text": row.get("public_text") or row["text"],
+                "evidence_ids": []}
+        else:
+            raise ValueError("self_review_preservation_invalid")
+        if "paragraph_id" in row:
+            block["paragraph_id"] = row["paragraph_id"]
+        rebuilt.append(block)
+    value = deepcopy(candidate)
+    if surface == "master":
+        value.update(master_title=source["master_title"], blocks=rebuilt, platform_variants=[])
+    else:
+        previous = next(row for row in source["platform_variants"] if row["platform"] == surface)
+        value["platform_variants"] = [{"platform": surface, "title": previous["title"], "blocks": rebuilt}]
+    return value
+
+
+def _mark_preserved_analysis(output, request):
+    """Every retained authored analysis needs this round's verifier binding."""
+    if (output.critic.errors or request.self_review_source is None
+            or "target_surfaces" not in request.self_review_source):
+        return
+    surfaces = [("master", output.master_title, output.blocks)]
+    surfaces.extend((row.platform, row.title, row.blocks) for row in output.platform_variants)
+    for surface, title, blocks in surfaces:
+        source = _preservation_source(request, surface)
+        if source is None:
+            continue
+        graph = source["structured_blocks"]
+        expected = graph["master"] if surface == "master" else graph["variants"][surface]
+        previous_title = source["master_title"] if surface == "master" else next(
+            row["title"] for row in source["platform_variants"] if row["platform"] == surface)
+        actual = [(getattr(row.kind, "value", row.kind), row.text) for row in blocks]
+        wanted = [(row["kind"], row.get("public_text") or row["text"]
+            if row["kind"] in {"opinion", "transition", "cta"} else row["text"]) for row in expected]
+        if title != previous_title or actual != wanted:
+            raise ValueError("self_review_preservation_invalid")
+        for block in blocks:
+            if (getattr(block.origin, "value", block.origin) == "model_editorial"
+                    and getattr(block.kind, "value", block.kind) in {"opinion", "transition"}):
+                block.analysis_pending = True
+    output.pending_editorial_analysis = derive_pending(output, request.claims)
+    from ai_marketing_api.operator_content import _render
+    output.master_content = _render(output.blocks, surface="master")
+    for variant in output.platform_variants:
+        variant.body = _render(variant.blocks, surface=variant.platform)
+
+
+def _preservation_metadata(output, request):
+    """Signed server provenance is separate from the untouched provider receipt."""
+    source = request.self_review_source
+    if source is None or "target_surfaces" not in source:
+        return None
+    rows = [("master", output.master_title, output.master_content)]
+    rows.extend((row.platform, row.title, row.body) for row in output.platform_variants)
+    preserved = [{"surface": surface, **source["surface_text_sha256"][surface],
+        "rendered_title_sha256": hashlib.sha256((title or "").encode()).hexdigest(),
+        "rendered_body_sha256": hashlib.sha256((body or "").encode()).hexdigest()}
+        for surface, title, body in rows if surface not in source["target_surfaces"]]
+    if not preserved:
+        return None
+    return {"source": "server_self_review_preservation", "source_snapshot_sha256": source["snapshot_sha256"],
+        "provider_generated_preserved_text": False, "preserved_surfaces": preserved}
+
+
 def _stage_writer_contract(body, step, surface, *, accepted_platform_titles=(), title_diversification=False):
     contract = body["response_contract"]
     if step == "draft_master":
@@ -170,12 +263,17 @@ def _normalized_candidate(registry, role, request, contexts, fallback, candidate
                     or candidate.get("surface_fact_plan_sha256") != (request.surface_fact_plan or {}).get("plan_sha256"))):
             raise ValueError("artifact_surface_fact_plan_mismatch")
     output = normalize_content_output(registry, role, request, contexts, fallback, candidate)
+    _mark_preserved_analysis(output, request)
     if output.critic.errors:
         return output
     # An authenticated previous step may carry independently verified public
     # expressions. Never trust incoming verified flags on an unsigned draft.
     if signature and hmac.compare_digest(artifact_signature(candidate), signature):
         signed = OperatorContentOutput.model_validate(candidate)
+        if signed.analysis_binding_reviews and _preservation_metadata(output, request) is not None:
+            transform = signed.server_transform or {}
+            if transform.get("source_snapshot_sha256") != request.self_review_source["snapshot_sha256"]:
+                raise ValueError("self_review_preservation_invalid")
         old_blocks = {("master", b.binding_hash): b for b in signed.blocks}
         for variant in signed.platform_variants:
             old_blocks.update({(variant.platform, b.binding_hash): b for b in variant.blocks})
@@ -305,6 +403,8 @@ async def run_editorial_step(registry, role, step: EditorialStep, payload: Edito
                             "status": "unavailable", "error_code": code, "artifact": None,
                             "publishable": False, "requires_human_review": True,
                             "generation_trace": trace.model_dump(mode="json")})
+                    candidate = _preserved_writer_candidate(candidate, request,
+                        "master" if step == "draft_master" else payload.surface, body["canonical_block_registry"])
                     output = normalize_content_output(registry, role, scoped, contexts, fallback, candidate)
                     if step == "adapt_platform":
                         # This step owns only the requested variant. Its signed
@@ -322,6 +422,7 @@ async def run_editorial_step(registry, role, step: EditorialStep, payload: Edito
                                     allow_seedance_version=(getattr(role, "value", role) == "industry"
                                         and request.genre == "industry_analysis")):
                                 block.public_text, block.public_text_verified = text, False
+                    _mark_preserved_analysis(output, request)
                     output.pending_editorial_analysis = derive_pending(output, request.claims)
             else:
                 if not payload.candidate:
@@ -359,6 +460,7 @@ async def run_editorial_step(registry, role, step: EditorialStep, payload: Edito
             if request.fact_expression_mode == "grounded_paraphrase":
                 trace.evidence_mode = "grounded_paraphrase"
             output.generation_trace = trace
+            output.server_transform = _preservation_metadata(output, request)
             artifact = output.model_dump(mode="json")
             result = {"schema_version": "operator.editorial_step.v1", "step": step,
                 "status": "artifact" if not output.critic.errors else "blocked",
@@ -369,7 +471,7 @@ async def run_editorial_step(registry, role, step: EditorialStep, payload: Edito
                 result["editorial_review_mode"] = request.editorial_review_mode
             return capture.attach(result, run.private_review_receipt if step == "review_editorial" else None)
     except ValueError as exc:
-        code = str(exc) if str(exc) in {"stage_route_unavailable", "artifact_signature_invalid", "artifact_public_expression_invalid", "signed_master_required", "signed_candidate_required", "candidate_required", "master_evidence_invalid", "master_writer_not_completed", "analysis_verification_required", "analysis_verifier_not_completed"} else "step_artifact_invalid"
+        code = str(exc) if str(exc) in {"stage_route_unavailable", "artifact_signature_invalid", "artifact_public_expression_invalid", "signed_master_required", "signed_candidate_required", "candidate_required", "master_evidence_invalid", "master_writer_not_completed", "analysis_verification_required", "analysis_verifier_not_completed", "self_review_preservation_invalid"} else "step_artifact_invalid"
         result = {"schema_version": "operator.editorial_step.v1", "step": step,
             "status": "unavailable", "error_code": code, "artifact": None,
             "publishable": False, "requires_human_review": True,
