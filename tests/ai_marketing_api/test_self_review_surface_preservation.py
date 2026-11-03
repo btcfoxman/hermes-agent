@@ -273,7 +273,6 @@ def test_signed_prior_step_cannot_reuse_old_analysis_as_fresh_verification(monke
 async def verified_current_master(monkeypatch):
     """Use the real staged verifier parser to build supported synthetic reviews."""
     request, _, _, _ = snapshot(monkeypatch)
-    request = request.model_copy(update={"channels": []})
     monkeypatch.setattr(steps, "server_stage_route", lambda stage: {"model": "synthetic-stage"})
     calls = []
 
@@ -285,19 +284,34 @@ async def verified_current_master(monkeypatch):
                     "reason": "Synthetic current evidence-and-context support fixture."}
                 for row in body["analysis_verification"]["candidates"]]}
         calls.append("writer")
-        return {"_model": "synthetic-writer", "master_title": request.approved_proposal.title,
-            "blocks": [{"block_ref": row["block_ref"]} for row in body["canonical_block_registry"]],
-            "platform_variants": []}
+        refs = [{"block_ref": row["block_ref"]} for row in body["canonical_block_registry"]]
+        contract = body["stage_writer_contract"]
+        if contract["step"] == "draft_master":
+            return {"_model": "synthetic-writer", "master_title": request.approved_proposal.title,
+                "blocks": refs, "platform_variants": []}
+        surface = contract["target_surface"]
+        previous = next(row for row in request.self_review_source["platform_variants"] if row["platform"] == surface)
+        return {"_model": "synthetic-writer", "platform_variants": [{"platform": surface,
+            "title": previous["title"], "blocks": refs if surface == "wechat_mp" else refs[:1]}]}
 
     registry = OperatorRegistry()
     master = await steps.run_editorial_step(registry, "industry", "draft_master",
         steps.EditorialStepRequest(compose=request), model)
     assert master["status"] == "artifact", master
     assert master["artifact"]["pending_editorial_analysis"]
+    combined = deepcopy(master["artifact"])
+    combined["platform_variants"] = []
+    for surface in request.channels:
+        adapted = await steps.run_editorial_step(registry, "industry", "adapt_platform",
+            steps.EditorialStepRequest(compose=request, surface=surface, candidate=master["artifact"],
+                candidate_signature=master["artifact_signature"]), model)
+        assert adapted["status"] == "artifact", adapted
+        assert [row["platform"] for row in adapted["artifact"]["platform_variants"]] == [surface]
+        combined["platform_variants"].extend(adapted["artifact"]["platform_variants"])
     verified = await steps.run_editorial_step(registry, "industry", "verify_claims",
-        steps.EditorialStepRequest(compose=request, candidate=master["artifact"]), model)
+        steps.EditorialStepRequest(compose=request, candidate=combined), model)
     assert verified["status"] == "artifact", verified
-    assert calls == ["writer", "verifier"]
+    assert calls == ["writer", "writer", "writer", "writer", "verifier"]
     assert verified["artifact"]["analysis_binding_reviews"]
     assert all(row["verdict"] == "supported" for row in verified["artifact"]["analysis_binding_reviews"])
     assert not verified["artifact"].get("pending_editorial_analysis")
@@ -316,9 +330,10 @@ def test_valid_old_hmac_and_supported_reviews_cannot_cross_the_source_snapshot(m
         else:
             historical["server_transform"]["source_snapshot_sha256"] = "0" * 64
         supported = steps.OperatorContentOutput.model_validate(historical)
-        for block in supported.blocks:
-            if getattr(block.kind, "value", block.kind) == "opinion":
-                block.analysis_pending = True
+        for blocks in [supported.blocks, *[row.blocks for row in supported.platform_variants]]:
+            for block in blocks:
+                if getattr(block.kind, "value", block.kind) == "opinion":
+                    block.analysis_pending = True
         assert steps.derive_pending(supported, request.claims)
         restored = steps.restore_supported(supported, request.claims, supported.analysis_binding_reviews)
         assert not restored.pending_editorial_analysis
